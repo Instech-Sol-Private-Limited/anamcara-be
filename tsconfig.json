@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2016",                    // Target modern JS
+    "module": "commonjs",                  // CommonJS for Node.js
+    "outDir": "./dist",                    // Output folder
+    "rootDir": "./src",                    // Source folder
+    "esModuleInterop": true,               // Allow default imports from CommonJS
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,                        // Enable all strict type-checking
+    "typeRoots": ["./src/types", "./node_modules/@types"],
+    "types": ["node", "express"],          // Explicitly include needed types
+    "resolveJsonModule": true,            // Allows importing .json files
+    "skipLibCheck": true                   // Skip type checking of .d.ts files
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
