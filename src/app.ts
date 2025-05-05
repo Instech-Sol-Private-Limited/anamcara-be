@@ -36,8 +36,8 @@ export const openai = new OpenAI({
 
 // Middleware
 app.use(cors({
-  
-  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:80', 'http://localhost'],
+
+  origin: ['*'],
   credentials: true
 }));
 app.use(express.json());
@@ -49,17 +49,25 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/', (req, res) => {
+  res.status(200).send(`
+      <h2 style="padding: 20px; text-align: center;">Server is running...</h2>
+  `);
+});
 
-app.get('/health', (req , res) => {
+
+app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 
 app.use('/api/conversations', authMiddleware, conversationRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
-app.use('/api/auth', authRoutes); 
-app.use('/api/blogs', blogRoutes); 
+app.use('/api/auth', authRoutes);
+app.use('/api/blogs', blogRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`Server running on port http://localhost:${PORT}`);
+// });
+
+app.listen();
