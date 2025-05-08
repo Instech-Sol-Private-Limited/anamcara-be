@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "ts-node-dev src/app.ts",
+    "dev": "nodemon --watch src --ext ts,json --exec ts-node src/app.ts",
     "build": "tsc",
-    "start": "nodemon dist/app.js",
+    "start": "node dist/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

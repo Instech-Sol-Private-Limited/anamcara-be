@@ -1,4 +1,3 @@
-// src/controllers/blogController.ts
 import { Request, Response } from 'express';
 import { supabase } from '../app';
 
@@ -152,7 +151,6 @@ export const createBlog = async (req: Request, res: Response): Promise<void>=> {
   }
 };
 
-
 export const updateBlog = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
@@ -198,7 +196,6 @@ export const updateBlog = async (req: Request, res: Response): Promise<void> => 
     res.status(500).json({ error: 'Failed to update blog' });
   }
 };
-
 
 export const deleteBlog = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -283,7 +280,6 @@ export const likeUnlikeBlog = async (req: Request, res: Response): Promise<void>
   }
 };
 
-
 export const bookmarkUnbookmarkBlog = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
@@ -328,7 +324,6 @@ export const bookmarkUnbookmarkBlog = async (req: Request, res: Response): Promi
     res.status(500).json({ error: 'Failed to bookmark/unbookmark blog' });
   }
 };
-
 
 export const addComment = async (req: Request, res: Response): Promise<void> => {
   try {

@@ -1,6 +1,6 @@
 // src/routes/conversation.routes.ts
 import { Router } from 'express';
-import * as ConversationController from '../controllers/conversationController'; 
+import * as ConversationController from '../controllers/conversation.controller'; 
 
 const router = Router();
 

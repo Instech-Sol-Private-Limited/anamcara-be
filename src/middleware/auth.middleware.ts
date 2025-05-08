@@ -57,7 +57,7 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
       ...profile
     };
     
-    console.log('Authentication successful for user:', user.id);
+    console.log('Authentication successfull for user:', user.id);
     next();
   } catch (error: any) {
     console.error('Auth error:', error);

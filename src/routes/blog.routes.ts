@@ -9,7 +9,7 @@ import {
   likeUnlikeBlog,
   bookmarkUnbookmarkBlog,
   addComment
-} from '../controllers/blogController';
+} from '../controllers/blog.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = express.Router();

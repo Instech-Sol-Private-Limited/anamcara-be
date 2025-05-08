@@ -54,7 +54,9 @@ app.use('/api/conversations', auth_middleware_1.authMiddleware, conversationRout
 app.use('/api/chat', auth_middleware_1.authMiddleware, chatRoutes_1.default);
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/blogs', blogRoutes_1.default);
-// app.listen(PORT, () => {
-//   console.log(`Server running on port http://localhost:${PORT}`);
-// });
-app.listen();
+
+app.listen(PORT, () => {
+  console.log(`Server running on port http://localhost:${PORT}`);
+});
+
+// app.listen();
