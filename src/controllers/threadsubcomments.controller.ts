@@ -81,7 +81,7 @@ const deleteSubComment = async (
         const { id: user_id, role } = req.user!;
 
         const { data: comment, error: fetchError } = await supabase
-            .from('comments')
+            .from('threadcomments')
             .select('id, user_id')
             .eq('id', comment_id)
             .single();
@@ -98,7 +98,7 @@ const deleteSubComment = async (
         }
 
         const { error: deleteError } = await supabase
-            .from('subcomments')
+            .from('threadsubcomments')
             .delete()
             .eq('id', comment_id);
 
@@ -128,7 +128,7 @@ const updateSubComment = async (
         const { id: user_id, role } = req.user!;
 
         const { data: existingComment, error: fetchError } = await supabase
-            .from('comments')
+            .from('threadcomments')
             .select('*')
             .eq('id', comment_id)
             .single();
@@ -149,7 +149,7 @@ const updateSubComment = async (
         }
 
         const { error: updateError } = await supabase
-            .from('comments')
+            .from('threadcomments')
             .update({ content })
             .eq('id', comment_id);
 
@@ -187,7 +187,7 @@ const getSubComments = async (
     }
 
     const { data, error } = await supabase
-        .from('comments')
+        .from('threadcomments')
         .select('*')
         .eq('comment_id', comment_id)
         .order('created_at', { ascending: false })
@@ -224,7 +224,7 @@ const updateSubCommentReaction = async (
     }
 
     const { data: commentData, error: commentError } = await supabase
-        .from('comments')
+        .from('threadcomments')
         .select('total_likes, total_dislikes')
         .eq('id', comment_id)
         .single();
@@ -249,7 +249,7 @@ const updateSubCommentReaction = async (
             if (deleteError) return res.status(500).json({ error: deleteError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_likes: newTotalLikes })
                 .eq('id', comment_id);
 
@@ -270,7 +270,7 @@ const updateSubCommentReaction = async (
             if (deleteError) return res.status(500).json({ error: deleteError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -296,7 +296,7 @@ const updateSubCommentReaction = async (
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -322,7 +322,7 @@ const updateSubCommentReaction = async (
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -341,7 +341,7 @@ const updateSubCommentReaction = async (
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_likes: newTotalLikes })
                 .eq('id', comment_id);
 
@@ -360,7 +360,7 @@ const updateSubCommentReaction = async (
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadcomments')
                 .update({ total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -384,7 +384,7 @@ const getSubcommentReactions = async (
     }
 
     const { data, error } = await supabase
-        .from('comments')
+        .from('threadcomments')
         .select(`
         id,
         content,
