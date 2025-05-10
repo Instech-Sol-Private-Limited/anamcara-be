@@ -2,7 +2,7 @@ import { supabase } from '../app';
 
 export async function ensureThreadsCommentsTableExists() {
     const sql = `
-    create table comments (
+    create table threadcomments (
     id uuid primary key default gen_random_uuid(),
     thread_id uuid not null references threads(id) on delete cascade,
     imgs text[] default '{}',

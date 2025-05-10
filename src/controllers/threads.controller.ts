@@ -233,7 +233,10 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
 
     const { data: thread, error } = await supabase
       .from('threads')
-      .select('*')
+      .select(`
+        *,
+        profiles!inner(avatar_url)  -- Perform inner join with the profiles table
+      `)
       .eq('id', thread_id)
       .maybeSingle();
 
@@ -241,6 +244,7 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
       return res.status(404).json({ error: 'Thread not found!' });
     }
 
+    // Fetch user reaction if user_id is available (like the previous code)
     let userReaction = null;
     if (user_id) {
       const { data: reactionData, error: reactionError } = await supabase
@@ -255,18 +259,12 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
       }
     }
 
-    return res.status(200).json({
-      ...thread,
-      user_reaction: userReaction || null, // null if not reacted
-    });
-  } catch (err: any) {
-    console.error('Unexpected error in getThreadDetails:', err);
-    return res.status(500).json({
-      error: 'Internal server error while retrieving thread details.',
-      message: err.message || 'Unexpected failure.',
-    });
+    return res.json({ thread, userReaction });
+  } catch (err) {
+    return res.status(500).json({ error: 'Something went wrong!' });
   }
 };
+
 
 // get all threads
 const getAllThreads = async (req: Request, res: Response): Promise<any> => {
@@ -275,7 +273,11 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
   const { data, error } = await supabase
     .from('threads')
-    .select('*')
+    .select(`
+      *,
+      profiles!inner(avatar_url)  -- Perform inner join with the profiles table
+    `)
+    .eq('is_active', true) // Optional condition for active threads
     .order('publish_date', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -283,6 +285,7 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
   return res.json(data);
 };
+
 
 // apply like/dislike
 const updateReaction = async (
