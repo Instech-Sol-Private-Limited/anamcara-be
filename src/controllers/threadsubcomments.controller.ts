@@ -373,24 +373,22 @@ const updateSubCommentReaction = async (
 
 // get user's all comment reactions by thread
 const getSubcommentReactions = async (
-    req: Request<{ thread_id: string }>,
+    req: Request<{comment_id: string }>,
     res: Response
 ): Promise<any> => {
-    const { thread_id } = req.params;
+    const { comment_id } = req.params;
     const user_id = req.user?.id;
 
-    if (!thread_id || !user_id) {
+    if (!comment_id || !user_id) {
         return res.status(400).json({ error: 'Thread ID and User ID are required.' });
     }
 
     const { data, error } = await supabase
-        .from('threadssubcomments')
+        .from('threadsubcomments')
         .select(`
         id,
-        content,
-        subcomments_comment_reactions(type)
-      `)
-        .eq('thread_id', thread_id)
+        thread_subcomment_reactions(type, user_id)`)
+        .eq('thread_id', comment_id)
         .order('created_at', { ascending: true });
 
     if (error) {
@@ -404,7 +402,6 @@ const getSubcommentReactions = async (
 
         return {
             comment_id: comment.id,
-            content: comment.content,
             reaction: reactionEntry?.type || null,
         };
     });
