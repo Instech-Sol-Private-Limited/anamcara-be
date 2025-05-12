@@ -8,16 +8,16 @@ const router = express.Router();
 router.get('/get-replies/:comment_id', getSubComments);
 
 // create a new comment
-router.post('/add-reply', authMiddleware, createSubComment);
+router.post('/add-reply/:comment_id', authMiddleware, createSubComment);
 
 // update comment
-router.put('/update-reply/:reply_id', authMiddleware, updateSubComment);
+router.put('/update-reply/:comment_id', authMiddleware, updateSubComment);
 
 // delete comment
-router.delete('/delete-reply/:reply_id', authMiddleware, deleteSubComment);
+router.delete('/delete-reply/:comment_id', authMiddleware, deleteSubComment);
 
 // handle like/ dislike
-router.patch('/apply-reply-react/:reply_id', authMiddleware, updateSubCommentReaction);
+router.patch('/apply-reply-react/:comment_id', authMiddleware, updateSubCommentReaction);
 
 // get user's comments reaction by thread
 router.get('/get-reply-reaction/:comment_id', authMiddleware, getSubcommentReactions);

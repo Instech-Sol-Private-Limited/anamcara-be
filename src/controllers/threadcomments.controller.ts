@@ -387,7 +387,7 @@ const getCommentReactionsByThreadAndUser = async (
 ): Promise<any> => {
     const { thread_id } = req.params;
     const user_id = req.user?.id;
-
+console.log(user_id, thread_id)
     if (!thread_id || !user_id) {
         return res.status(400).json({ error: 'Thread ID and User ID are required.' });
     }
@@ -396,7 +396,6 @@ const getCommentReactionsByThreadAndUser = async (
         .from('threadcomments')
         .select(`
         id,
-        content,
         comment_reactions(type)
       `)
         .eq('thread_id', thread_id)
@@ -413,7 +412,6 @@ const getCommentReactionsByThreadAndUser = async (
 
         return {
             comment_id: comment.id,
-            content: comment.content,
             reaction: reactionEntry?.type || null,
         };
     });
