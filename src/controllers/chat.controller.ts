@@ -1,12 +1,8 @@
-// src/controllers/chat.controller.ts
 import { Request, Response } from 'express';
 import { supabase } from '../app';
 import { openai } from '../app';
 import { v4 as uuidv4 } from 'uuid';
 
-// @desc    Send a message to the chat and get an AI response
-// @route   POST /api/chat/send
-// @access  Private
 export const sendMessage = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;

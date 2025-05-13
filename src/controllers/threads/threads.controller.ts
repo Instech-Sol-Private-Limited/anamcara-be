@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../app';
+import { supabase } from '../../app';
 
 // add new thread
 const createThread = async (req: Request, res: Response): Promise<any> => {
@@ -233,7 +233,10 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
 
     const { data: thread, error } = await supabase
       .from('threads')
-      .select('*')
+      .select(`
+        *,
+        profiles!inner(avatar_url)  -- Perform inner join with the profiles table
+      `)
       .eq('id', thread_id)
       .maybeSingle();
 
@@ -255,16 +258,9 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
       }
     }
 
-    return res.status(200).json({
-      ...thread,
-      user_reaction: userReaction || null, // null if not reacted
-    });
-  } catch (err: any) {
-    console.error('Unexpected error in getThreadDetails:', err);
-    return res.status(500).json({
-      error: 'Internal server error while retrieving thread details.',
-      message: err.message || 'Unexpected failure.',
-    });
+    return res.json({ thread, userReaction });
+  } catch (err) {
+    return res.status(500).json({ error: 'Something went wrong!' });
   }
 };
 
@@ -275,7 +271,11 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
   const { data, error } = await supabase
     .from('threads')
-    .select('*')
+    .select(`
+      *,
+      profiles!inner(avatar_url)  -- Perform inner join with the profiles table
+    `)
+    .eq('is_active', true) // Optional condition for active threads
     .order('publish_date', { ascending: false })
     .range(offset, offset + limit - 1);
 

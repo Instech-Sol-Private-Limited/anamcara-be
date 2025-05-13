@@ -1,20 +1,19 @@
 import { Request, Response } from 'express';
-import { supabase } from '../app';
+import { supabase } from '../../app';
 
 // add new comment
-const createComment = async (req: Request, res: Response): Promise<any> => {
+const createSubComment = async (req: Request, res: Response): Promise<any> => {
     try {
         const {
             content,
-            thread_id,
-            imgs = []
+            comment_id,
         } = req.body;
 
         const { id: user_id, first_name, last_name } = req.user!;
 
         const requiredFields = {
             content,
-            thread_id,
+            comment_id,
             user_id,
             user_name: first_name,
         };
@@ -27,21 +26,20 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
         }
 
         const { data: threadData, error: threadError } = await supabase
-            .from('threads')
+            .from('threadcomments')
             .select('id')
-            .eq('id', thread_id)
+            .eq('id', comment_id)
             .single();
 
         if (threadError || !threadData) {
-            return res.status(400).json({ error: 'Invalid Thread Id. No matching thread found.' });
+            return res.status(400).json({ error: 'Parent comment not found!' });
         }
 
         const { data, error } = await supabase
-            .from('comments')
+            .from('threadsubcomments')
             .insert([{
                 content,
-                thread_id,
-                imgs,
+                comment_id,
                 user_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
                 user_id
             }])
@@ -50,31 +48,31 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
         if (error) {
             console.error('Supabase insert error:', error);
             return res.status(500).json({
-                error: error.message || 'Unknown error occurred while creating comment.',
+                error: error.message || 'Unknown error occurred while adding subcomment!',
                 details: error.details || null,
                 hint: error.hint || null,
             });
         }
 
         if (!data || data.length === 0) {
-            return res.status(500).json({ error: 'Comment creation failed. No data returned.' });
+            return res.status(500).json({ error: 'Failed to add sucomment!' });
         }
 
         return res.status(201).json({
-            message: 'Comment created successfully!',
+            message: 'Reply created successfully!',
         });
 
     } catch (err: any) {
-        console.error('Unexpected error in createComment:', err);
+        console.error('Unexpected error in adding reply:', err);
         return res.status(500).json({
-            error: 'Internal server error while creating comment.',
+            error: 'Internal server error while creating reply.',
             message: err.message || 'Unexpected failure.',
         });
     }
 };
 
 // delete comment
-const deleteComment = async (
+const deleteSubComment = async (
     req: Request<{ comment_id: string }> & { user?: { id: string; role?: string } },
     res: Response
 ): Promise<any> => {
@@ -83,13 +81,13 @@ const deleteComment = async (
         const { id: user_id, role } = req.user!;
 
         const { data: comment, error: fetchError } = await supabase
-            .from('comments')
+            .from('threadsubcomments')
             .select('id, user_id')
             .eq('id', comment_id)
             .single();
 
         if (fetchError || !comment) {
-            return res.status(404).json({ error: 'Comment not found!' });
+            return res.status(404).json({ error: 'Reply not found!' });
         }
 
         const isAuthor = comment.user_id === user_id;
@@ -100,7 +98,7 @@ const deleteComment = async (
         }
 
         const { error: deleteError } = await supabase
-            .from('comments')
+            .from('threadsubcomments')
             .delete()
             .eq('id', comment_id);
 
@@ -108,19 +106,19 @@ const deleteComment = async (
             return res.status(500).json({ error: deleteError.message });
         }
 
-        return res.status(200).json({ message: 'Comment deleted successfully!' });
+        return res.status(200).json({ message: 'Reply deleted successfully!' });
 
     } catch (err: any) {
         console.error('Unexpected error in deleteComment:', err);
         return res.status(500).json({
-            error: 'Internal server error while deleting comment.',
+            error: 'Internal server error while deleting reply.',
             message: err.message || 'Unexpected failure.',
         });
     }
 };
 
 // update comment
-const updateComment = async (
+const updateSubComment = async (
     req: Request<{ comment_id: string }> & { user?: { id: string; role?: string; first_name?: string; last_name?: string } },
     res: Response
 ): Promise<any> => {
@@ -130,7 +128,7 @@ const updateComment = async (
         const { id: user_id, role } = req.user!;
 
         const { data: existingComment, error: fetchError } = await supabase
-            .from('comments')
+            .from('threadsubcomments')
             .select('*')
             .eq('id', comment_id)
             .single();
@@ -151,7 +149,7 @@ const updateComment = async (
         }
 
         const { error: updateError } = await supabase
-            .from('comments')
+            .from('threadsubcomments')
             .update({ content })
             .eq('id', comment_id);
 
@@ -176,42 +174,35 @@ const updateComment = async (
 };
 
 // get all comment by thread_id
-const getComments = async (
-    req: Request<{ thread_id: string }>,
+const getSubComments = async (
+    req: Request<{ comment_id: string }>,
     res: Response
 ): Promise<any> => {
-    try {
+    const { comment_id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = parseInt(req.query.offset as string) || 0;
 
-        const { thread_id } = req.params;
-        const limit = parseInt(req.query.limit as string) || 10;
-        const offset = parseInt(req.query.offset as string) || 0;
-
-        if (!thread_id) {
-            return res.status(400).json({ error: 'Thread ID is required!' });
-        }
-
-        const { data, error } = await supabase
-            .from('threadcomments')
-            .select('*')
-            .eq('thread_id', thread_id)
-            .order('created_at', { ascending: false })
-            .range(offset, offset + limit - 1);
-        if (error) {
-            console.error('Error fetching comments:', error);
-            return res.status(500).json({ error: "Comment fetching failed!" });
-        }
-
-        return res.status(200).json({ comments: data });
+    if (!comment_id) {
+        return res.status(400).json({ error: 'Thread ID is required.' });
     }
-    catch (err: any) {
-        return res.status(500).json({
-            error: err.message || 'Unexpected failure.',
-        })
+
+    const { data, error } = await supabase
+        .from('threadsubcomments')
+        .select('*')
+        .eq('comment_id', comment_id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+    if (error) {
+        console.error('Error fetching subcomments:', error);
+        return res.status(500).json({ error: error.message });
     }
+
+    return res.status(200).json(data);
 };
 
 // apply like/dislike
-const updateCommentReaction = async (
+const updateSubCommentReaction = async (
     req: Request<{ comment_id: string }, {}, { type: 'like' | 'dislike' }>,
     res: Response
 ): Promise<any> => {
@@ -222,7 +213,7 @@ const updateCommentReaction = async (
     if (!user_id) return res.status(401).json({ error: 'Unauthorized' });
 
     const { data: existing, error: fetchError } = await supabase
-        .from('comment_reactions')
+        .from('thread_subcomment_reactions')
         .select('*')
         .eq('user_id', user_id)
         .eq('comment_id', comment_id)
@@ -233,7 +224,7 @@ const updateCommentReaction = async (
     }
 
     const { data: commentData, error: commentError } = await supabase
-        .from('comments')
+        .from('threadsubcomments')
         .select('total_likes, total_dislikes')
         .eq('id', comment_id)
         .single();
@@ -250,7 +241,7 @@ const updateCommentReaction = async (
             newTotalLikes -= 1;
 
             const { error: deleteError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .delete()
                 .eq('user_id', user_id)
                 .eq('comment_id', comment_id);
@@ -258,7 +249,7 @@ const updateCommentReaction = async (
             if (deleteError) return res.status(500).json({ error: deleteError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_likes: newTotalLikes })
                 .eq('id', comment_id);
 
@@ -271,7 +262,7 @@ const updateCommentReaction = async (
             newTotalDislikes -= 1;
 
             const { error: deleteError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .delete()
                 .eq('user_id', user_id)
                 .eq('comment_id', comment_id);
@@ -279,7 +270,7 @@ const updateCommentReaction = async (
             if (deleteError) return res.status(500).json({ error: deleteError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -293,19 +284,19 @@ const updateCommentReaction = async (
             newTotalDislikes += 1;
 
             await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .delete()
                 .eq('user_id', user_id)
                 .eq('comment_id', comment_id);
 
             const { error: insertError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .insert([{ user_id, comment_id, type: 'dislike' }]);
 
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -319,19 +310,19 @@ const updateCommentReaction = async (
             newTotalDislikes -= 1;
 
             await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .delete()
                 .eq('user_id', user_id)
                 .eq('comment_id', comment_id);
 
             const { error: insertError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .insert([{ user_id, comment_id, type: 'like' }]);
 
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -344,13 +335,13 @@ const updateCommentReaction = async (
             newTotalLikes += 1;
 
             const { error: insertError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .insert([{ user_id, comment_id, type: 'like' }]);
 
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_likes: newTotalLikes })
                 .eq('id', comment_id);
 
@@ -363,13 +354,13 @@ const updateCommentReaction = async (
             newTotalDislikes += 1;
 
             const { error: insertError } = await supabase
-                .from('comment_reactions')
+                .from('thread_subcomment_reactions')
                 .insert([{ user_id, comment_id, type: 'dislike' }]);
 
             if (insertError) return res.status(500).json({ error: insertError.message });
 
             const { error: updateError } = await supabase
-                .from('comments')
+                .from('threadsubcomments')
                 .update({ total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
@@ -381,25 +372,23 @@ const updateCommentReaction = async (
 };
 
 // get user's all comment reactions by thread
-const getCommentReactionsByThreadAndUser = async (
-    req: Request<{ thread_id: string }>,
+const getSubcommentReactions = async (
+    req: Request<{comment_id: string }>,
     res: Response
 ): Promise<any> => {
-    const { thread_id } = req.params;
+    const { comment_id } = req.params;
     const user_id = req.user?.id;
 
-    if (!thread_id || !user_id) {
+    if (!comment_id || !user_id) {
         return res.status(400).json({ error: 'Thread ID and User ID are required.' });
     }
 
     const { data, error } = await supabase
-        .from('comments')
+        .from('threadsubcomments')
         .select(`
         id,
-        content,
-        comment_reactions(type)
-      `)
-        .eq('thread_id', thread_id)
+        thread_subcomment_reactions(type, user_id)`)
+        .eq('thread_id', comment_id)
         .order('created_at', { ascending: true });
 
     if (error) {
@@ -413,7 +402,6 @@ const getCommentReactionsByThreadAndUser = async (
 
         return {
             comment_id: comment.id,
-            content: comment.content,
             reaction: reactionEntry?.type || null,
         };
     });
@@ -422,11 +410,11 @@ const getCommentReactionsByThreadAndUser = async (
 };
 
 export {
-    createComment,
-    deleteComment,
-    updateComment,
-    getComments,
-    updateCommentReaction,
-    getCommentReactionsByThreadAndUser,
+    createSubComment,
+    deleteSubComment,
+    updateSubComment,
+    getSubComments,
+    updateSubCommentReaction,
+    getSubcommentReactions,
 };
 
