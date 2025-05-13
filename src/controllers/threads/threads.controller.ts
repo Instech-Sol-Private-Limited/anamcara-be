@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../app';
+import { supabase } from '../../app';
 
 // add new thread
 const createThread = async (req: Request, res: Response): Promise<any> => {
@@ -244,7 +244,6 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
       return res.status(404).json({ error: 'Thread not found!' });
     }
 
-    // Fetch user reaction if user_id is available (like the previous code)
     let userReaction = null;
     if (user_id) {
       const { data: reactionData, error: reactionError } = await supabase
@@ -265,7 +264,6 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
   }
 };
 
-
 // get all threads
 const getAllThreads = async (req: Request, res: Response): Promise<any> => {
   const limit = parseInt(req.query.limit as string) || 10;
@@ -285,7 +283,6 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
   return res.json(data);
 };
-
 
 // apply like/dislike
 const updateReaction = async (

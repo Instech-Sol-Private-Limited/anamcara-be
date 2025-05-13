@@ -10,8 +10,6 @@ import authRoutes from './routes/auth.routes';
 import blogRoutes from './routes/blog.routes';
 import categoryRoutes from './routes/threadcategory.routes';
 import threadsRoutes from './routes/threads.routes';
-import commentsRoutes from './routes/threadcomments.routes';
-import subCommentsRoutes from './routes/threadsubcomments.routes';
 
 dotenv.config();
 
@@ -30,7 +28,6 @@ export const supabase = createClient(
 
 (async () => {
   if (supabase) {
-    // await ensureThreadCategoryTableExists();
     console.log('Supabase connection successfully');
   } else {
     console.error('Failed to connect to Supabase')
@@ -42,18 +39,12 @@ export const openai = new OpenAI({
 });
 
 app.use(cors({
-  origin: ['*'],
-  credentials: true
+  origin: ['http://localhost:3000', 'http://localhost:5173', "*"],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(express.json());
-
-// app.use((req, res, next) => {
-//   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-//   console.log('Request body:', req.body);
-//   console.log('Auth header:', req.headers.authorization ? 'Present' : 'Missing');
-//   next();
-// });
 
 app.get('/', (req, res) => {
   res.status(200).send(`
@@ -61,18 +52,12 @@ app.get('/', (req, res) => {
   `);
 });
 
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 app.use('/api/conversations', authMiddleware, conversationRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
-app.use('/api/comments', commentsRoutes);
-app.use('/api/subcomments', subCommentsRoutes);
 
 
 app.listen(PORT, () => {

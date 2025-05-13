@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../app';
+import { supabase } from '../../app';
 
 // add new comment
 const createSubComment = async (req: Request, res: Response): Promise<any> => {
