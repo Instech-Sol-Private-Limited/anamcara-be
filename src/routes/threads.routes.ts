@@ -16,7 +16,7 @@ import {
     getCommentReactionsByThreadAndUser,
     updateComment,
     updateCommentReaction,
-} from '../controllers/threads/threadcomments.controller';
+} from '../controllers/threads/comments.controller';
 import {
     createSubComment,
     deleteSubComment,
