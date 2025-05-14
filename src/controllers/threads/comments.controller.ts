@@ -328,7 +328,7 @@ const updateCommentReaction = async (
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         const { error: updateCommentError } = await supabase
-            .from('threads')
+            .from('threadcomments')
             .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
             .eq('id', comment_id);
 

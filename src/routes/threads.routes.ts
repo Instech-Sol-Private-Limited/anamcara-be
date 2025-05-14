@@ -18,12 +18,12 @@ import {
     updateCommentReaction,
 } from '../controllers/threads/comments.controller';
 import {
-    createSubComment,
-    deleteSubComment,
-    getSubcommentReactions,
-    getSubComments,
-    updateSubComment,
-    updateSubCommentReaction,
+    createReply,
+    deleteReply,
+    // getSubcommentReactions,
+    getReplies,
+    updateReply,
+    updateReplyReaction,
 } from '../controllers/threads/replies.controller';
 import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware';
 
@@ -90,22 +90,22 @@ router.patch('/apply-comment-react/:comment_id', authMiddleware, updateCommentRe
 // ======================= comment's replies ========================
 
 // get all comments(range)
-router.get('/get-replies/:comment_id', getSubComments);
+router.get('/get-replies/:comment_id', optionalAuthMiddleware, getReplies);
 
 // create a new comment
-router.post('/add-reply/:comment_id', authMiddleware, createSubComment);
+router.post('/add-reply', authMiddleware, createReply);
 
 // update comment
-router.put('/update-reply/:comment_id', authMiddleware, updateSubComment);
+router.put('/update-reply/:reply_id', authMiddleware, updateReply);
 
 // delete comment
-router.delete('/delete-reply/:comment_id', authMiddleware, deleteSubComment);
+router.delete('/delete-reply/:reply_id', authMiddleware, deleteReply);
 
 // handle like/ dislike
-router.patch('/apply-reply-react/:comment_id', authMiddleware, updateSubCommentReaction);
+router.patch('/apply-reply-react/:reply_id', authMiddleware, updateReplyReaction);
 
 // get user's comments reaction by thread
-router.get('/get-reply-reaction/:comment_id', authMiddleware, getSubcommentReactions);
+// router.get('/get-reply-reaction/:comment_id', authMiddleware, getSubcommentReactions);
 
 
 export default router;
