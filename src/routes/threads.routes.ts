@@ -6,14 +6,14 @@ import {
     getThreadDetails,
     getAllThreads,
     updateReaction,
-    getAllReactionsByUser,
-    getThreadReaction
+    // getAllReactionsByUser,
+    // getThreadReaction
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
     deleteComment,
     getComments,
-    getCommentReactionsByThreadAndUser,
+    // getCommentReactionsByThreadAndUser,
     updateComment,
     updateCommentReaction,
 } from '../controllers/threads/comments.controller';
@@ -51,10 +51,10 @@ router.delete('/delete-thread/:thread_id', authMiddleware, deleteThread);
 router.patch('/apply-react/:thread_id', authMiddleware, updateReaction);
 
 // get user reaction by thread
-router.get('/get-user-reaction/:thread_id', authMiddleware, getThreadReaction);
+// router.get('/get-user-reaction/:thread_id', authMiddleware, getThreadReaction);
 
-// get all thread user reaction
-router.get('/get-all-user-reactions', authMiddleware, getAllReactionsByUser);
+// // get all thread user reaction
+// router.get('/get-all-user-reactions', authMiddleware, getAllReactionsByUser);
 
 
 
@@ -65,7 +65,7 @@ router.get('/get-all-user-reactions', authMiddleware, getAllReactionsByUser);
 // ======================= thread's comments ========================
 
 // get all comments(range)
-router.get('/get-comments/:thread_id', getComments);
+router.get('/get-comments/:thread_id', optionalAuthMiddleware, getComments);
 
 // create a new comment
 router.post('/add-comment', authMiddleware, createComment);
@@ -80,7 +80,7 @@ router.delete('/delete-comment/:comment_id', authMiddleware, deleteComment);
 router.patch('/apply-comment-react/:comment_id', authMiddleware, updateCommentReaction);
 
 // get user's comments reaction by thread
-router.get('/get-all-comment-reaction/:thread_id', authMiddleware, getCommentReactionsByThreadAndUser);
+// router.get('/get-all-comment-reaction/:thread_id', authMiddleware, getCommentReactionsByThreadAndUser);
 
 
 

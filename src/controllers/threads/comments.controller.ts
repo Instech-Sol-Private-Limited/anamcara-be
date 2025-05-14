@@ -30,10 +30,11 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
             .from('threads')
             .select('id')
             .eq('id', thread_id)
+            .eq('is_deleted', false)
             .single();
 
         if (threadError || !threadData) {
-            return res.status(400).json({ error: 'Invalid Thread Id. No matching thread found.' });
+            return res.status(400).json({ error: 'No thread found!' });
         }
 
         const { data, error } = await supabase
@@ -86,6 +87,7 @@ const deleteComment = async (
             .from('threadcomments')
             .select('id, user_id')
             .eq('id', comment_id)
+            .eq('is_deleted', false)
             .single();
 
         if (fetchError || !comment) {
@@ -101,7 +103,9 @@ const deleteComment = async (
 
         const { error: deleteError } = await supabase
             .from('threadcomments')
-            .delete()
+            .update({
+                is_deleted: true,
+            })
             .eq('id', comment_id);
 
         if (deleteError) {
@@ -133,6 +137,7 @@ const updateComment = async (
             .from('threadcomments')
             .select('*')
             .eq('id', comment_id)
+            .eq('is_deleted', false)
             .single();
 
         if (fetchError || !existingComment) {
@@ -152,7 +157,10 @@ const updateComment = async (
 
         const { error: updateError } = await supabase
             .from('threadcomments')
-            .update({ content })
+            .update({
+                content,
+                is_edited: true
+            })
             .eq('id', comment_id);
 
         if (updateError) {
@@ -181,8 +189,8 @@ const getComments = async (
     res: Response
 ): Promise<any> => {
     try {
-
         const { thread_id } = req.params;
+        const user_id = req.user?.id;
         const limit = parseInt(req.query.limit as string) || 10;
         const offset = parseInt(req.query.offset as string) || 0;
 
@@ -190,18 +198,55 @@ const getComments = async (
             return res.status(400).json({ error: 'Thread ID is required!' });
         }
 
-        const { data, error } = await supabase
+        const { data: thread, error: fetchError } = await supabase
+            .from('threads')
+            .select('id')
+            .eq('id', thread_id)
+            .eq('is_deleted', false)
+            .single();
+
+        if (fetchError || !thread) {
+            return res.status(404).json({ error: 'Thread not found!' });
+        }
+
+        const { data: comments, error } = await supabase
             .from('threadcomments')
-            .select('*')
+            .select(`
+              *,
+              profiles!inner(avatar_url)
+            `)
             .eq('thread_id', thread_id)
+            .eq('is_deleted', false)
             .order('created_at', { ascending: false })
             .range(offset, offset + limit - 1);
         if (error) {
-            console.error('Error fetching comments:', error);
             return res.status(500).json({ error: "Comment fetching failed!" });
         }
 
-        return res.status(200).json({ comments: data });
+        const commentsWithReactions = await Promise.all(comments.map(async (comment) => {
+            let userReaction = null;
+
+            if (user_id) {
+                const { data: reactionData, error: reactionError } = await supabase
+                    .from('thread_reactions')
+                    .select('type')
+                    .eq('user_id', user_id)
+                    .eq('target_type', 'comment')
+                    .eq('target_id', comment.id)
+                    .maybeSingle();
+
+                if (!reactionError && reactionData) {
+                    userReaction = reactionData.type;
+                }
+            }
+
+            return {
+                ...comment,
+                user_reaction: userReaction,
+            };
+        }));
+
+        return res.status(200).json({ comments: commentsWithReactions });
     }
     catch (err: any) {
         return res.status(500).json({
@@ -219,13 +264,12 @@ const updateCommentReaction = async (
     const { type } = req.body;
     const user_id = req.user?.id;
 
-    if (!user_id) return res.status(401).json({ error: 'Unauthorized' });
-
     const { data: existing, error: fetchError } = await supabase
-        .from('comment_reactions')
+        .from('thread_reactions')
         .select('*')
         .eq('user_id', user_id)
-        .eq('comment_id', comment_id)
+        .eq('target_id', comment_id)
+        .eq('target_type', 'comment')
         .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') {
@@ -236,188 +280,120 @@ const updateCommentReaction = async (
         .from('threadcomments')
         .select('total_likes, total_dislikes')
         .eq('id', comment_id)
+        .eq('is_deleted', false)
         .single();
 
     if (commentError) {
-        return res.status(500).json({ error: commentError.message });
+        return res.status(500).json({ error: 'Comment not found!' });
     }
-
+    
     let newTotalLikes = commentData?.total_likes ?? 0;
     let newTotalDislikes = commentData?.total_dislikes ?? 0;
 
     if (existing) {
-        if (existing.type === 'like' && type === 'like') {
-            newTotalLikes -= 1;
+        if (existing.type === type) {
+            if (type === 'like') newTotalLikes -= 1;
+            if (type === 'dislike') newTotalDislikes -= 1;
 
             const { error: deleteError } = await supabase
-                .from('comment_reactions')
+                .from('thread_reactions')
                 .delete()
-                .eq('user_id', user_id)
-                .eq('comment_id', comment_id);
+                .eq('id', existing.id);
 
             if (deleteError) return res.status(500).json({ error: deleteError.message });
 
-            const { error: updateError } = await supabase
+            const { error: updateCommentError } = await supabase
                 .from('threadcomments')
-                .update({ total_likes: newTotalLikes })
+                .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
                 .eq('id', comment_id);
 
-            if (updateError) return res.status(500).json({ error: updateError.message });
+            if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
 
-            return res.status(200).json({ message: 'Like removed.' });
+            return res.status(200).json({ message: `${type} removed!` });
         }
 
-        if (existing.type === 'dislike' && type === 'dislike') {
-            newTotalDislikes -= 1;
-
-            const { error: deleteError } = await supabase
-                .from('comment_reactions')
-                .delete()
-                .eq('user_id', user_id)
-                .eq('comment_id', comment_id);
-
-            if (deleteError) return res.status(500).json({ error: deleteError.message });
-
-            const { error: updateError } = await supabase
-                .from('threadcomments')
-                .update({ total_dislikes: newTotalDislikes })
-                .eq('id', comment_id);
-
-            if (updateError) return res.status(500).json({ error: updateError.message });
-
-            return res.status(200).json({ message: 'Dislike removed.' });
-        }
-
-        if (existing.type === 'like' && type === 'dislike') {
+        if (existing.type === 'like') {
             newTotalLikes -= 1;
             newTotalDislikes += 1;
-
-            await supabase
-                .from('comment_reactions')
-                .delete()
-                .eq('user_id', user_id)
-                .eq('comment_id', comment_id);
-
-            const { error: insertError } = await supabase
-                .from('comment_reactions')
-                .insert([{ user_id, comment_id, type: 'dislike' }]);
-
-            if (insertError) return res.status(500).json({ error: insertError.message });
-
-            const { error: updateError } = await supabase
-                .from('threadcomments')
-                .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-                .eq('id', comment_id);
-
-            if (updateError) return res.status(500).json({ error: updateError.message });
-
-            return res.status(200).json({ message: 'Like changed to dislike.' });
-        }
-
-        if (existing.type === 'dislike' && type === 'like') {
-            newTotalLikes += 1;
+        } else {
             newTotalDislikes -= 1;
-
-            await supabase
-                .from('comment_reactions')
-                .delete()
-                .eq('user_id', user_id)
-                .eq('comment_id', comment_id);
-
-            const { error: insertError } = await supabase
-                .from('comment_reactions')
-                .insert([{ user_id, comment_id, type: 'like' }]);
-
-            if (insertError) return res.status(500).json({ error: insertError.message });
-
-            const { error: updateError } = await supabase
-                .from('threadcomments')
-                .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-                .eq('id', comment_id);
-
-            if (updateError) return res.status(500).json({ error: updateError.message });
-
-            return res.status(200).json({ message: 'Dislike changed to like.' });
+            newTotalLikes += 1;
         }
+
+        const { error: updateError } = await supabase
+            .from('thread_reactions')
+            .update({ type, updated_by: user_id })
+            .eq('id', existing.id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        const { error: updateCommentError } = await supabase
+            .from('threads')
+            .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+            .eq('id', comment_id);
+
+        if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
+
+        return res.status(200).json({ message: `Reaction updated to ${type}!` });
     } else {
-        if (type === 'like') {
-            newTotalLikes += 1;
+        if (type === 'like') newTotalLikes += 1;
+        if (type === 'dislike') newTotalDislikes += 1;
 
-            const { error: insertError } = await supabase
-                .from('comment_reactions')
-                .insert([{ user_id, comment_id, type: 'like' }]);
+        const { error: insertError } = await supabase
+            .from('thread_reactions')
+            .insert([{ user_id, target_id: comment_id, target_type: 'comment', type }]);
 
-            if (insertError) return res.status(500).json({ error: insertError.message });
+        if (insertError) return res.status(500).json({ error: insertError.message });
 
-            const { error: updateError } = await supabase
-                .from('threadcomments')
-                .update({ total_likes: newTotalLikes })
-                .eq('id', comment_id);
+        const { error: updateCommentError } = await supabase
+            .from('threadcomments')
+            .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+            .eq('id', comment_id);
 
-            if (updateError) return res.status(500).json({ error: updateError.message });
+        if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
 
-            return res.status(200).json({ message: 'Like added.' });
-        }
-
-        if (type === 'dislike') {
-            newTotalDislikes += 1;
-
-            const { error: insertError } = await supabase
-                .from('comment_reactions')
-                .insert([{ user_id, comment_id, type: 'dislike' }]);
-
-            if (insertError) return res.status(500).json({ error: insertError.message });
-
-            const { error: updateError } = await supabase
-                .from('threadcomments')
-                .update({ total_dislikes: newTotalDislikes })
-                .eq('id', comment_id);
-
-            if (updateError) return res.status(500).json({ error: updateError.message });
-
-            return res.status(200).json({ message: 'Dislike added.' });
-        }
+        return res.status(200).json({ message: `${type} added!` });
     }
 };
 
 // get user's all comment reactions by thread
-const getCommentReactionsByThreadAndUser = async (
-    req: Request<{ thread_id: string }>,
-    res: Response
-): Promise<any> => {
-    const { thread_id } = req.params;
-    const user_id = req.user?.id;
-console.log(user_id, thread_id)
-    if (!thread_id || !user_id) {
-        return res.status(400).json({ error: 'Thread ID and User ID are required.' });
-    }
+// const getCommentReactionsByThreadAndUser = async (
+//     req: Request<{ thread_id: string }>,
+//     res: Response
+// ): Promise<any> => {
+//     const { thread_id } = req.params;
+//     const user_id = req.user?.id;
+//     console.log(user_id, thread_id)
+//     if (!thread_id || !user_id) {
+//         return res.status(400).json({ error: 'Thread ID and User ID are required.' });
+//     }
 
-    const { data, error } = await supabase
-        .from('threadcomments')
-        .select(`
-        id,
-        comment_reactions(type)
-      `)
-        .eq('thread_id', thread_id)
-        .order('created_at', { ascending: true });
+//     const { data, error } = await supabase
+//         .from('threadcomments')
+//         .select(`
+//         id,
+//         comment_reactions(type)
+//       `)
+//         .eq('thread_id', thread_id)
+//         .order('created_at', { ascending: true });
 
-    if (error) {
-        return res.status(500).json({ error: error.message });
-    }
+//     if (error) {
+//         return res.status(500).json({ error: error.message });
+//     }
 
-    const userReactions = data.map(comment => {
-        const reactionEntry = (comment as any).comment_reactions?.find(
-            (r: any) => r?.user_id === user_id
-        );
+//     const userReactions = data.map(comment => {
+//         const reactionEntry = (comment as any).comment_reactions?.find(
+//             (r: any) => r?.user_id === user_id
+//         );
 
-        return {
-            comment_id: comment.id,
-            reaction: reactionEntry?.type || null,
-        };
-    });
+//         return {
+//             comment_id: comment.id,
+//             reaction: reactionEntry?.type || null,
+//         };
+//     });
 
-    return res.status(200).json({ reactions: userReactions });
-};
+//     return res.status(200).json({ reactions: userReactions });
+// };
 
 export {
     createComment,
@@ -425,6 +401,6 @@ export {
     updateComment,
     getComments,
     updateCommentReaction,
-    getCommentReactionsByThreadAndUser,
+    // getCommentReactionsByThreadAndUser,
 };
 
