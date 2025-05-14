@@ -295,11 +295,9 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Loop through threads and fetch the reaction for each thread
   const threadsWithReactions = await Promise.all(threads.map(async (thread) => {
     let userReaction = null;
 
-    // If user is authenticated, fetch reaction for each thread
     if (user_id) {
       const { data: reactionData, error: reactionError } = await supabase
         .from('thread_reactions')
@@ -314,7 +312,6 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
       }
     }
 
-    // Return the thread along with its reaction
     return {
       ...thread,
       user_reaction: userReaction,
@@ -333,9 +330,6 @@ const updateReaction = async (
   const { type } = req.body;
   const user_id = req.user?.id;
 
-  if (!user_id) return res.status(401).json({ error: 'Unauthorized' });
-
-  // Check if the user already reacted
   const { data: existing, error: fetchError } = await supabase
     .from('thread_reactions')
     .select('*')
@@ -347,7 +341,6 @@ const updateReaction = async (
   if (fetchError && fetchError.code !== 'PGRST116') {
     return res.status(500).json({ error: fetchError.message });
   }
-
   const { data: threadData, error: threadError } = await supabase
     .from('threads')
     .select('total_likes, total_dislikes')
@@ -356,7 +349,7 @@ const updateReaction = async (
     .single();
 
   if (threadError) {
-    return res.status(500).json({ error: threadError.message });
+    return res.status(500).json({ error: 'Thread not found!' });
   }
 
   let newTotalLikes = threadData?.total_likes ?? 0;
@@ -364,7 +357,6 @@ const updateReaction = async (
 
   if (existing) {
     if (existing.type === type) {
-      // Toggle off reaction
       if (type === 'like') newTotalLikes -= 1;
       if (type === 'dislike') newTotalDislikes -= 1;
 
@@ -382,10 +374,9 @@ const updateReaction = async (
 
       if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-      return res.status(200).json({ message: `${type} removed.` });
+      return res.status(200).json({ message: `${type} removed!` });
     }
 
-    // Update from like -> dislike or vice versa
     if (existing.type === 'like') {
       newTotalLikes -= 1;
       newTotalDislikes += 1;
@@ -408,9 +399,8 @@ const updateReaction = async (
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-    return res.status(200).json({ message: `Reaction updated to ${type}.` });
+    return res.status(200).json({ message: `Reaction updated to ${type}!` });
   } else {
-    // New reaction
     if (type === 'like') newTotalLikes += 1;
     if (type === 'dislike') newTotalDislikes += 1;
 
@@ -427,70 +417,70 @@ const updateReaction = async (
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-    return res.status(200).json({ message: `${type} added.` });
+    return res.status(200).json({ message: `${type} added!` });
   }
 };
 
 // get user reaction by thread
-const getThreadReaction = async (
-  req: Request<{ thread_id: string }>,
-  res: Response
-): Promise<any> => {
-  const { thread_id } = req.params;
-  const user_id = req.user?.id;
+// const getThreadReaction = async (
+//   req: Request<{ thread_id: string }>,
+//   res: Response
+// ): Promise<any> => {
+//   const { thread_id } = req.params;
+//   const user_id = req.user?.id;
 
-  if (!thread_id || !user_id) {
-    return res.status(400).json({ error: 'Thread ID and User ID are required.' });
-  }
+//   if (!thread_id || !user_id) {
+//     return res.status(400).json({ error: 'Thread ID and User ID are required.' });
+//   }
 
-  const { data, error } = await supabase
-    .from('thread_reactions')
-    .select('type')
-    .eq('user_id', user_id)
-    .eq('target_type', 'thread')
-    .eq('target_id', thread_id)
-    .maybeSingle();
+//   const { data, error } = await supabase
+//     .from('thread_reactions')
+//     .select('type')
+//     .eq('user_id', user_id)
+//     .eq('target_type', 'thread')
+//     .eq('target_id', thread_id)
+//     .maybeSingle();
 
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
+//   if (error) {
+//     return res.status(500).json({ error: error.message });
+//   }
 
-  return res.status(200).json({
-    thread_id,
-    reaction: data?.type ?? null,
-  });
-};
+//   return res.status(200).json({
+//     thread_id,
+//     reaction: data?.type ?? null,
+//   });
+// };
 
 // get all thread user reaction
-const getAllReactionsByUser = async (req: Request, res: Response): Promise<any> => {
-  const user_id = req.user?.id;
+// const getAllReactionsByUser = async (req: Request, res: Response): Promise<any> => {
+//   const user_id = req.user?.id;
 
-  if (!user_id) {
-    return res.status(400).json({ error: 'User ID is required.' });
-  }
+//   if (!user_id) {
+//     return res.status(400).json({ error: 'User ID is required.' });
+//   }
 
-  const limit = parseInt(req.query.limit as string) || 10;
-  const offset = parseInt(req.query.offset as string) || 0;
+//   const limit = parseInt(req.query.limit as string) || 10;
+//   const offset = parseInt(req.query.offset as string) || 0;
 
-  const { data, error } = await supabase
-    .from('thread_likes')
-    .select('thread_id, reaction')
-    .eq('user_id', user_id)
-    .range(offset, offset + limit - 1);
+//   const { data, error } = await supabase
+//     .from('thread_likes')
+//     .select('thread_id, reaction')
+//     .eq('user_id', user_id)
+//     .range(offset, offset + limit - 1);
 
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
+//   if (error) {
+//     return res.status(500).json({ error: error.message });
+//   }
 
-  return res.status(200).json({
-    reactions: data || [],
-    pagination: {
-      limit,
-      offset,
-      count: data?.length || 0,
-    },
-  });
-};
+//   return res.status(200).json({
+//     reactions: data || [],
+//     pagination: {
+//       limit,
+//       offset,
+//       count: data?.length || 0,
+//     },
+//   });
+// };
 
 export {
   createThread,
@@ -499,7 +489,7 @@ export {
   getThreadDetails,
   getAllThreads,
   updateReaction,
-  getThreadReaction,
-  getAllReactionsByUser
+  // getThreadReaction,
+  // getAllReactionsByUser
 };
 
