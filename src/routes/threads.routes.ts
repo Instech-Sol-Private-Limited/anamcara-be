@@ -16,7 +16,7 @@ import {
     getCommentReactionsByThreadAndUser,
     updateComment,
     updateCommentReaction,
-} from '../controllers/threads/threadcomments.controller';
+} from '../controllers/threads/comments.controller';
 import {
     createSubComment,
     deleteSubComment,
@@ -25,7 +25,7 @@ import {
     updateSubComment,
     updateSubCommentReaction,
 } from '../controllers/threads/replies.controller';
-import { authMiddleware } from '../middleware/auth.middleware';
+import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
@@ -33,13 +33,13 @@ const router = express.Router();
 // ======================= threads ========================
 
 // get all threads(range)
-router.get('/get-all-threads', getAllThreads);
+router.get('/get-all-threads', optionalAuthMiddleware, getAllThreads);
 
 // create a new thread
 router.post('/create-thread', authMiddleware, createThread);
 
 // get thread details
-router.get('/get-thread-details/:thread_id', getThreadDetails);
+router.get('/get-thread-details/:thread_id', optionalAuthMiddleware, getThreadDetails);
 
 // update thread
 router.put('/update-thread/:thread_id', authMiddleware, updateThread);

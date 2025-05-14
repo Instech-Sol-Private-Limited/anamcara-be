@@ -1,4 +1,3 @@
-// src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../app';
 
@@ -68,7 +67,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-
 export const requireRole = (role: string) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (req.user?.role !== role) {
@@ -79,4 +77,49 @@ export const requireRole = (role: string) => {
     }
     next();
   };
+};
+
+export const optionalAuthMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+
+      if (!error && user) {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (!profileError && profile) {
+          req.user = {
+            id: user.id,
+            email: user.email || '',
+            role: profile.role || 'user',
+            ...profile
+          };
+
+          console.log('Optional auth: user attached:', user.id);
+        } else {
+          console.log('Optional auth: profile not found or error');
+        }
+      } else {
+        console.log('Optional auth: invalid token');
+      }
+    } catch (err: any) {
+      console.warn('Optional auth middleware error:', err.message);
+    }
+  } else {
+    console.log('Optional auth: No auth header provided');
+  }
+
+  next();
 };
