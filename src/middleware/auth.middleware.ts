@@ -107,7 +107,6 @@ export const optionalAuthMiddleware = async (
             ...profile
           };
 
-          console.log('Optional auth: user attached:', user.id);
         } else {
           console.log('Optional auth: profile not found or error');
         }

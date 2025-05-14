@@ -94,6 +94,7 @@ const deleteThread = async (
       .from('threads')
       .select('id, author_id')
       .eq('id', thread_id)
+      .eq('is_deleted', false)
       .single();
 
     if (fetchError || !thread) {
@@ -109,7 +110,9 @@ const deleteThread = async (
 
     const { error: deleteError } = await supabase
       .from('threads')
-      .delete()
+      .update({
+        is_deleted: true,
+      })
       .eq('id', thread_id);
 
     if (deleteError) {
@@ -145,6 +148,7 @@ const updateThread = async (req: Request, res: Response): Promise<any> => {
       .from('threads')
       .select('*')
       .eq('id', thread_id)
+      .eq('is_deleted', false)
       .single();
 
     if (threadError || !existingThread) {
@@ -195,7 +199,9 @@ const updateThread = async (req: Request, res: Response): Promise<any> => {
         category_name,
         author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
         author_id,
-        keywords
+        keywords,
+        updated_by: author_id,
+        is_edited: true
       })
       .eq('id', thread_id);
 
@@ -238,6 +244,8 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
         profiles!inner(avatar_url)  -- Perform inner join with the profiles table
       `)
       .eq('id', thread_id)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
       .maybeSingle();
 
     if (error || !thread) {
@@ -281,6 +289,7 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
       profiles!inner(avatar_url)
     `)
     .eq('is_active', true)
+    .eq('is_deleted', false)
     .order('publish_date', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -343,6 +352,7 @@ const updateReaction = async (
     .from('threads')
     .select('total_likes, total_dislikes')
     .eq('id', thread_id)
+    .eq('is_deleted', false)
     .single();
 
   if (threadError) {
