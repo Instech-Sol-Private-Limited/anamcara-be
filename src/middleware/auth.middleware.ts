@@ -7,7 +7,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
   }
   
   const authHeader = req.headers.authorization;
-  console.log('Auth header received:', authHeader ? `${authHeader.substring(0, 15)}...` : 'None'); // Debug
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     console.log('Unauthorized: No valid auth header found');
@@ -56,7 +55,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
       ...profile
     };
     
-    console.log('Authentication successfull for user:', user.id);
     next();
   } catch (error: any) {
     console.error('Auth error:', error);

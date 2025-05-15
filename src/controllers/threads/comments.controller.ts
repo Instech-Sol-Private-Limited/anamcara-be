@@ -125,12 +125,12 @@ const deleteComment = async (
 
 // update comment
 const updateComment = async (
-    req: Request<{ comment_id: string }> & { user?: { id: string; role?: string; first_name?: string; last_name?: string } },
+    req: Request<{ comment_id: string }> & { user?: { id: string; role?: string; } },
     res: Response
 ): Promise<any> => {
     try {
         const { comment_id } = req.params;
-        const { content } = req.body;
+        const { content, imgs } = req.body;
         const { id: user_id, role } = req.user!;
 
         const { data: existingComment, error: fetchError } = await supabase
@@ -159,6 +159,7 @@ const updateComment = async (
             .from('threadcomments')
             .update({
                 content,
+                imgs,
                 is_edited: true
             })
             .eq('id', comment_id);
@@ -286,7 +287,7 @@ const updateCommentReaction = async (
     if (commentError) {
         return res.status(500).json({ error: 'Comment not found!' });
     }
-    
+
     let newTotalLikes = commentData?.total_likes ?? 0;
     let newTotalDislikes = commentData?.total_dislikes ?? 0;
 
