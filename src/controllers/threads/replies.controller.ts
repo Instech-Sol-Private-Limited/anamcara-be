@@ -195,7 +195,10 @@ const getReplies = async (
 
     const { data: replies, error } = await supabase
         .from('threadsubcomments')
-        .select('*')
+        .select(`
+            *,
+            profiles!inner(avatar_url)
+        `)
         .eq('comment_id', comment_id)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
@@ -264,7 +267,7 @@ const updateReplyReaction = async (
     if (replyError) {
         return res.status(500).json({ error: 'Reply not found!' });
     }
-    
+
     let newTotalLikes = replyData?.total_likes ?? 0;
     let newTotalDislikes = replyData?.total_dislikes ?? 0;
 
