@@ -6,6 +6,7 @@ import {
     getThreadDetails,
     getAllThreads,
     updateReaction,
+     getThreadsByUserId,
     // getAllReactionsByUser,
     // getThreadReaction
 } from '../controllers/threads/threads.controller';
@@ -49,6 +50,8 @@ router.delete('/delete-thread/:thread_id', authMiddleware, deleteThread);
 
 // handle like/ dislike
 router.patch('/apply-react/:thread_id', authMiddleware, updateReaction);
+
+router.get('/get-threads-by-user/:user_id', optionalAuthMiddleware, getThreadsByUserId);
 
 // get user reaction by thread
 // router.get('/get-user-reaction/:thread_id', authMiddleware, getThreadReaction);

@@ -420,7 +420,70 @@ const updateReaction = async (
     return res.status(200).json({ message: `${type} added!` });
   }
 };
+const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { user_id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const current_user_id = req.user?.id;
 
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required in the request parameters.' });
+    }
+
+    const { data: threads, error } = await supabase
+      .from('threads')
+      .select(`
+        *,
+        profiles!inner(avatar_url)
+      `)
+      .eq('author_id', user_id)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .order('publish_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const threadsWithReactions = await Promise.all(threads.map(async (thread) => {
+      let userReaction = null;
+
+      if (current_user_id) {
+        const { data: reactionData, error: reactionError } = await supabase
+          .from('thread_reactions')
+          .select('type')
+          .eq('user_id', current_user_id)
+          .eq('target_type', 'thread')
+          .eq('target_id', thread.id)
+          .maybeSingle();
+
+        if (!reactionError && reactionData) {
+          userReaction = reactionData.type;
+        }
+      }
+
+      return {
+        ...thread,
+        user_reaction: userReaction,
+      };
+    }));
+
+    return res.status(200).json({ 
+      threads: threadsWithReactions,
+      pagination: {
+        limit,
+        offset,
+        count: threadsWithReactions.length
+      }
+    });
+  } catch (err: any) {
+    console.error('Unexpected error in getThreadsByUserId:', err);
+    return res.status(500).json({
+      error: 'Internal server error while fetching threads.',
+      message: err.message || 'Unexpected failure.',
+    });
+  }
+};
 // get user reaction by thread
 // const getThreadReaction = async (
 //   req: Request<{ thread_id: string }>,
@@ -489,6 +552,7 @@ export {
   getThreadDetails,
   getAllThreads,
   updateReaction,
+   getThreadsByUserId
   // getThreadReaction,
   // getAllReactionsByUser
 };
