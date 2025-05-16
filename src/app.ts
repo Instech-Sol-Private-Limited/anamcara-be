@@ -10,7 +10,7 @@ import authRoutes from './routes/auth.routes';
 import blogRoutes from './routes/blog.routes';
 import categoryRoutes from './routes/threadcategory.routes';
 import threadsRoutes from './routes/threads.routes';
-
+import profileRoutes from './routes/profile.routes';
 dotenv.config();
 
 const app = express();
@@ -58,6 +58,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
+app.use('/api/profiles', profileRoutes);
 
 
 app.listen(PORT, () => {
