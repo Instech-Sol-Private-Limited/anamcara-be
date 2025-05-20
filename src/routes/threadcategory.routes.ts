@@ -23,6 +23,6 @@ router.put('/update-category/:id', authMiddleware, updateCategory);
 router.delete('/delete-category/:id', authMiddleware, removeCategory);
 
 // update active/inactive status
-router.patch('/toggle-category-status/:id', authMiddleware, toggleCategoryStatus);
+router.put('/toggle-category-status/:id', authMiddleware, toggleCategoryStatus);
 
 export default router;

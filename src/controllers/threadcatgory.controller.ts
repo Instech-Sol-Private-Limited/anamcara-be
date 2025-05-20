@@ -12,8 +12,15 @@ const formatSlug = (slug: string): string => slug.trim().toLowerCase().replace(/
 
 // get all categories
 const getAllCategories = async (_req: Request, res: Response): Promise<any> => {
-    const { data, error } = await supabase.from('threadcategory').select('*');
-    if (error) return res.status(500).json({ error: 'Error fetching categories' });
+    const { data, error } = await supabase
+        .from('threadcategory')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+    if (error) {
+        return res.status(500).json({ error: 'Error fetching categories' });
+    }
+
     return res.status(200).json(data);
 };
 
