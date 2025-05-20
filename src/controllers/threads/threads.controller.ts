@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../app';
+import { supabase } from '../../app';
 
 // add new thread
 const createThread = async (req: Request, res: Response): Promise<any> => {
@@ -94,6 +94,7 @@ const deleteThread = async (
       .from('threads')
       .select('id, author_id')
       .eq('id', thread_id)
+      .eq('is_deleted', false)
       .single();
 
     if (fetchError || !thread) {
@@ -109,7 +110,9 @@ const deleteThread = async (
 
     const { error: deleteError } = await supabase
       .from('threads')
-      .delete()
+      .update({
+        is_deleted: true,
+      })
       .eq('id', thread_id);
 
     if (deleteError) {
@@ -145,6 +148,7 @@ const updateThread = async (req: Request, res: Response): Promise<any> => {
       .from('threads')
       .select('*')
       .eq('id', thread_id)
+      .eq('is_deleted', false)
       .single();
 
     if (threadError || !existingThread) {
@@ -195,7 +199,9 @@ const updateThread = async (req: Request, res: Response): Promise<any> => {
         category_name,
         author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
         author_id,
-        keywords
+        keywords,
+        updated_by: author_id,
+        is_edited: true
       })
       .eq('id', thread_id);
 
@@ -233,8 +239,13 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
 
     const { data: thread, error } = await supabase
       .from('threads')
-      .select('*')
+      .select(`
+        *,
+        profiles!inner(avatar_url)  -- Perform inner join with the profiles table
+      `)
       .eq('id', thread_id)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
       .maybeSingle();
 
     if (error || !thread) {
@@ -242,29 +253,26 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
     }
 
     let userReaction = null;
+
     if (user_id) {
+
       const { data: reactionData, error: reactionError } = await supabase
-        .from('thread_likes')
-        .select('reaction')
+        .from('thread_reactions')
+        .select('type')
         .eq('user_id', user_id)
-        .eq('thread_id', thread_id)
+        .eq('target_type', 'thread')
+        .eq('target_id', thread_id)
         .maybeSingle();
 
+
       if (!reactionError && reactionData) {
-        userReaction = reactionData.reaction;
+        userReaction = reactionData.type;
       }
     }
 
-    return res.status(200).json({
-      ...thread,
-      user_reaction: userReaction || null, // null if not reacted
-    });
-  } catch (err: any) {
-    console.error('Unexpected error in getThreadDetails:', err);
-    return res.status(500).json({
-      error: 'Internal server error while retrieving thread details.',
-      message: err.message || 'Unexpected failure.',
-    });
+    return res.json({ thread, userReaction });
+  } catch (err) {
+    return res.status(500).json({ error: 'Something went wrong!' });
   }
 };
 
@@ -272,16 +280,45 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
 const getAllThreads = async (req: Request, res: Response): Promise<any> => {
   const limit = parseInt(req.query.limit as string) || 10;
   const offset = parseInt(req.query.offset as string) || 0;
+  const user_id = req.user?.id;
 
-  const { data, error } = await supabase
+  const { data: threads, error } = await supabase
     .from('threads')
-    .select('*')
+    .select(`
+      *,
+      profiles!inner(avatar_url)
+    `)
+    .eq('is_active', true)
+    .eq('is_deleted', false)
     .order('publish_date', { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) return res.status(500).json({ error: error.message });
 
-  return res.json(data);
+  const threadsWithReactions = await Promise.all(threads.map(async (thread) => {
+    let userReaction = null;
+
+    if (user_id) {
+      const { data: reactionData, error: reactionError } = await supabase
+        .from('thread_reactions')
+        .select('type')
+        .eq('user_id', user_id)
+        .eq('target_type', 'thread')
+        .eq('target_id', thread.id)
+        .maybeSingle();
+
+      if (!reactionError && reactionData) {
+        userReaction = reactionData.type;
+      }
+    }
+
+    return {
+      ...thread,
+      user_reaction: userReaction,
+    };
+  }));
+
+  return res.json(threadsWithReactions);
 };
 
 // apply like/dislike
@@ -291,235 +328,223 @@ const updateReaction = async (
 ): Promise<any> => {
   const { thread_id } = req.params;
   const { type } = req.body;
-
   const user_id = req.user?.id;
 
   const { data: existing, error: fetchError } = await supabase
-    .from('thread_likes')
+    .from('thread_reactions')
     .select('*')
     .eq('user_id', user_id)
-    .eq('thread_id', thread_id)
+    .eq('target_id', thread_id)
+    .eq('target_type', 'thread')
     .single();
 
   if (fetchError && fetchError.code !== 'PGRST116') {
     return res.status(500).json({ error: fetchError.message });
   }
-
   const { data: threadData, error: threadError } = await supabase
     .from('threads')
     .select('total_likes, total_dislikes')
     .eq('id', thread_id)
+    .eq('is_deleted', false)
     .single();
 
   if (threadError) {
-    return res.status(500).json({ error: threadError.message });
+    return res.status(500).json({ error: 'Thread not found!' });
   }
 
   let newTotalLikes = threadData?.total_likes ?? 0;
   let newTotalDislikes = threadData?.total_dislikes ?? 0;
 
   if (existing) {
-    if (existing.type === 'like' && type === 'like') {
-      newTotalLikes -= 1;
+    if (existing.type === type) {
+      if (type === 'like') newTotalLikes -= 1;
+      if (type === 'dislike') newTotalDislikes -= 1;
+
       const { error: deleteError } = await supabase
-        .from('thread_likes')
+        .from('thread_reactions')
         .delete()
-        .eq('user_id', user_id)
-        .eq('thread_id', thread_id);
+        .eq('id', existing.id);
 
       if (deleteError) return res.status(500).json({ error: deleteError.message });
 
-      // Update total_likes in the thread
-      const { error: updateLikesError } = await supabase
+      const { error: updateThreadError } = await supabase
         .from('threads')
-        .update({ total_likes: newTotalLikes })
+        .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
         .eq('id', thread_id);
 
-      if (updateLikesError) return res.status(500).json({ error: updateLikesError.message });
+      if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-      return res.status(200).json({ message: 'Like removed.' });
+      return res.status(200).json({ message: `${type} removed!` });
     }
 
-    if (existing.type === 'dislike' && type === 'dislike') {
-      newTotalDislikes -= 1;
-      const { error: deleteError } = await supabase
-        .from('thread_likes')
-        .delete()
-        .eq('user_id', user_id)
-        .eq('thread_id', thread_id);
-
-      if (deleteError) return res.status(500).json({ error: deleteError.message });
-
-      // Update total_dislikes in the thread
-      const { error: updateDislikesError } = await supabase
-        .from('threads')
-        .update({ total_dislikes: newTotalDislikes })
-        .eq('id', thread_id);
-
-      if (updateDislikesError) return res.status(500).json({ error: updateDislikesError.message });
-
-      return res.status(200).json({ message: 'Dislike removed.' });
-    }
-
-    if (existing.type === 'like' && type === 'dislike') {
+    if (existing.type === 'like') {
       newTotalLikes -= 1;
       newTotalDislikes += 1;
-
-      // Remove the old like
-      const { error: deleteLikeError } = await supabase
-        .from('thread_likes')
-        .delete()
-        .eq('user_id', user_id)
-        .eq('thread_id', thread_id);
-
-      if (deleteLikeError) return res.status(500).json({ error: deleteLikeError.message });
-
-      // Insert the new dislike
-      const { error: insertDislikeError } = await supabase
-        .from('thread_likes')
-        .insert([{ user_id, thread_id, type: 'dislike' }]);
-
-      if (insertDislikeError) return res.status(500).json({ error: insertDislikeError.message });
-
-      // Update totals
-      const { error: updateTotalsError } = await supabase
-        .from('threads')
-        .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-        .eq('id', thread_id);
-
-      if (updateTotalsError) return res.status(500).json({ error: updateTotalsError.message });
-
-      return res.status(200).json({ message: 'Like changed to dislike.' });
-    }
-
-    if (existing.type === 'dislike' && type === 'like') {
-      newTotalLikes += 1;
+    } else {
       newTotalDislikes -= 1;
-
-      // Remove the old dislike
-      const { error: deleteDislikeError } = await supabase
-        .from('thread_likes')
-        .delete()
-        .eq('user_id', user_id)
-        .eq('thread_id', thread_id);
-
-      if (deleteDislikeError) return res.status(500).json({ error: deleteDislikeError.message });
-
-      // Insert the new like
-      const { error: insertLikeError } = await supabase
-        .from('thread_likes')
-        .insert([{ user_id, thread_id, type: 'like' }]);
-
-      if (insertLikeError) return res.status(500).json({ error: insertLikeError.message });
-
-      // Update totals
-      const { error: updateTotalsError } = await supabase
-        .from('threads')
-        .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-        .eq('id', thread_id);
-
-      if (updateTotalsError) return res.status(500).json({ error: updateTotalsError.message });
-
-      return res.status(200).json({ message: 'Dislike changed to like.' });
+      newTotalLikes += 1;
     }
+
+    const { error: updateError } = await supabase
+      .from('thread_reactions')
+      .update({ type, updated_by: user_id })
+      .eq('id', existing.id);
+
+    if (updateError) return res.status(500).json({ error: updateError.message });
+
+    const { error: updateThreadError } = await supabase
+      .from('threads')
+      .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+      .eq('id', thread_id);
+
+    if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
+
+    return res.status(200).json({ message: `Reaction updated to ${type}!` });
   } else {
-    if (type === 'like') {
-      newTotalLikes += 1;
-      const { error: insertLikeError } = await supabase
-        .from('thread_likes')
-        .insert([{ user_id, thread_id, type }]);
+    if (type === 'like') newTotalLikes += 1;
+    if (type === 'dislike') newTotalDislikes += 1;
 
-      if (insertLikeError) return res.status(500).json({ error: insertLikeError.message });
+    const { error: insertError } = await supabase
+      .from('thread_reactions')
+      .insert([{ user_id, target_id: thread_id, target_type: 'thread', type }]);
 
-      const { error: updateLikesError } = await supabase
-        .from('threads')
-        .update({ total_likes: newTotalLikes })
-        .eq('id', thread_id);
+    if (insertError) return res.status(500).json({ error: insertError.message });
 
-      if (updateLikesError) return res.status(500).json({ error: updateLikesError.message });
+    const { error: updateThreadError } = await supabase
+      .from('threads')
+      .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+      .eq('id', thread_id);
 
-      return res.status(200).json({ message: 'Like added.' });
-    }
+    if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-    if (type === 'dislike') {
-      newTotalDislikes += 1;
-      const { error: insertDislikeError } = await supabase
-        .from('thread_likes')
-        .insert([{ user_id, thread_id, type }]);
-
-      if (insertDislikeError) return res.status(500).json({ error: insertDislikeError.message });
-
-      const { error: updateDislikesError } = await supabase
-        .from('threads')
-        .update({ total_dislikes: newTotalDislikes })
-        .eq('id', thread_id);
-
-      if (updateDislikesError) return res.status(500).json({ error: updateDislikesError.message });
-
-      return res.status(200).json({ message: 'Dislike added.' });
-    }
+    return res.status(200).json({ message: `${type} added!` });
   }
 };
 
+const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { user_id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const current_user_id = req.user?.id;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required in the request parameters.' });
+    }
+
+    const { data: threads, error } = await supabase
+      .from('threads')
+      .select(`
+        *,
+        profiles!inner(avatar_url)
+      `)
+      .eq('author_id', user_id)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .order('publish_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const threadsWithReactions = await Promise.all(threads.map(async (thread) => {
+      let userReaction = null;
+
+      if (current_user_id) {
+        const { data: reactionData, error: reactionError } = await supabase
+          .from('thread_reactions')
+          .select('type')
+          .eq('user_id', current_user_id)
+          .eq('target_type', 'thread')
+          .eq('target_id', thread.id)
+          .maybeSingle();
+
+        if (!reactionError && reactionData) {
+          userReaction = reactionData.type;
+        }
+      }
+
+      return {
+        ...thread,
+        user_reaction: userReaction,
+      };
+    }));
+
+    return res.status(200).json({ 
+      threads: threadsWithReactions,
+      pagination: {
+        limit,
+        offset,
+        count: threadsWithReactions.length
+      }
+    });
+  } catch (err: any) {
+    console.error('Unexpected error in getThreadsByUserId:', err);
+    return res.status(500).json({
+      error: 'Internal server error while fetching threads.',
+      message: err.message || 'Unexpected failure.',
+    });
+  }
+};
 // get user reaction by thread
-const getThreadReaction = async (req: Request<{ thread_id: string }>, res: Response): Promise<any> => {
-  const { thread_id } = req.params;
-  const user_id = req.user?.id;
+// const getThreadReaction = async (
+//   req: Request<{ thread_id: string }>,
+//   res: Response
+// ): Promise<any> => {
+//   const { thread_id } = req.params;
+//   const user_id = req.user?.id;
 
-  if (!thread_id || !user_id) {
-    return res.status(400).json({ error: 'Thread ID and User ID are required.' });
-  }
+//   if (!thread_id || !user_id) {
+//     return res.status(400).json({ error: 'Thread ID and User ID are required.' });
+//   }
 
-  const { data, error } = await supabase
-    .from('thread_likes')
-    .select('type')
-    .eq('user_id', user_id)
-    .eq('thread_id', thread_id)
-    .maybeSingle();
+//   const { data, error } = await supabase
+//     .from('thread_reactions')
+//     .select('type')
+//     .eq('user_id', user_id)
+//     .eq('target_type', 'thread')
+//     .eq('target_id', thread_id)
+//     .maybeSingle();
 
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
+//   if (error) {
+//     return res.status(500).json({ error: error.message });
+//   }
 
-  if (!data) {
-    return res.status(200).json({ message: 'No reaction found.', reaction: null });
-  }
-  return res.status(200).json({
-    thread_id,
-    reaction: data?.type || null,
-  });
-};
+//   return res.status(200).json({
+//     thread_id,
+//     reaction: data?.type ?? null,
+//   });
+// };
 
 // get all thread user reaction
-const getAllReactionsByUser = async (req: Request, res: Response): Promise<any> => {
-  const user_id = req.user?.id;
+// const getAllReactionsByUser = async (req: Request, res: Response): Promise<any> => {
+//   const user_id = req.user?.id;
 
-  if (!user_id) {
-    return res.status(400).json({ error: 'User ID is required.' });
-  }
+//   if (!user_id) {
+//     return res.status(400).json({ error: 'User ID is required.' });
+//   }
 
-  const limit = parseInt(req.query.limit as string) || 10;
-  const offset = parseInt(req.query.offset as string) || 0;
+//   const limit = parseInt(req.query.limit as string) || 10;
+//   const offset = parseInt(req.query.offset as string) || 0;
 
-  const { data, error } = await supabase
-    .from('thread_likes')
-    .select('thread_id, reaction')
-    .eq('user_id', user_id)
-    .range(offset, offset + limit - 1);
+//   const { data, error } = await supabase
+//     .from('thread_likes')
+//     .select('thread_id, reaction')
+//     .eq('user_id', user_id)
+//     .range(offset, offset + limit - 1);
 
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
+//   if (error) {
+//     return res.status(500).json({ error: error.message });
+//   }
 
-  return res.status(200).json({
-    reactions: data || [],
-    pagination: {
-      limit,
-      offset,
-      count: data?.length || 0,
-    },
-  });
-};
+//   return res.status(200).json({
+//     reactions: data || [],
+//     pagination: {
+//       limit,
+//       offset,
+//       count: data?.length || 0,
+//     },
+//   });
+// };
 
 export {
   createThread,
@@ -528,7 +553,8 @@ export {
   getThreadDetails,
   getAllThreads,
   updateReaction,
-  getThreadReaction,
-  getAllReactionsByUser
+   getThreadsByUserId
+  // getThreadReaction,
+  // getAllReactionsByUser
 };
 

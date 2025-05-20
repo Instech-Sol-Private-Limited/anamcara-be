@@ -1,8 +1,6 @@
-// src/controllers/conversation.controller.ts
 import { Request, Response } from 'express';
 import { supabase } from '../app';
 import { v4 as uuidv4 } from 'uuid';
-
 
 export const getConversations = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -38,9 +36,6 @@ export const getConversations = async (req: Request, res: Response): Promise<voi
   }
 };
 
-// @desc    Get a conversation by ID with all messages
-// @route   GET /api/conversations/:id
-// @access  Private
 export const getConversationById = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -95,9 +90,6 @@ export const getConversationById = async (req: Request, res: Response): Promise<
   }
 };
 
-// @desc    
-// @route   
-// @access 
 export const createConversation = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -142,9 +134,6 @@ export const createConversation = async (req: Request, res: Response): Promise<v
   }
 };
 
-// @desc    
-// @route   
-// @access  
 export const updateConversation = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -200,7 +189,6 @@ export const updateConversation = async (req: Request, res: Response): Promise<v
     });
   }
 };
-
 
 export const deleteConversation = async (req: Request, res: Response): Promise<void> => {
   try {
