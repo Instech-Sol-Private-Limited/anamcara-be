@@ -420,6 +420,7 @@ const updateReaction = async (
     return res.status(200).json({ message: `${type} added!` });
   }
 };
+
 const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => {
   try {
     const { user_id } = req.params;
