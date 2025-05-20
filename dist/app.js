@@ -19,7 +19,7 @@ const blogRoutes_1 = __importDefault(require("./routes/blogRoutes"));
 dotenv_1.default.config();
 // Initialize Express app
 const app = (0, express_1.default)();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3001;
 // Ensure required environment variables are set
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !process.env.OPENAI_API_KEY) {
     console.error('Missing required environment variables');
@@ -55,7 +55,7 @@ app.use('/api/chat', auth_middleware_1.authMiddleware, chatRoutes_1.default);
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/blogs', blogRoutes_1.default);
 
-app.listen(PORT, () => {
+app.listen(PORT,'0.0.0.0',  () => {
   console.log(`Server running on port http://localhost:${PORT}`);
 });
 
