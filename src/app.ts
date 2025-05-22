@@ -15,7 +15,7 @@ import profileRoutes from './routes/profile.routes';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3001;
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !process.env.OPENAI_API_KEY) {
   console.error('Missing required environment variables');
@@ -40,7 +40,7 @@ export const openai = new OpenAI({
 });
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000','http://localhost:5174', '*'],
+  origin: ['http://localhost:5173', 'http://localhost:3001', '*'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -65,3 +65,7 @@ app.use('/api/profiles', profileRoutes);
 app.listen(PORT, () => {
   console.log(`Server running on port http://localhost:${PORT}`);
 });
+
+// app.listen(PORT,'0.0.0.0', () => {
+//   console.log(`Server running on port http://localhost:${PORT}`);
+// });

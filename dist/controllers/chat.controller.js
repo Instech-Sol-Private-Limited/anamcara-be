@@ -13,9 +13,6 @@ exports.clearMessages = exports.getMessages = exports.sendMessage = void 0;
 const app_1 = require("../app");
 const app_2 = require("../app");
 const uuid_1 = require("uuid");
-// @desc    Send a message to the chat and get an AI response
-// @route   POST /api/chat/send
-// @access  Private
 const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {

@@ -9,8 +9,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addComment = exports.bookmarkUnbookmarkBlog = exports.likeUnlikeBlog = exports.deleteBlog = exports.updateBlog = exports.createBlog = exports.getBlogById = exports.getAllBlogs = void 0;
+exports.bookmarkUnbookmarkBlog = exports.likeUnlikeBlog = exports.getCommentsByBlogId = exports.deleteComment = exports.updateComment = exports.addComment = exports.deleteBlog = exports.updateBlog = exports.createBlog = exports.getBlogById = exports.getAllBlogs = void 0;
 const app_1 = require("../app");
+// ===================== Blogs =======================
 const getAllBlogs = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -216,6 +217,150 @@ const deleteBlog = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.deleteBlog = deleteBlog;
+// ===================== comments =======================
+const addComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { content, blog_id } = req.body;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized user.' });
+        }
+        if (!blog_id || typeof blog_id !== 'string') {
+            return res.status(400).json({ success: false, message: 'Valid blog_id is required.' });
+        }
+        if (!content || typeof content !== 'string' || content.trim().length < 3) {
+            return res.status(400).json({ success: false, message: 'Comment content must be at least 3 characters.' });
+        }
+        const { data, error } = yield app_1.supabase
+            .from('comments')
+            .insert({
+            blog_id,
+            user_id: userId,
+            content: content.trim()
+        })
+            .select(`
+        *,
+        profiles:user_id (
+          id,
+          first_name,
+          last_name,
+          avatar_url
+        )
+      `)
+            .single();
+        if (error)
+            throw error;
+        res.status(201).json({ success: true, message: 'Comment added successfully.', data });
+    }
+    catch (error) {
+        console.error('Error adding comment:', error);
+        res.status(500).json({ success: false, message: 'Failed to add comment.' });
+    }
+});
+exports.addComment = addComment;
+const updateComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { comment_id: commentId } = req.params;
+        const { content } = req.body;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized user.' });
+        }
+        if (!content || typeof content !== 'string' || content.trim().length < 3) {
+            return res.status(400).json({ success: false, message: 'Updated content must be at least 3 characters.' });
+        }
+        // Check ownership
+        const { data: existingComment } = yield app_1.supabase
+            .from('comments')
+            .select('user_id')
+            .eq('id', commentId)
+            .single();
+        if (!existingComment || existingComment.user_id !== userId) {
+            return res.status(403).json({ success: false, message: 'You are not authorized to update this comment.' });
+        }
+        const { data, error } = yield app_1.supabase
+            .from('comments')
+            .update({ content: content.trim() })
+            .eq('id', commentId)
+            .select()
+            .single();
+        if (error)
+            throw error;
+        res.status(200).json({ success: true, message: 'Comment updated successfully.', data });
+    }
+    catch (error) {
+        console.error('Error updating comment:', error);
+        res.status(500).json({ success: false, message: 'Failed to update comment.' });
+    }
+});
+exports.updateComment = updateComment;
+const deleteComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { comment_id: commentId } = req.params;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized user.' });
+        }
+        // Check ownership
+        const { data: existingComment } = yield app_1.supabase
+            .from('comments')
+            .select('user_id')
+            .eq('id', commentId)
+            .single();
+        if (!existingComment || existingComment.user_id !== userId) {
+            return res.status(403).json({ success: false, message: 'You are not authorized to delete this comment.' });
+        }
+        const { error } = yield app_1.supabase
+            .from('comments')
+            .delete()
+            .eq('id', commentId);
+        if (error)
+            throw error;
+        res.status(200).json({ success: true, message: 'Comment deleted successfully.' });
+    }
+    catch (error) {
+        console.error('Error deleting comment:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete comment.' });
+    }
+});
+exports.deleteComment = deleteComment;
+const getCommentsByBlogId = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { blog_id: blogId } = req.params;
+        if (!blogId || typeof blogId !== 'string') {
+            return res.status(400).json({ success: false, message: 'A valid blog ID is required.' });
+        }
+        const { data, error } = yield app_1.supabase
+            .from('comments')
+            .select(`
+        *,
+        profiles:user_id (
+          id,
+          first_name,
+          last_name,
+          avatar_url
+        )
+      `)
+            .eq('blog_id', blogId)
+            .order('created_at', { ascending: false });
+        if (error)
+            throw error;
+        res.status(200).json({
+            success: true,
+            message: 'Comments fetched successfully.',
+            count: data.length,
+            data
+        });
+    }
+    catch (error) {
+        console.error('Error fetching comments:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch comments.' });
+    }
+});
+exports.getCommentsByBlogId = getCommentsByBlogId;
 // Like/Unlike blog
 const likeUnlikeBlog = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -302,38 +447,3 @@ const bookmarkUnbookmarkBlog = (req, res) => __awaiter(void 0, void 0, void 0, f
     }
 });
 exports.bookmarkUnbookmarkBlog = bookmarkUnbookmarkBlog;
-const addComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { id } = req.params;
-        const { content } = req.body;
-        const userId = req.user.id;
-        if (!content) {
-            res.status(400).json({ error: 'Comment content is required' });
-        }
-        const { data, error } = yield app_1.supabase
-            .from('comments')
-            .insert({
-            blog_id: id,
-            user_id: userId,
-            content
-        })
-            .select(`
-        *,
-        profiles:user_id (
-          id,
-          first_name,
-          last_name,
-          avatar_url
-        )
-      `)
-            .single();
-        if (error)
-            throw error;
-        res.status(201).json(data);
-    }
-    catch (error) {
-        console.error('Error adding comment:', error);
-        res.status(500).json({ error: 'Failed to add comment' });
-    }
-});
-exports.addComment = addComment;

@@ -9,14 +9,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireRole = exports.authMiddleware = void 0;
+exports.optionalAuthMiddleware = exports.requireRole = exports.authMiddleware = void 0;
 const app_1 = require("../app");
 const authMiddleware = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     if (req.originalUrl.startsWith('/api/auth') || req.originalUrl === '/health') {
         return next();
     }
     const authHeader = req.headers.authorization;
-    console.log('Auth header received:', authHeader ? `${authHeader.substring(0, 15)}...` : 'None'); // Debug
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log('Unauthorized: No valid auth header found');
         res.status(401).json({
@@ -50,7 +49,6 @@ const authMiddleware = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
             return;
         }
         req.user = Object.assign({ id: user.id, email: user.email || '', role: profile.role || 'user' }, profile);
-        console.log('Authentication successful for user:', user.id);
         next();
     }
     catch (error) {
@@ -75,3 +73,36 @@ const requireRole = (role) => {
     };
 };
 exports.requireRole = requireRole;
+const optionalAuthMiddleware = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+            const { data: { user }, error } = yield app_1.supabase.auth.getUser(token);
+            if (!error && user) {
+                const { data: profile, error: profileError } = yield app_1.supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
+                if (!profileError && profile) {
+                    req.user = Object.assign({ id: user.id, email: user.email || '', role: profile.role || 'user' }, profile);
+                }
+                else {
+                    console.log('Optional auth: profile not found or error');
+                }
+            }
+            else {
+                console.log('Optional auth: invalid token');
+            }
+        }
+        catch (err) {
+            console.warn('Optional auth middleware error:', err.message);
+        }
+    }
+    else {
+        console.log('Optional auth: No auth header provided');
+    }
+    next();
+});
+exports.optionalAuthMiddleware = optionalAuthMiddleware;

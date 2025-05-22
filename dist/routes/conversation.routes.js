@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 // src/routes/conversation.routes.ts
 const express_1 = require("express");
-const ConversationController = __importStar(require("../controllers/conversationController"));
+const ConversationController = __importStar(require("../controllers/conversation.controller"));
 const router = (0, express_1.Router)();
 router.get('/', ConversationController.getConversations);
 router.post('/', ConversationController.createConversation);

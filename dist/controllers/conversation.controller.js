@@ -45,9 +45,6 @@ const getConversations = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getConversations = getConversations;
-// @desc    Get a conversation by ID with all messages
-// @route   GET /api/conversations/:id
-// @access  Private
 const getConversationById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -97,9 +94,6 @@ const getConversationById = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.getConversationById = getConversationById;
-// @desc    
-// @route   
-// @access 
 const createConversation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -142,9 +136,6 @@ const createConversation = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.createConversation = createConversation;
-// @desc    
-// @route   
-// @access  
 const updateConversation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
