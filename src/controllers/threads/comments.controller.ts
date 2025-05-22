@@ -48,6 +48,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
             }])
             .select();
 
+            console.log(data, error)
         if (error) {
             console.error('Supabase insert error:', error);
             return res.status(500).json({

@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.routes';
 import blogRoutes from './routes/blog.routes';
 import categoryRoutes from './routes/threadcategory.routes';
 import threadsRoutes from './routes/threads.routes';
+import profileRoutes from './routes/profile.routes';
 
 dotenv.config();
 
@@ -39,7 +40,7 @@ export const openai = new OpenAI({
 });
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', '*'],
+  origin: ['http://localhost:5173', 'http://localhost:3000','http://localhost:5174', '*'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -58,6 +59,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
+app.use('/api/profiles', profileRoutes);
 
 
 app.listen(PORT, () => {
