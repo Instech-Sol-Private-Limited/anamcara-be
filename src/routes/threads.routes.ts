@@ -7,26 +7,23 @@ import {
     getAllThreads,
     updateReaction,
      getThreadsByUserId,
-    // getAllReactionsByUser,
-    // getThreadReaction
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
     deleteComment,
     getComments,
-    // getCommentReactionsByThreadAndUser,
     updateComment,
     updateCommentReaction,
 } from '../controllers/threads/comments.controller';
 import {
     createReply,
     deleteReply,
-    // getSubcommentReactions,
     getReplies,
     updateReply,
     updateReplyReaction,
 } from '../controllers/threads/replies.controller';
 import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware';
+import { createSpamThread, deleteSpamThread, getSpammedThreads } from '../controllers/threads/spam.controller';
 
 const router = express.Router();
 
@@ -53,14 +50,6 @@ router.patch('/apply-react/:thread_id', authMiddleware, updateReaction);
 
 router.get('/get-threads-by-user/:user_id', optionalAuthMiddleware, getThreadsByUserId);
 
-// get user reaction by thread
-// router.get('/get-user-reaction/:thread_id', authMiddleware, getThreadReaction);
-
-// // get all thread user reaction
-// router.get('/get-all-user-reactions', authMiddleware, getAllReactionsByUser);
-
-
-
 
 
 
@@ -82,11 +71,6 @@ router.delete('/delete-comment/:comment_id', authMiddleware, deleteComment);
 // handle like/ dislike
 router.patch('/apply-comment-react/:comment_id', authMiddleware, updateCommentReaction);
 
-// get user's comments reaction by thread
-// router.get('/get-all-comment-reaction/:thread_id', authMiddleware, getCommentReactionsByThreadAndUser);
-
-
-
 
 
 
@@ -107,8 +91,16 @@ router.delete('/delete-reply/:reply_id', authMiddleware, deleteReply);
 // handle like/ dislike
 router.patch('/apply-reply-react/:reply_id', authMiddleware, updateReplyReaction);
 
-// get user's comments reaction by thread
-// router.get('/get-reply-reaction/:comment_id', authMiddleware, getSubcommentReactions);
 
+// ======================= Threads Spam ========================
+
+// create spam thread
+router.post('/create-spam-thread', authMiddleware, createSpamThread);
+
+// remove spam comment
+router.delete('/remove-spam-thread/:thread_id', authMiddleware, deleteSpamThread);
+
+// remove spam comment
+router.get('/get-spam-threads', authMiddleware, getSpammedThreads);
 
 export default router;

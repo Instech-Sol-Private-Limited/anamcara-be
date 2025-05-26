@@ -357,51 +357,11 @@ const updateCommentReaction = async (
     }
 };
 
-// get user's all comment reactions by thread
-// const getCommentReactionsByThreadAndUser = async (
-//     req: Request<{ thread_id: string }>,
-//     res: Response
-// ): Promise<any> => {
-//     const { thread_id } = req.params;
-//     const user_id = req.user?.id;
-//     console.log(user_id, thread_id)
-//     if (!thread_id || !user_id) {
-//         return res.status(400).json({ error: 'Thread ID and User ID are required.' });
-//     }
-
-//     const { data, error } = await supabase
-//         .from('threadcomments')
-//         .select(`
-//         id,
-//         comment_reactions(type)
-//       `)
-//         .eq('thread_id', thread_id)
-//         .order('created_at', { ascending: true });
-
-//     if (error) {
-//         return res.status(500).json({ error: error.message });
-//     }
-
-//     const userReactions = data.map(comment => {
-//         const reactionEntry = (comment as any).comment_reactions?.find(
-//             (r: any) => r?.user_id === user_id
-//         );
-
-//         return {
-//             comment_id: comment.id,
-//             reaction: reactionEntry?.type || null,
-//         };
-//     });
-
-//     return res.status(200).json({ reactions: userReactions });
-// };
-
 export {
     createComment,
     deleteComment,
     updateComment,
     getComments,
     updateCommentReaction,
-    // getCommentReactionsByThreadAndUser,
 };
 
