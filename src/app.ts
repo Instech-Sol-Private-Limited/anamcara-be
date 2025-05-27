@@ -11,6 +11,7 @@ import blogRoutes from './routes/blog.routes';
 import categoryRoutes from './routes/threadcategory.routes';
 import threadsRoutes from './routes/threads.routes';
 import profileRoutes from './routes/profile.routes';
+import reportRoutes from './routes/reports.routes';
 
 dotenv.config();
 
@@ -61,6 +62,7 @@ app.use('/api/blogs', blogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
 app.use('/api/profiles', profileRoutes);
+app.use('/api/reports', reportRoutes);
 
 
 app.listen(PORT, () => {
