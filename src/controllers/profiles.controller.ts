@@ -6,22 +6,44 @@ export const updateProfile = async (req: Request, res: Response) => {
     const userId = req.user?.id;
 
     if (!userId) {
-       res.status(401).json({
+      return res.status(401).json({
         success: false,
         message: 'Unauthorized: Please login to update your profile'
       });
     }
 
-    const { first_name, last_name, avatar_url } = req.body;
-
+    const { 
+      first_name, 
+      last_name, 
+      avatar_url,
+      facebook_url,
+      twitter_url,
+      instagram_url,
+      linkedin_url
+    } = req.body;
 
     if (!first_name) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'First name is required'
       });
     }
 
+    // Validate social media URLs if provided
+    const validateUrl = (url: string, platform: string) => {
+      if (!url) return true; // Allow empty URLs
+      try {
+        new URL(url);
+        return true;
+      } catch {
+        throw new Error(`Invalid ${platform} URL format`);
+      }
+    };
+
+    if (facebook_url) validateUrl(facebook_url, 'Facebook');
+    if (twitter_url) validateUrl(twitter_url, 'Twitter');
+    if (instagram_url) validateUrl(instagram_url, 'Instagram');
+    if (linkedin_url) validateUrl(linkedin_url, 'LinkedIn');
 
     const { data, error } = await supabase
       .from('profiles')
@@ -29,6 +51,10 @@ export const updateProfile = async (req: Request, res: Response) => {
         first_name,
         last_name, 
         avatar_url,
+        facebook_url: facebook_url || null,
+        twitter_url: twitter_url || null,
+        instagram_url: instagram_url || null,
+        linkedin_url: linkedin_url || null,
         updated_at: new Date().toISOString()
       })
       .eq('id', userId)
@@ -36,7 +62,7 @@ export const updateProfile = async (req: Request, res: Response) => {
       .single();
 
     if (error) {
-       res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: error.message
       });
@@ -48,7 +74,7 @@ export const updateProfile = async (req: Request, res: Response) => {
       data
     });
   } catch (error: any) {
-     res.status(500).json({
+    res.status(500).json({
       success: false,
       message: error.message || 'Error updating profile'
     });

@@ -4,7 +4,13 @@ import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.put('/', authMiddleware, updateProfile);
+router.put('/', authMiddleware, async (req, res, next) => {
+  try {
+	await updateProfile(req, res);
+  } catch (err) {
+	next(err);
+  }
+});
 
 router.get('/:id', authMiddleware, getUserProfile);
 
