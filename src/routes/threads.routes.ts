@@ -7,6 +7,7 @@ import {
     getAllThreads,
     updateReaction,
      getThreadsByUserId,
+     toggleThreadStatus,
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
@@ -50,6 +51,7 @@ router.patch('/apply-react/:thread_id', authMiddleware, updateReaction);
 
 router.get('/get-threads-by-user/:user_id', optionalAuthMiddleware, getThreadsByUserId);
 
+router.patch('/toggle-status/:thread_id', authMiddleware, toggleThreadStatus);
 
 
 

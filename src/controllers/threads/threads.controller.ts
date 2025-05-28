@@ -588,9 +588,31 @@ const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => 
         }
       }
 
+      const { data: comments } = await supabase
+        .from('threadcomments')
+        .select('id, thread_id, content, is_deleted')
+        .eq('thread_id', thread.id)
+        .eq('is_deleted', false);
+
+      const commentIds = comments?.map(c => c.id) || [];
+
+      const subcommentsResults = await Promise.all(
+        commentIds.map(commentId =>
+          supabase
+            .from('threadsubcomments')
+            .select('id')
+            .eq('comment_id', commentId)
+            .eq('is_deleted', false)
+        )
+      );
+
+      const totalComments = comments?.length || 0;
+      const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+
       return {
         ...thread,
         user_reaction: userReaction,
+        total_comments: totalComments + totalReplies,
       };
     }));
 
@@ -611,6 +633,77 @@ const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => 
   }
 };
 
+const toggleThreadStatus = async (
+  req: Request<{ thread_id: string }, {}, {}>,
+  res: Response
+): Promise<any> => {
+  try {
+    const { thread_id } = req.params;
+    const user_id = req.user?.id;
+
+    if (!user_id) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Authentication required.' 
+      });
+    }
+
+    // First check if thread exists and user has permission
+    const { data: thread, error: fetchError } = await supabase
+      .from('threads')
+      .select('is_closed, author_id')
+      .eq('id', thread_id)
+      .eq('is_deleted', false)
+      .single();
+
+    if (fetchError || !thread) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Thread not found.' 
+      });
+    }
+
+    // Check if user is the author (optional - remove if any user can toggle)
+    if (thread.author_id !== user_id) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'You can only toggle status of your own threads.' 
+      });
+    }
+
+    // Toggle the status
+    const { data: updatedThread, error: updateError } = await supabase
+      .from('threads')
+      .update({ 
+        is_closed: !thread.is_closed,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', thread_id)
+      .select('id, is_closed')
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({ 
+        success: false, 
+        error: updateError.message 
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Thread ${updatedThread.is_closed ? 'closed' : 'opened'} successfully.`,
+      data: updatedThread
+    });
+
+  } catch (error: any) {
+    console.error('Unexpected error in toggleThreadStatus:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while toggling thread status.',
+      message: error.message || 'Unexpected failure.'
+    });
+  }
+};
 
 export {
   createThread,
@@ -619,6 +712,7 @@ export {
   getThreadDetails,
   getAllThreads,
   updateReaction,
-  getThreadsByUserId
+  getThreadsByUserId,
+  toggleThreadStatus,
 };
 
