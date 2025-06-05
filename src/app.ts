@@ -12,6 +12,11 @@ import categoryRoutes from './routes/threadcategory.routes';
 import threadsRoutes from './routes/threads.routes';
 import profileRoutes from './routes/profile.routes';
 import reportRoutes from './routes/reports.routes';
+import cron from 'node-cron';
+import updateDailyInsights from './services/dailyinsights.service';
+import { getDailyInsights } from './controllers/dailyinsights.controller';
+
+// import ngrok from '@ngrok/ngrok';
 
 dotenv.config();
 
@@ -63,11 +68,17 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/reports', reportRoutes);
+app.get('/api/daily-insights', getDailyInsights);
 
+// daily insights
+cron.schedule('0 0 * * *', updateDailyInsights);
 
 app.listen(PORT, () => {
   console.log(`Server running on port http://localhost:${PORT}`);
 });
+// Get your endpoint online
+// ngrok.connect({ addr: 5000, authtoken_from_env: true })
+//   .then(listener => console.log(`Ngrok connection established at: ${listener.url()}`));
 
 // app.listen(PORT,'0.0.0.0', () => {
 //   console.log(`Server running on port http://localhost:${PORT}`);

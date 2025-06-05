@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../utils/supabase';
+import { supabase } from '../app';
 
 export const updateProfile = async (req: Request, res: Response) => {
   try {
