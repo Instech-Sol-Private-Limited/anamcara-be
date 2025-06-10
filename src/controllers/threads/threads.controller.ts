@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../app';
+import { sendNotification } from '../../sockets/emitNotification';
 
 type ReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul';
 
@@ -29,7 +30,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       whisper_mode = false,
     } = req.body;
 
-    const { id: author_id, first_name, last_name } = req.user!;
+    const { id: author_id, first_name, last_name, email } = req.user!;
 
     const requiredFields = {
       title,
@@ -85,6 +86,23 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
     if (!data || data.length === 0) {
       return res.status(500).json({ error: 'Thread creation failed. No data returned.' });
     }
+
+
+    const threadId = data[0].id;
+
+    await sendNotification({
+      recipientEmail: email,
+      recipientUserId: author_id,
+      actorUserId: null,
+      threadId: threadId,
+      message: 'Thread created successfully! +10 soulpoints added to your profile',
+      type: 'thread_creation',
+      metadata: {
+        soulpoints: 10,
+        thread_id: threadId,
+        thread_title: title
+      }
+    });
 
     return res.status(201).json({
       message: 'Thread created successfully!',
@@ -428,7 +446,7 @@ const updateReaction = async (
 ): Promise<any> => {
   const { thread_id } = req.params;
   const { type } = req.body;
-  const user_id = req.user?.id;
+  const { id: user_id } = req.user!;
 
   if (!user_id || !fieldMap[type]) {
     return res.status(400).json({ error: 'Invalid user or reaction type.' });
@@ -448,13 +466,30 @@ const updateReaction = async (
 
   const { data: threadData, error: threadError } = await supabase
     .from('threads')
-    .select('total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls')
+    .select('total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, author_id, title')
     .eq('id', thread_id)
     .eq('is_deleted', false)
     .single();
 
   if (threadError || !threadData) {
     return res.status(404).json({ error: 'Thread not found!' });
+  }
+
+  const shouldSendNotification = threadData.author_id !== user_id;
+
+  let authorProfile = null;
+  if (shouldSendNotification) {
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('email, first_name, last_name')
+      .eq('id', threadData.author_id)
+      .single();
+
+    if (profileError) {
+      console.error('Error fetching author profile:', profileError);
+    } else {
+      authorProfile = profileData;
+    }
   }
 
   type UpdateFields = {
@@ -475,9 +510,20 @@ const updateReaction = async (
     total_souls: threadData.total_souls ?? 0,
   };
 
+  const getReactionDisplayName = (reactionType: ReactionType): string => {
+    const displayNames: Record<ReactionType, string> = {
+      'like': 'like',
+      'dislike': 'dislike',
+      'insightful': 'insightful reaction',
+      'heart': 'heart',
+      'hug': 'hug',
+      'soul': 'soul reaction'
+    };
+    return displayNames[reactionType] || reactionType;
+  };
+
   if (existing) {
     if (existing.type === type) {
-      // Remove reaction
       const field = fieldMap[type];
       updates[field] = Math.max(0, updates[field] - 1);
 
@@ -495,10 +541,29 @@ const updateReaction = async (
 
       if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
+      if (shouldSendNotification && authorProfile) {
+        await sendNotification({
+          recipientEmail: authorProfile.email,
+          recipientUserId: threadData.author_id,
+          actorUserId: user_id,
+          threadId: thread_id,
+          message: `_${getReactionDisplayName(type)}_ reaction was removed from your thread **${threadData.title.split(' ').length > 3
+            ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
+            : threadData.title
+            }**`,
+          type: 'reaction_removed',
+          metadata: {
+            reaction_type: type,
+            thread_id: thread_id,
+            thread_title: threadData.title,
+            actor_user_id: user_id
+          }
+        });
+      }
+
       return res.status(200).json({ message: `${type} removed!` });
     }
 
-    // Update existing reaction
     const prevField = fieldMap[existing.type as ReactionType];
     const currentField = fieldMap[type];
 
@@ -522,9 +587,29 @@ const updateReaction = async (
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
+    if (shouldSendNotification && authorProfile) {
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: threadData.author_id,
+        actorUserId: user_id,
+        threadId: thread_id,
+        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.split(' ').length > 3
+          ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
+          : threadData.title
+          }**`,
+        type: 'reaction_updated',
+        metadata: {
+          previous_reaction_type: existing.type,
+          new_reaction_type: type,
+          thread_id: thread_id,
+          thread_title: threadData.title,
+          actor_user_id: user_id
+        }
+      });
+    }
+
     return res.status(200).json({ message: `Reaction updated to ${type}!` });
   } else {
-    // New reaction
     const field = fieldMap[type];
     updates[field] += 1;
 
@@ -540,6 +625,38 @@ const updateReaction = async (
       .eq('id', thread_id);
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
+
+    if (shouldSendNotification && authorProfile) {
+      const soulpointsMap: Record<ReactionType, number> = {
+        'like': 2,
+        'dislike': 0,
+        'insightful': 3,
+        'heart': 4,
+        'hug': 2,
+        'soul': 2
+      };
+
+      const soulpoints = soulpointsMap[type] || 0;
+
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: threadData.author_id,
+        actorUserId: user_id,
+        threadId: thread_id,
+        message: `Received _${getReactionDisplayName(type)}_ reaction on your thread **${threadData.title.split(' ').length > 3
+          ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
+          : threadData.title
+          }**`,
+        type: 'reaction_added',
+        metadata: {
+          reaction_type: type,
+          soulpoints: soulpoints,
+          thread_id: thread_id,
+          thread_title: threadData.title,
+          actor_user_id: user_id
+        }
+      });
+    }
 
     return res.status(200).json({ message: `${type} added!` });
   }
@@ -642,9 +759,9 @@ const toggleThreadStatus = async (
     const user_id = req.user?.id;
 
     if (!user_id) {
-      return res.status(401).json({ 
-        success: false, 
-        error: 'Authentication required.' 
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
       });
     }
 
@@ -657,24 +774,24 @@ const toggleThreadStatus = async (
       .single();
 
     if (fetchError || !thread) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Thread not found.' 
+      return res.status(404).json({
+        success: false,
+        error: 'Thread not found.'
       });
     }
 
     // Check if user is the author (optional - remove if any user can toggle)
     if (thread.author_id !== user_id) {
-      return res.status(403).json({ 
-        success: false, 
-        error: 'You can only toggle status of your own threads.' 
+      return res.status(403).json({
+        success: false,
+        error: 'You can only toggle status of your own threads.'
       });
     }
 
     // Toggle the status
     const { data: updatedThread, error: updateError } = await supabase
       .from('threads')
-      .update({ 
+      .update({
         is_closed: !thread.is_closed,
         updated_at: new Date().toISOString()
       })
@@ -683,9 +800,9 @@ const toggleThreadStatus = async (
       .single();
 
     if (updateError) {
-      return res.status(500).json({ 
-        success: false, 
-        error: updateError.message 
+      return res.status(500).json({
+        success: false,
+        error: updateError.message
       });
     }
 

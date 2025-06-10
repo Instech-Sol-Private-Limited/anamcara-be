@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../app';
+import { sendNotification } from '../../sockets/emitNotification';
 
 // add new comment
 const createComment = async (req: Request, res: Response): Promise<any> => {
@@ -10,7 +11,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
             imgs = []
         } = req.body;
 
-        const { id: user_id, first_name, last_name } = req.user!;
+        const { id: user_id, first_name, last_name, email } = req.user!;
 
         const requiredFields = {
             content,
@@ -28,7 +29,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
 
         const { data: threadData, error: threadError } = await supabase
             .from('threads')
-            .select('id')
+            .select('id, author_id, title')
             .eq('id', thread_id)
             .eq('is_deleted', false)
             .single();
@@ -36,6 +37,9 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
         if (threadError || !threadData) {
             return res.status(400).json({ error: 'No thread found!' });
         }
+
+        const { author_id: threadAuthorId, title: threadTitle } = threadData;
+
 
         const { data, error } = await supabase
             .from('threadcomments')
@@ -47,6 +51,21 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
                 user_id
             }])
             .select();
+
+        if (threadAuthorId !== user_id) {
+            await sendNotification({
+                recipientEmail: email,
+                recipientUserId: threadAuthorId,
+                actorUserId: user_id,
+                threadId: thread_id,
+                message: `Comment posted! +5 soulpoints added to your profile`,
+                type: 'comment',
+                metadata: {
+                    thread_id,
+                    commenter_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+                },
+            });
+        }
 
         if (error) {
             console.error('Supabase insert error:', error);
@@ -263,7 +282,11 @@ const updateCommentReaction = async (
 ): Promise<any> => {
     const { comment_id } = req.params;
     const { type } = req.body;
-    const user_id = req.user?.id;
+    const { id: user_id } = req.user!;
+
+    if (!user_id) {
+        return res.status(400).json({ error: 'Invalid user.' });
+    }
 
     const { data: existing, error: fetchError } = await supabase
         .from('thread_reactions')
@@ -279,22 +302,72 @@ const updateCommentReaction = async (
 
     const { data: commentData, error: commentError } = await supabase
         .from('threadcomments')
-        .select('total_likes, total_dislikes')
+        .select(`
+        total_likes, 
+        total_dislikes, 
+        user_id, 
+        content,
+        thread_id,
+        is_deleted
+    `)
         .eq('id', comment_id)
         .eq('is_deleted', false)
         .single();
 
-    if (commentError) {
-        return res.status(500).json({ error: 'Comment not found!' });
+    if (commentError || !commentData) {
+        return res.status(404).json({ error: 'Comment not found!' });
+    }
+
+    const { data: threadData, error: threadError } = await supabase
+        .from('threads')
+        .select('title, author_id')
+        .eq('id', commentData.thread_id)
+        .single();
+
+    if (threadError || !threadData) {
+        return res.status(404).json({ error: 'Thread not found!' });
+    }
+
+    const threadTitle = threadData.title || 'a thread';
+    const truncatedTitle = threadTitle.split(' ').length > 3
+        ? threadTitle.split(' ').slice(0, 3).join(' ') + '...'
+        : threadTitle;
+
+    const shouldSendNotification = commentData.user_id !== user_id;
+
+    let authorProfile = null;
+    if (shouldSendNotification) {
+        const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('email, first_name, last_name')
+            .eq('id', commentData.user_id)
+            .single();
+
+        if (profileError) {
+            console.error('Error fetching comment author profile:', profileError);
+        } else {
+            authorProfile = profileData;
+        }
     }
 
     let newTotalLikes = commentData?.total_likes ?? 0;
     let newTotalDislikes = commentData?.total_dislikes ?? 0;
 
+    const getReactionDisplayName = (reactionType: 'like' | 'dislike'): string => {
+        return reactionType === 'like' ? 'like' : 'dislike';
+    };
+
+    const getCommentPreview = (content: string): string => {
+        const words = content.split(' ');
+        return words.length > 5
+            ? words.slice(0, 5).join(' ') + '...'
+            : content;
+    };
+
     if (existing) {
         if (existing.type === type) {
-            if (type === 'like') newTotalLikes -= 1;
-            if (type === 'dislike') newTotalDislikes -= 1;
+            if (type === 'like') newTotalLikes = Math.max(0, newTotalLikes - 1);
+            if (type === 'dislike') newTotalDislikes = Math.max(0, newTotalDislikes - 1);
 
             const { error: deleteError } = await supabase
                 .from('thread_reactions')
@@ -310,14 +383,33 @@ const updateCommentReaction = async (
 
             if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
 
+            if (shouldSendNotification && authorProfile) {
+                await sendNotification({
+                    recipientEmail: authorProfile.email,
+                    recipientUserId: commentData.user_id,
+                    actorUserId: user_id,
+                    threadId: commentData.thread_id,
+                    message: `_${getReactionDisplayName(type)}_ reaction was removed from your comment: "${getCommentPreview(commentData.content)}" on thread **${truncatedTitle}**`,
+                    type: 'reaction_removed',
+                    metadata: {
+                        reaction_type: type,
+                        comment_id: comment_id,
+                        thread_id: commentData.thread_id,
+                        thread_title: threadTitle,
+                        comment_content: commentData.content,
+                        actor_user_id: user_id
+                    }
+                });
+            }
+
             return res.status(200).json({ message: `${type} removed!` });
         }
 
         if (existing.type === 'like') {
-            newTotalLikes -= 1;
+            newTotalLikes = Math.max(0, newTotalLikes - 1);
             newTotalDislikes += 1;
         } else {
-            newTotalDislikes -= 1;
+            newTotalDislikes = Math.max(0, newTotalDislikes - 1);
             newTotalLikes += 1;
         }
 
@@ -334,6 +426,26 @@ const updateCommentReaction = async (
             .eq('id', comment_id);
 
         if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
+
+        if (shouldSendNotification && authorProfile) {
+            await sendNotification({
+                recipientEmail: authorProfile.email,
+                recipientUserId: commentData.user_id,
+                actorUserId: user_id,
+                threadId: commentData.thread_id,
+                message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on thread **${truncatedTitle}**`,
+                type: 'reaction_updated',
+                metadata: {
+                    previous_reaction_type: existing.type,
+                    new_reaction_type: type,
+                    comment_id: comment_id,
+                    thread_id: commentData.thread_id,
+                    thread_title: threadTitle,
+                    comment_content: commentData.content,
+                    actor_user_id: user_id
+                }
+            });
+        }
 
         return res.status(200).json({ message: `Reaction updated to ${type}!` });
     } else {
@@ -352,6 +464,33 @@ const updateCommentReaction = async (
             .eq('id', comment_id);
 
         if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
+
+        if (shouldSendNotification && authorProfile) {
+            const soulpointsMap: Record<'like' | 'dislike', number> = {
+                'like': 1,
+                'dislike': 0
+            };
+
+            const soulpoints = soulpointsMap[type] || 0;
+
+            await sendNotification({
+                recipientEmail: authorProfile.email,
+                recipientUserId: commentData.user_id,
+                actorUserId: user_id,
+                threadId: commentData.thread_id,
+                message: `Received _${getReactionDisplayName(type)}_ reaction on your comment: "${getCommentPreview(commentData.content)}" on thread **${truncatedTitle}**`,
+                type: 'reaction_added',
+                metadata: {
+                    reaction_type: type,
+                    soulpoints: soulpoints,
+                    comment_id: comment_id,
+                    thread_id: commentData.thread_id,
+                    thread_title: threadTitle,
+                    comment_content: commentData.content,
+                    actor_user_id: user_id
+                }
+            });
+        }
 
         return res.status(200).json({ message: `${type} added!` });
     }
