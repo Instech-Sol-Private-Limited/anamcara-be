@@ -72,6 +72,7 @@ app.use('/api/profiles', profileRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
+
 cron.schedule('0 0 * * *', updateDailyInsights);
 
 const server = http.createServer(app);
