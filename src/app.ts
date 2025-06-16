@@ -19,7 +19,7 @@ import updateDailyInsights from './crons/dailyInsightsCron';
 import { getDailyInsights } from './controllers/dailyinsights.controller';
 import { Server } from 'socket.io';
 import { registerSocketHandlers } from './sockets';
-
+import friendsRoutes from './routes/friends.routes';
 dotenv.config();
 
 const app = express();
@@ -72,7 +72,7 @@ app.use('/api/profiles', profileRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
-
+app.use('/api/friends', friendsRoutes);
 cron.schedule('0 0 * * *', updateDailyInsights);
 
 const server = http.createServer(app);
