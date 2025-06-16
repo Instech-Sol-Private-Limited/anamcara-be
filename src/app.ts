@@ -14,6 +14,7 @@ import threadsRoutes from './routes/threads.routes';
 import profileRoutes from './routes/profile.routes';
 import reportRoutes from './routes/reports.routes';
 import notificationsRoutes from './routes/notifications.routes';
+import chatMessageRoutes from './routes/chatmessages.routes';
 import cron from 'node-cron';
 import updateDailyInsights from './crons/dailyInsightsCron';
 import { getDailyInsights } from './controllers/dailyinsights.controller';
@@ -72,6 +73,7 @@ app.use('/api/profiles', profileRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
+app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 
