@@ -15,10 +15,11 @@ const sendFriendRequest = async (req: Request, res: Response) => {
       .single();
 
     if (existingFriendship) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Friend request already exists or you are already friends'
       });
+      return;
     }
 
     // Get sender and receiver info
@@ -35,12 +36,12 @@ const sendFriendRequest = async (req: Request, res: Response) => {
       .single();
 
     if (!senderProfile || !receiverProfile) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'User not found'
       });
+      return;
     }
-
     // Create friendship record
     const { data: friendship, error } = await supabase
       .from('friendships')
@@ -53,40 +54,47 @@ const sendFriendRequest = async (req: Request, res: Response) => {
       .single();
 
     if (error) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: error.message
       });
+      return;
     }
 
     // Send notification to receiver
     const senderName = `${senderProfile.first_name} ${senderProfile.last_name || ''}`.trim();
+    console.log('Triggering notification for friend request:', {
+      recipientEmail: receiverProfile.email,
+      recipientUserId: receiverId,
+      actorUserId: senderId,
+      friendshipId: friendship.id
+    });
     await sendNotification({
       recipientEmail: receiverProfile.email,
       recipientUserId: receiverId,
       actorUserId: senderId,
-      threadId: friendship.id,
+      threadId: null, // Not used for friendships
       message: `**${senderName}** sent you a _friend request_`,
       type: 'friend_request_received',
       metadata: {
-        friendship_id: friendship.id,
+        friendship_id: friendship.id, // Link to friendship
         sender_name: senderName,
         sender_id: senderId
       }
     });
-
-    res.json({
+     res.json({
       success: true,
       data: friendship,
       message: 'Friend request sent successfully'
     });
-
+    return;
   } catch (error) {
     console.error('Error sending friend request:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+    return;
   }
 };
 
@@ -107,10 +115,11 @@ const acceptFriendRequest = async (req: Request, res: Response) => {
       .single();
 
     if (!friendship) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Friend request not found'
       });
+      return;
     }
 
     // Update friendship status
@@ -122,10 +131,11 @@ const acceptFriendRequest = async (req: Request, res: Response) => {
       .single();
 
     if (error) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: error.message
       });
+      return;
     }
 
     // Send notification to sender
@@ -136,31 +146,32 @@ const acceptFriendRequest = async (req: Request, res: Response) => {
     const senderEmail = friendship.sender.email;
     
     await sendNotification({
-      recipientEmail: senderEmail,
-      recipientUserId: friendship.sender_id,
-      actorUserId: userId,
-      threadId: friendshipId,
-      message: `**${accepterName}** accepted your _friend request_`,
-      type: 'friend_request_accepted',
-      metadata: {
-        friendship_id: friendshipId,
-        accepter_name: accepterName,
-        accepter_id: userId
-      }
-    });
+  recipientEmail: senderEmail,
+  recipientUserId: friendship.sender_id,
+  actorUserId: userId,
+  threadId: '', // Not used for friendships
+  message: `**${accepterName}** accepted your _friend request_`,
+  type: 'friend_request_accepted',
+  metadata: {
+    friendship_id: friendshipId,
+    accepter_name: accepterName,
+    accepter_id: userId
+  }
+});
 
-    res.json({
+     res.json({
       success: true,
       data: updatedFriendship,
       message: 'Friend request accepted'
     });
-
+    return;
   } catch (error) {
     console.error('Error accepting friend request:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+    return;
   }
 };
 
@@ -175,28 +186,30 @@ const rejectFriendRequest = async (req: Request, res: Response) => {
       .eq('id', friendshipId)
       .select()
       .single();
-
-    if (error) {
-      return res.status(400).json({
+if (error) {
+      res.status(400).json({
         success: false,
         message: error.message
       });
+      return;
     }
 
-    res.json({
+     res.json({
       success: true,
       data,
       message: 'Friend request rejected'
     });
-
+    return;
   } catch (error) {
     console.error('Error rejecting friend request:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+    return;
   }
 };
+
 
 export {
   sendFriendRequest,

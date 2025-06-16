@@ -5,7 +5,7 @@ interface NotificationInput {
   recipientEmail: string;
   recipientUserId: string;
   actorUserId: string | null;
-  threadId: string;
+  threadId: string | null;
   message: string;
   type: 'reaction' | 'comment' | 'mention' | string;
   metadata?: Record<string, any>;
@@ -17,7 +17,7 @@ interface NotificationRecord {
   message: string;
   created_at: string;
   action_performed_by: string | null;
-  thread_id: string;
+  thread_id: string | null;
   is_read: boolean;
   type: string;
   metadata: Record<string, any>;
