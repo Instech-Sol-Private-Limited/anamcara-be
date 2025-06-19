@@ -11,7 +11,7 @@ const router = Router();
 router.get('/get-conversions/:userId', getUserConversations);
 
 // 🔁 Get direct chat between two users
-router.get('/direct/:user1/:user2', getDirectMessages);
+router.get('/direct/:chatId', getDirectMessages);
 
 // 👫 Get accepted friends (no chat yet)
 router.get('/friends/:userId', getUserFriends);
