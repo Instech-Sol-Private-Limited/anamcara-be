@@ -5,71 +5,157 @@ import { supabase } from '../app';
 export const getUserConversations = async (req: Request, res: Response): Promise<any> => {
     const { userId } = req.params;
 
-    const { data, error } = await supabase
-        .from('chatmessages')
-        .select('id, sender, receiver, content, created_at')
-        .or(`sender.eq.${userId},receiver.eq.${userId}`)
-        .order('created_at', { ascending: false });
+    try {
+        const { data: friendships, error: friendshipsError } = await supabase
+            .from('friendships')
+            .select('sender_id, receiver_id')
+            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+            .eq('status', 'accepted');
 
-    if (error) return res.status(500).json({ error: error.message });
+        if (friendshipsError) throw friendshipsError;
 
-    if (!data || data.length === 0) {
-        return res.json({ success: true, data: [] });
-    }
+        const friendIds = friendships?.map(friendship =>
+            friendship.sender_id === userId ? friendship.receiver_id : friendship.sender_id
+        ) || [];
 
-    const conversations = new Map<string, any>();
-
-    for (const msg of data) {
-        const otherUser = msg.sender === userId ? msg.receiver : msg.sender;
-        if (!conversations.has(otherUser)) {
-            conversations.set(otherUser, msg);
+        if (friendIds.length === 0) {
+            return res.json({ success: true, data: [] });
         }
-    }
 
-    const otherUserIds = Array.from(conversations.keys());
+        const { data: chats, error: chatsError } = await supabase
+            .from('chats')
+            .select('id, user_1, user_2, created_at, updated_at')
+            .or(`and(user_1.eq.${userId},user_2.in.(${friendIds.join(',')})),and(user_2.eq.${userId},user_1.in.(${friendIds.join(',')}))`);
 
-    const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, avatar_url')
-        .in('id', otherUserIds);
+        if (chatsError) throw chatsError;
+        if (!chats || chats.length === 0) {
+            return res.json({ success: true, data: [] });
+        }
 
-    if (profileError) return res.status(500).json({ error: profileError.message });
+        const chatIds = chats.map(chat => chat.id);
+        const { data: messages, error: messagesError } = await supabase
+            .from('chatmessages')
+            .select('id, chat_id, sender, message, created_at, has_media, media')
+            .in('chat_id', chatIds);
 
-    const profileMap = new Map(profiles.map(p => [p.id, p]));
+        if (messagesError) throw messagesError;
 
-    const formatted = Array.from(conversations.values()).map(msg => {
-        const otherId = msg.sender === userId ? msg.receiver : msg.sender;
-        const profile = profileMap.get(otherId);
+        const chatsWithMessages = chats.filter(chat =>
+            messages?.some(msg => msg.chat_id === chat.id)
+        );
 
-        return {
-            ...msg,
-            user: {
-                id: otherId,
-                user_name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`,
-                avatar_img: profile?.avatar_url ?? ''
+        if (chatsWithMessages.length === 0) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const recentMessageMap = new Map<string, any>();
+        messages?.forEach(msg => {
+            if (!recentMessageMap.has(msg.chat_id) ||
+                new Date(msg.created_at) > new Date(recentMessageMap.get(msg.chat_id).created_at)) {
+                recentMessageMap.set(msg.chat_id, msg);
             }
-        };
-    });
+        });
 
-    return res.json({ success: true, data: formatted });
+        const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, avatar_url')
+            .in('id', friendIds);
+
+        if (profilesError) throw profilesError;
+
+        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+
+        const formatted = chatsWithMessages.map(chat => {
+            const otherUserId = chat.user_1 === userId ? chat.user_2 : chat.user_1;
+            const profile = profileMap.get(otherUserId);
+            const lastMessage = recentMessageMap.get(chat.id);
+
+            return {
+                chat_id: chat.id,
+                updated_at: chat.updated_at,
+                last_message: lastMessage ? {
+                    id: lastMessage.id,
+                    message: lastMessage.message,
+                    has_media: lastMessage.has_media,
+                    created_at: lastMessage.created_at
+                } : null,
+                user: {
+                    id: otherUserId,
+                    user_name: profile
+                        ? `${profile.first_name} ${profile.last_name}`
+                        : 'Unknown User',
+                    avatar_img: profile?.avatar_url || ''
+                }
+            };
+        }).sort((a, b) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        );
+
+        return res.json({ success: true, data: formatted });
+    } catch (error) {
+        console.error('Error fetching conversations:', error);
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch conversations'
+        });
+    }
 };
 
 // get direct messages
 export const getDirectMessages = async (req: Request, res: Response): Promise<any> => {
-    const { user1, user2 } = req.params;
-    console.log(user1, user2)
-    const { data, error } = await supabase
-        .from('chatmessages')
-        .select('*')
-        .or(
-            `and(sender.eq.${user1},receiver.eq.${user2}),and(sender.eq.${user2},receiver.eq.${user1})`
-        )
-        .order('created_at', { ascending: true });
-    if (error) {
-        return res.status(500).json({ success: false, error: error.message });
-    }
+    const { chatId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
 
-    return res.status(200).json({ success: true, data: data || [] });
+    try {
+        const pageNumber = Number(page);
+        const limitNumber = Number(limit);
+        const offset = (pageNumber - 1) * limitNumber;
+
+        const { data: chat, error: chatError } = await supabase
+            .from('chats')
+            .select('user_1, user_2')
+            .eq('id', chatId)
+            .single();
+
+        if (chatError || !chat) {
+            return res.status(404).json({
+                success: false,
+                error: 'Chat not found or access denied'
+            });
+        }
+
+        // Get messages for this chat
+        const { data, error, count } = await supabase
+            .from('chatmessages')
+            .select('*', { count: 'exact' })
+            .eq('chat_id', chatId)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limitNumber - 1);
+
+        if (error) throw error;
+
+        const totalItems = count || 0;
+        const hasMore = totalItems > pageNumber * limitNumber;
+
+        return res.status(200).json({
+            success: true,
+            data: data || [],
+            pagination: {
+                currentPage: pageNumber,
+                limit: limitNumber,
+                totalItems,
+                totalPages: Math.ceil(totalItems / limitNumber),
+                hasMore
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching messages:', error);
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch messages'
+        });
+    }
 };
 
 // user frineds
@@ -77,7 +163,8 @@ export const getUserFriends = async (req: Request, res: Response): Promise<any> 
     const { userId } = req.params;
 
     try {
-        const { data, error } = await supabase
+        // 1. Get accepted friendships
+        const { data: friendships, error } = await supabase
             .from('friendships')
             .select('id, sender_id, receiver_id, status')
             .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
@@ -85,7 +172,7 @@ export const getUserFriends = async (req: Request, res: Response): Promise<any> 
 
         if (error) return res.status(500).json({ success: false, error: error.message });
 
-        const friendIds = data.map((entry) =>
+        const friendIds = friendships.map((entry) =>
             entry.sender_id === userId ? entry.receiver_id : entry.sender_id
         );
 
@@ -93,23 +180,298 @@ export const getUserFriends = async (req: Request, res: Response): Promise<any> 
             return res.status(200).json({ success: true, data: [] });
         }
 
+        const friendsWithChats: {
+            friendId: string;
+            chatId: string;
+        }[] = [];
+
+        // 2. Ensure chat exists between each friend
+        for (const friendId of friendIds) {
+            const { data: existingChat, error: chatCheckError } = await supabase
+                .from('chats')
+                .select('id')
+                .or(`and(user_1.eq.${userId},user_2.eq.${friendId}),and(user_1.eq.${friendId},user_2.eq.${userId})`)
+                .maybeSingle();
+
+            let chatId = existingChat?.id;
+
+            if (!existingChat && !chatCheckError) {
+                const { data: newChat, error: insertError } = await supabase
+                    .from('chats')
+                    .insert([
+                        {
+                            user_1: userId,
+                            user_2: friendId
+                        }
+                    ])
+                    .select('id')
+                    .single();
+
+                if (insertError) {
+                    console.error('Error creating chat:', insertError);
+                    continue;
+                }
+
+                chatId = newChat.id;
+            }
+
+            if (chatId) {
+                friendsWithChats.push({ friendId, chatId });
+            }
+        }
+
+        // 3. Fetch profile data
         const { data: friendsData, error: profileError } = await supabase
             .from('profiles')
             .select('id, first_name, last_name, avatar_url, email')
             .in('id', friendIds);
 
-        if (profileError) return res.status(500).json({ success: false, error: profileError.message });
+        if (profileError) {
+            return res.status(500).json({ success: false, error: profileError.message });
+        }
 
-        const formatted = friendsData.map(profile => ({
-            id: profile.id,
-            user_name: `${profile.first_name} ${profile.last_name}`,
-            avatar_img: profile.avatar_url,
-            email: profile.email
-        }));
+        // 4. Merge with chat ID
+        const formatted = friendsData.map(profile => {
+            const chatInfo = friendsWithChats.find(f => f.friendId === profile.id);
+
+            return {
+                id: profile.id,
+                user_name: `${profile.first_name} ${profile.last_name}`,
+                avatar_img: profile.avatar_url,
+                email: profile.email,
+                chat_id: chatInfo?.chatId || null
+            };
+        });
 
         return res.status(200).json({ success: true, data: formatted });
 
     } catch (err) {
+        console.error('Error in getUserFriends:', err);
         return res.status(500).json({ success: false, error: 'Something went wrong.' });
     }
 };
+
+// Get all public messages (with pagination)
+export const getPublicMessages = async (req: Request, res: Response): Promise<any> => {
+    const { page = 1, limit = 50 } = req.query;
+
+    try {
+        const pageNumber = Number(page);
+        const limitNumber = Number(limit);
+        const offset = (pageNumber - 1) * limitNumber;
+
+        const { data, error, count } = await supabase
+            .from('public_chat')
+            .select(`
+                id,
+                message,
+                is_edited,
+                is_deleted,
+                created_at,
+                updated_at,
+                sender:profiles(id, first_name, last_name, avatar_url)
+            `, { count: 'exact' })
+            .eq('is_deleted', false)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limitNumber - 1);
+
+        if (error) throw error;
+
+        const totalItems = count || 0;
+        const hasMore = totalItems > pageNumber * limitNumber;
+
+        return res.json({
+            success: true,
+            data: data || [],
+            pagination: {
+                currentPage: pageNumber,
+                limit: limitNumber,
+                totalItems,
+                totalPages: Math.ceil(totalItems / limitNumber),
+                hasMore
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching public messages:', error);
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch messages'
+        });
+    }
+};
+
+// // Post a new public message
+// export const postPublicMessage = async (req: Request, res: Response): Promise<any> => {
+//     const { userId, message } = req.body;
+
+//     if (!userId || !message) {
+//         return res.status(400).json({
+//             success: false,
+//             error: 'User ID and message are required'
+//         });
+//     }
+
+//     try {
+//         const { data, error } = await supabase
+//             .from('public_chat')
+//             .insert([{
+//                 message,
+//                 sender_id: userId,
+//                 created_at: new Date().toISOString(),
+//                 updated_at: new Date().toISOString()
+//             }])
+//             .select(`
+//                 id,
+//                 message,
+//                 is_edited,
+//                 is_deleted,
+//                 created_at,
+//                 updated_at,
+//                 sender:profiles(id, first_name, last_name, avatar_url)
+//             `)
+//             .single();
+
+//         if (error) throw error;
+
+//         return res.status(201).json({ success: true, data });
+
+//     } catch (error) {
+//         console.error('Error posting public message:', error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error instanceof Error ? error.message : 'Failed to post message'
+//         });
+//     }
+// };
+
+// // Edit a public message
+// export const editPublicMessage = async (req: Request, res: Response): Promise<any> => {
+//     const { userId, messageId, newMessage } = req.body;
+
+//     if (!userId || !messageId || !newMessage) {
+//         return res.status(400).json({
+//             success: false,
+//             error: 'User ID, message ID, and new message are required'
+//         });
+//     }
+
+//     try {
+//         // First verify the user is the original sender
+//         const { data: existingMessage, error: fetchError } = await supabase
+//             .from('public_chat')
+//             .select('sender_id')
+//             .eq('id', messageId)
+//             .single();
+
+//         if (fetchError) throw fetchError;
+//         if (!existingMessage) {
+//             return res.status(404).json({
+//                 success: false,
+//                 error: 'Message not found'
+//             });
+//         }
+//         if (existingMessage.sender_id !== userId) {
+//             return res.status(403).json({
+//                 success: false,
+//                 error: 'You can only edit your own messages'
+//             });
+//         }
+
+//         const { data, error } = await supabase
+//             .from('public_chat')
+//             .update({
+//                 message: newMessage,
+//                 is_edited: true,
+//                 updated_at: new Date().toISOString()
+//             })
+//             .eq('id', messageId)
+//             .select(`
+//                 id,
+//                 message,
+//                 is_edited,
+//                 is_deleted,
+//                 created_at,
+//                 updated_at,
+//                 sender:profiles(id, first_name, last_name, avatar_url)
+//             `)
+//             .single();
+
+//         if (error) throw error;
+
+//         return res.json({ success: true, data });
+
+//     } catch (error) {
+//         console.error('Error editing public message:', error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error instanceof Error ? error.message : 'Failed to edit message'
+//         });
+//     }
+// };
+
+// // Delete a public message (soft delete)
+// export const deletePublicMessage = async (req: Request, res: Response): Promise<any> => {
+//     const { userId, messageId } = req.body;
+
+//     if (!userId || !messageId) {
+//         return res.status(400).json({
+//             success: false,
+//             error: 'User ID and message ID are required'
+//         });
+//     }
+
+//     try {
+//         // First verify the user is the original sender
+//         const { data: existingMessage, error: fetchError } = await supabase
+//             .from('public_chat')
+//             .select('sender_id')
+//             .eq('id', messageId)
+//             .single();
+
+//         if (fetchError) throw fetchError;
+//         if (!existingMessage) {
+//             return res.status(404).json({
+//                 success: false,
+//                 error: 'Message not found'
+//             });
+//         }
+//         if (existingMessage.sender_id !== userId) {
+//             return res.status(403).json({
+//                 success: false,
+//                 error: 'You can only delete your own messages'
+//             });
+//         }
+
+//         const { data, error } = await supabase
+//             .from('public_chat')
+//             .update({
+//                 is_deleted: true,
+//                 updated_at: new Date().toISOString(),
+//                 deleted_at: new Date().toISOString()
+//             })
+//             .eq('id', messageId)
+//             .select(`
+//                 id,
+//                 message,
+//                 is_edited,
+//                 is_deleted,
+//                 created_at,
+//                 updated_at,
+//                 deleted_at,
+//                 sender:profiles(id, first_name, last_name, avatar_url)
+//             `)
+//             .single();
+
+//         if (error) throw error;
+
+//         return res.json({ success: true, data });
+
+//     } catch (error) {
+//         console.error('Error deleting public message:', error);
+//         return res.status(500).json({
+//             success: false,
+//             error: error instanceof Error ? error.message : 'Failed to delete message'
+//         });
+//     }
+// };
