@@ -6,8 +6,8 @@ const router = Router();
 
 
 router.post('/send', ChatController.sendMessage);
-router.get('/messages/:conversationId', ChatController.getMessages);
 
+router.get('/messages/:conversationId', ChatController.getMessages);
 
 router.delete('/messages/:conversationId', ChatController.clearMessages);
 
