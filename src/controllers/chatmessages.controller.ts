@@ -129,7 +129,7 @@ export const getDirectMessages = async (req: Request, res: Response): Promise<an
             .from('chatmessages')
             .select('*', { count: 'exact' })
             .eq('chat_id', chatId)
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: true })
             .range(offset, offset + limitNumber - 1);
 
         if (error) throw error;
@@ -271,8 +271,7 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
                 updated_at,
                 sender:profiles(id, first_name, last_name, avatar_url)
             `, { count: 'exact' })
-            .eq('is_deleted', false)
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: true })
             .range(offset, offset + limitNumber - 1);
 
         if (error) throw error;

@@ -19,11 +19,11 @@ export const registerSocketHandlers = (io: Server) => {
 
       console.log(`✅ Registered ${email}`);
       console.log(`🌐 Connected Users: ${connectedUsers.size}`);
+
       for (const [userEmail, sockets] of connectedUsers.entries()) {
         console.log(`- ${userEmail}: ${[...sockets].join(', ')}`);
       }
 
-      // Notify friends
       const friends = await getUserFriends(email);
       console.log('friends:', friends);
 
@@ -36,7 +36,6 @@ export const registerSocketHandlers = (io: Server) => {
         }
       }
 
-      // Find chat IDs where the user is a participant
       const { data: chatList, error: chatError } = await supabase
         .from('chats')
         .select('id')
@@ -49,7 +48,6 @@ export const registerSocketHandlers = (io: Server) => {
 
       const chatIds = chatList?.map(chat => chat.id) || [];
 
-      // Fetch all "sent" messages in those chats where current user is the receiver
       const { data: messages, error: messagesError } = await supabase
         .from('chatmessages')
         .select('id, chat_id, sender')
@@ -87,7 +85,6 @@ export const registerSocketHandlers = (io: Server) => {
         }
       }
 
-      // Notify current user about which friends are online
       const onlineFriends = friends.filter(friend =>
         connectedUsers.has(friend) && connectedUsers.get(friend)!.size > 0
       );
@@ -100,6 +97,7 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
 
+    
     // --------------------- 1-1 Chat Events ------------------
 
     // Send a message
