@@ -357,4 +357,50 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
     }
 };
 
+export const getTravelMessages = async (req: Request, res: Response): Promise<any> => {
+    const { page = 1, limit = 50 } = req.query;
 
+    try {
+        const pageNumber = Number(page);
+        const limitNumber = Number(limit);
+        const offset = (pageNumber - 1) * limitNumber;
+
+        const { data, error, count } = await supabase
+            .from('travel_chat')
+            .select(`
+                id,
+                message,
+                is_edited,
+                is_deleted,
+                created_at,
+                updated_at,
+                sender:profiles(id, first_name, last_name, avatar_url)
+            `, { count: 'exact' })
+            .order('created_at', { ascending: true })
+            .range(offset, offset + limitNumber - 1);
+
+        if (error) throw error;
+
+        const totalItems = count || 0;
+        const hasMore = totalItems > pageNumber * limitNumber;
+
+        return res.json({
+            success: true,
+            data: data || [],
+            pagination: {
+                currentPage: pageNumber,
+                limit: limitNumber,
+                totalItems,
+                totalPages: Math.ceil(totalItems / limitNumber),
+                hasMore
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching public messages:', error);
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch messages'
+        });
+    }
+};
