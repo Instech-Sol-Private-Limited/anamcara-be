@@ -97,7 +97,7 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
 
-    
+
     // --------------------- 1-1 Chat Events ------------------
 
     // Send a message
@@ -407,10 +407,20 @@ export const registerSocketHandlers = (io: Server) => {
         if (insertError || !insertedMessage) {
           throw new Error(insertError?.message || 'Failed to insert public message');
         }
+        const { data: senderProfile } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, avatar_url')
+          .eq('id', sender_id)
+          .single();
+
+        const completeMessage = {
+          ...insertedMessage,
+          sender: senderProfile
+        };
 
         // Broadcast to all connected users
-        io.emit('public_receive_message', insertedMessage);
-        socket.emit('public_message_sent', insertedMessage);
+        io.emit('public_receive_message', completeMessage);
+        socket.emit('public_message_sent', completeMessage);
 
       } catch (error) {
         console.error('Public message send error:', error);
@@ -529,6 +539,170 @@ export const registerSocketHandlers = (io: Server) => {
 
     socket.on('public_user_offline', (userId: string) => {
       socket.broadcast.emit('public_user_offline', userId);
+    });
+
+
+    // --------------------- Public Chat Events ------------------
+
+    // Send a public message
+    socket.on('travel_send_message', async (payload: {
+      sender_id: string;
+      message: string;
+    }) => {
+      const { sender_id, message } = payload;
+
+      try {
+        const messageData = {
+          sender_id,
+          message,
+          is_edited: false,
+          is_deleted: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          deleted_at: null
+        };
+
+        const { data: insertedMessage, error: insertError } = await supabase
+          .from('travel_chat')
+          .insert([messageData])
+          .select()
+          .single();
+
+        if (insertError || !insertedMessage) {
+          throw new Error(insertError?.message || 'Failed to insert public message');
+        }
+
+        const { data: senderProfile } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, avatar_url')
+          .eq('id', sender_id)
+          .single();
+
+        const completeMessage = {
+          ...insertedMessage,
+          sender: senderProfile
+        };
+
+        io.emit('travel_receive_message', completeMessage);
+        socket.emit('travel_message_sent', completeMessage);
+
+      } catch (error) {
+        console.error('Public message send error:', error);
+        socket.emit('travel_message_error', {
+          error: error instanceof Error ? error.message : 'Failed to send public message'
+        });
+      }
+    });
+
+    // Edit public message
+    socket.on('travel_edit_message', async ({
+      messageId,
+      sender_id,
+      newMessage
+    }: {
+      messageId: string;
+      sender_id: string;
+      newMessage: string;
+    }) => {
+      const { data: message } = await supabase
+        .from('travel_chat')
+        .select('sender_id')
+        .eq('id', messageId)
+        .single();
+
+      if (!message || message.sender_id !== sender_id) {
+        socket.emit('travel_edit_message_error', {
+          messageId,
+          error: 'Not authorized to edit this message'
+        });
+        return;
+      }
+
+      const { data: editedData, error } = await supabase
+        .from('travel_chat')
+        .update({
+          message: newMessage,
+          is_edited: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', messageId)
+        .select()
+        .single();
+
+      if (error) {
+        socket.emit('travel_edit_message_error', { messageId, error: error.message });
+        return;
+      }
+
+      // Broadcast to all connected users
+      io.emit('travel_message_edited', {
+        id: messageId,
+        message: newMessage,
+        updated_at: editedData?.updated_at
+      });
+    });
+
+    // Delete public message
+    socket.on('travel_delete_message', async ({
+      messageId,
+      sender_id
+    }: {
+      messageId: string;
+      sender_id: string
+    }) => {
+      const { data: message } = await supabase
+        .from('travel_chat')
+        .select('sender_id')
+        .eq('id', messageId)
+        .single();
+
+      if (!message || message.sender_id !== sender_id) {
+        socket.emit('travel_delete_message_error', {
+          messageId,
+          error: 'Not authorized to delete this message'
+        });
+        return;
+      }
+
+      const { error } = await supabase
+        .from('travel_chat')
+        .update({
+          is_deleted: true,
+          deleted_at: new Date().toISOString()
+        })
+        .eq('id', messageId);
+
+      if (error) {
+        socket.emit('travel_delete_message_error', {
+          messageId,
+          error: error.message
+        });
+        return;
+      }
+
+      // Broadcast to all connected users
+      io.emit('travel_message_deleted', {
+        id: messageId,
+        deleted_at: new Date().toISOString()
+      });
+    });
+
+    // Public chat typing indicators
+    socket.on('travel_typing', ({ sender_id }: { sender_id: string }) => {
+      socket.broadcast.emit('travel_user_typing', sender_id);
+    });
+
+    socket.on('travel_stop_typing', ({ sender_id }: { sender_id: string }) => {
+      socket.broadcast.emit('travel_user_stop_typing', sender_id);
+    });
+
+    // Public user online status
+    socket.on('travel_user_online', (userId: string) => {
+      socket.broadcast.emit('travel_user_online', userId);
+    });
+
+    socket.on('travel_user_offline', (userId: string) => {
+      socket.broadcast.emit('travel_user_offline', userId);
     });
 
     // --------------------- Notification Events ------------------

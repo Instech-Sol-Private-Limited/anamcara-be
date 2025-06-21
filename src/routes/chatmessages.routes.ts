@@ -4,6 +4,7 @@ import {
   getDirectMessages,
   getUserFriends,
   getPublicMessages,
+  getTravelMessages,
 } from '../controllers/chatmessages.controller';
 
 const router = Router();
@@ -17,8 +18,11 @@ router.get('/direct/:chatId', getDirectMessages);
 // 👫 Get accepted friends (no chat yet)
 router.get('/friends/:userId', getUserFriends);
 
-// 👫 Get accepted friends (no chat yet)
+// get global chat
 router.get('/get-global-chat', getPublicMessages);
+
+// get travel chat
+router.get('/get-travel-chat', getTravelMessages);
 
 // 👫 Get accepted friends (no chat yet)
 router.post('/create-chamber', getPublicMessages);
