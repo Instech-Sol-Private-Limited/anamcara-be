@@ -39,7 +39,7 @@ const updateDailyInsights = async () => {
         await supabase
             .from('daily_insights')
             .delete()
-            .eq('date', today);
+            .neq('id', 0);
 
         const inserts = topThreads.map((thread, index) => ({
             thread_id: thread.id,

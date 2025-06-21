@@ -1,6 +1,99 @@
 import { Request, Response } from 'express';
 import { supabase } from '../app';
 
+
+// ----------------------- friends ----------------------
+// user frineds
+export const getUserFriends = async (req: Request, res: Response): Promise<any> => {
+    const { userId } = req.params;
+
+    try {
+        const { data: friendships, error } = await supabase
+            .from('friendships')
+            .select('id, sender_id, receiver_id, status')
+            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+            .eq('status', 'accepted');
+
+        if (error) return res.status(500).json({ success: false, error: error.message });
+
+        const friendIds = friendships.map((entry) =>
+            entry.sender_id === userId ? entry.receiver_id : entry.sender_id
+        );
+
+        if (friendIds.length === 0) {
+            return res.status(200).json({ success: true, data: [] });
+        }
+
+        const friendsWithChats: {
+            friendId: string;
+            chatId: string;
+        }[] = [];
+
+        for (const friendId of friendIds) {
+            const { data: existingChat, error: chatCheckError } = await supabase
+                .from('chats')
+                .select('id')
+                .or(`and(user_1.eq.${userId},user_2.eq.${friendId}),and(user_1.eq.${friendId},user_2.eq.${userId})`)
+                .maybeSingle();
+
+            let chatId = existingChat?.id;
+
+            if (!existingChat && !chatCheckError) {
+                const { data: newChat, error: insertError } = await supabase
+                    .from('chats')
+                    .insert([
+                        {
+                            user_1: userId,
+                            user_2: friendId
+                        }
+                    ])
+                    .select('id')
+                    .single();
+
+                if (insertError) {
+                    console.error('Error creating chat:', insertError);
+                    continue;
+                }
+
+                chatId = newChat.id;
+            }
+
+            if (chatId) {
+                friendsWithChats.push({ friendId, chatId });
+            }
+        }
+
+        const { data: friendsData, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, avatar_url, email')
+            .in('id', friendIds);
+
+        if (profileError) {
+            return res.status(500).json({ success: false, error: profileError.message });
+        }
+
+        const formatted = friendsData.map(profile => {
+            const chatInfo = friendsWithChats.find(f => f.friendId === profile.id);
+
+            return {
+                id: profile.id,
+                user_name: `${profile.first_name} ${profile.last_name}`,
+                avatar_img: profile.avatar_url,
+                email: profile.email,
+                chat_id: chatInfo?.chatId || null
+            };
+        });
+
+        return res.status(200).json({ success: true, data: formatted });
+
+    } catch (err) {
+        console.error('Error in getUserFriends:', err);
+        return res.status(500).json({ success: false, error: 'Something went wrong.' });
+    }
+};
+
+
+// ----------------------- chambers & chats ----------------------
 // get conversion
 export const getUserConversations = async (req: Request, res: Response): Promise<any> => {
     const { userId } = req.params;
@@ -101,6 +194,63 @@ export const getUserConversations = async (req: Request, res: Response): Promise
     }
 };
 
+// create custom chamber
+export const createChamber = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { name, description = '', tags = [], members = [], is_public = true } = req.body;
+        const { id: userId } = req.user!;
+
+        if (!name || !userId) {
+            return res.status(400).json({ error: 'Missing chamber name or userId' });
+        }
+
+        const { data: chamber, error: chamberError } = await supabase
+            .from('custom_chambers')
+            .insert([
+                {
+                    name,
+                    description: '',
+                    tags,
+                    is_public,
+                    is_active: true,
+                    creator_id: userId,
+                    member_count: members.length + 1,
+                },
+            ])
+            .select()
+            .single();
+
+        if (chamberError) throw chamberError;
+
+        const chamberId = chamber.id;
+
+        const memberInserts = [
+            {
+                chamber_id: chamberId,
+                user_id: userId,
+                joined_at: new Date().toISOString(),
+                is_moderator: true,
+            },
+            ...members.map((uid: any) => ({
+                chamber_id: chamberId,
+                user_id: uid,
+                joined_at: new Date().toISOString(),
+                is_moderator: false,
+            })),
+        ];
+
+        const { error: membersError } = await supabase.from('chamber_members').insert(memberInserts);
+        if (membersError) throw membersError;
+
+        res.status(201).json({ message: 'Chamber created successfully', chamber });
+    } catch (err) {
+        console.error('Error creating chamber:', err);
+        res.status(500).json({ error: 'Failed to create chamber' });
+    }
+};
+
+
+// ----------------------- messages ----------------------
 // get direct messages
 export const getDirectMessages = async (req: Request, res: Response): Promise<any> => {
     const { chatId } = req.params;
@@ -158,99 +308,6 @@ export const getDirectMessages = async (req: Request, res: Response): Promise<an
     }
 };
 
-// user frineds
-export const getUserFriends = async (req: Request, res: Response): Promise<any> => {
-    const { userId } = req.params;
-
-    try {
-        // 1. Get accepted friendships
-        const { data: friendships, error } = await supabase
-            .from('friendships')
-            .select('id, sender_id, receiver_id, status')
-            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-            .eq('status', 'accepted');
-
-        if (error) return res.status(500).json({ success: false, error: error.message });
-
-        const friendIds = friendships.map((entry) =>
-            entry.sender_id === userId ? entry.receiver_id : entry.sender_id
-        );
-
-        if (friendIds.length === 0) {
-            return res.status(200).json({ success: true, data: [] });
-        }
-
-        const friendsWithChats: {
-            friendId: string;
-            chatId: string;
-        }[] = [];
-
-        // 2. Ensure chat exists between each friend
-        for (const friendId of friendIds) {
-            const { data: existingChat, error: chatCheckError } = await supabase
-                .from('chats')
-                .select('id')
-                .or(`and(user_1.eq.${userId},user_2.eq.${friendId}),and(user_1.eq.${friendId},user_2.eq.${userId})`)
-                .maybeSingle();
-
-            let chatId = existingChat?.id;
-
-            if (!existingChat && !chatCheckError) {
-                const { data: newChat, error: insertError } = await supabase
-                    .from('chats')
-                    .insert([
-                        {
-                            user_1: userId,
-                            user_2: friendId
-                        }
-                    ])
-                    .select('id')
-                    .single();
-
-                if (insertError) {
-                    console.error('Error creating chat:', insertError);
-                    continue;
-                }
-
-                chatId = newChat.id;
-            }
-
-            if (chatId) {
-                friendsWithChats.push({ friendId, chatId });
-            }
-        }
-
-        // 3. Fetch profile data
-        const { data: friendsData, error: profileError } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, avatar_url, email')
-            .in('id', friendIds);
-
-        if (profileError) {
-            return res.status(500).json({ success: false, error: profileError.message });
-        }
-
-        // 4. Merge with chat ID
-        const formatted = friendsData.map(profile => {
-            const chatInfo = friendsWithChats.find(f => f.friendId === profile.id);
-
-            return {
-                id: profile.id,
-                user_name: `${profile.first_name} ${profile.last_name}`,
-                avatar_img: profile.avatar_url,
-                email: profile.email,
-                chat_id: chatInfo?.chatId || null
-            };
-        });
-
-        return res.status(200).json({ success: true, data: formatted });
-
-    } catch (err) {
-        console.error('Error in getUserFriends:', err);
-        return res.status(500).json({ success: false, error: 'Something went wrong.' });
-    }
-};
-
 // Get all public messages (with pagination)
 export const getPublicMessages = async (req: Request, res: Response): Promise<any> => {
     const { page = 1, limit = 50 } = req.query;
@@ -299,3 +356,5 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
         });
     }
 };
+
+
