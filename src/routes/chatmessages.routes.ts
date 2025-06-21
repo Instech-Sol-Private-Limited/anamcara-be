@@ -20,4 +20,7 @@ router.get('/friends/:userId', getUserFriends);
 // 👫 Get accepted friends (no chat yet)
 router.get('/get-global-chat', getPublicMessages);
 
+// 👫 Get accepted friends (no chat yet)
+router.post('/create-chamber', getPublicMessages);
+
 export default router;
