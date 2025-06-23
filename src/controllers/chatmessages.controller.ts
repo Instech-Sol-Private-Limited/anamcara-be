@@ -197,7 +197,7 @@ export const getUserConversations = async (req: Request, res: Response): Promise
 // create custom chamber
 export const createChamber = async (req: Request, res: Response): Promise<any> => {
     try {
-        const { name, description = '', tags = [], members = [], is_public = true } = req.body;
+        const { name, description = '', tags = [], members = [], is_public = false } = req.body;
         const { id: userId } = req.user!;
 
         if (!name || !userId) {
@@ -209,7 +209,7 @@ export const createChamber = async (req: Request, res: Response): Promise<any> =
             .insert([
                 {
                     name,
-                    description: '',
+                    description,
                     tags,
                     is_public,
                     is_active: true,
@@ -246,6 +246,198 @@ export const createChamber = async (req: Request, res: Response): Promise<any> =
     } catch (err) {
         console.error('Error creating chamber:', err);
         res.status(500).json({ error: 'Failed to create chamber' });
+    }
+};
+
+// get conversion
+export const getUserChambers = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { id: userId } = req.user!;
+
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing userId' });
+        }
+
+        // First, fetch owned chambers with last message
+        const { data: ownedChambers, error: ownedError } = await supabase
+            .from('custom_chambers')
+            .select(`
+                *,
+                creator:profiles!creator_id(
+                    first_name,
+                    last_name,
+                    avatar_url
+                ),
+                last_message:chamber_messages(
+                    id,
+                    message,
+                    created_at,
+                    sender_id
+                )
+            `)
+            .eq('creator_id', userId)
+            .eq('is_active', true)
+            .order('created_at', { foreignTable: 'last_message', ascending: false })
+            .limit(1, { foreignTable: 'last_message' });
+
+        if (ownedError) throw ownedError;
+
+        // Then fetch member chambers with last message and creator info
+        const { data: memberChambers, error: memberError } = await supabase
+            .from('chamber_members')
+            .select(`
+                chamber_id, 
+                chambers:custom_chambers(
+                    *,
+                    creator:profiles!creator_id(
+                        first_name,
+                        last_name,
+                        avatar_url
+                    ),
+                    last_message:chamber_messages(
+                        id,
+                        message,
+                        created_at,
+                        sender_id
+                    )
+                )
+            `)
+            .eq('user_id', userId)
+            .neq('custom_chambers.creator_id', userId)
+            .eq('custom_chambers.is_active', true)
+            .order('created_at', { foreignTable: 'chambers.last_message', ascending: false })
+            .limit(1, { foreignTable: 'chambers.last_message' });
+
+        if (memberError) throw memberError;
+
+        const joinedChambers = memberChambers
+            .map((item: any) => item.chambers)
+            .filter((chamber: any) => !!chamber);
+
+        const allChambers = [...ownedChambers, ...joinedChambers].map((chamber: any) => ({
+            id: chamber.id,
+            chat_id: chamber.id,
+            chamber_id: chamber.id,
+            chamber_name: chamber.name,
+            name: chamber.name,
+            description: chamber.description,
+            is_public: chamber.is_public,
+            is_active: chamber.is_active,
+            is_chamber: true,
+            creator_id: chamber.creator_id,
+            tags: chamber.tags || [],
+            member_count: chamber.member_count || 0,
+            updated_at: chamber.updated_at,
+            last_message: chamber.last_message?.[0] ? {
+                id: chamber.last_message[0].id,
+                message: chamber.last_message[0].message,
+                created_at: chamber.last_message[0].created_at,
+                sender_id: chamber.last_message[0].sender_id
+            } : null,
+            creator: {
+                id: chamber.creator_id,
+                user_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim() || 'Creator Name',
+                avatar_url: chamber.creator?.avatar_url || '',
+            }
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: allChambers,
+            pagination: {
+                total: allChambers.length,
+                page: 1,
+                pages: 1,
+                hasMore: false
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching user chambers:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch chambers'
+        });
+    }
+};
+
+// get chamber members
+export const getChamberMembers = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { chamber_id } = req.params;
+        const { id: userId } = req.user!;
+
+        if (!chamber_id) {
+            return res.status(400).json({ error: 'Missing chamber_id' });
+        }
+
+        const { data: chamber, error: chamberError } = await supabase
+            .from('custom_chambers')
+            .select('is_public')
+            .eq('id', chamber_id)
+            .single();
+
+        if (chamberError || !chamber) {
+            return res.status(404).json({ error: 'Chamber not found' });
+        }
+
+        if (!chamber.is_public) {
+            const { data: membership, error: membershipError } = await supabase
+                .from('chamber_members')
+                .select('user_id')
+                .eq('chamber_id', chamber_id)
+                .eq('user_id', userId)
+                .single();
+
+            if (membershipError || !membership) {
+                return res.status(403).json({ error: 'Not authorized to view this chamber' });
+            }
+        }
+
+        const { data: members, error: membersError } = await supabase
+            .from('chamber_members')
+            .select(`
+                user_id,
+                is_moderator,
+                joined_at,
+                profiles:user_id (
+                    id,
+                    user_name,
+                    avatar_img
+                )
+            `)
+            .eq('chamber_id', chamber_id);
+
+        if (membersError) throw membersError;
+
+        const formattedMembers = members.map((member: any) => ({
+            id: member.user_id,
+            chamber_id,
+            user_id: member.user_id,
+            user_name: member.profiles.user_name,
+            avatar_img: member.profiles.avatar_img,
+            is_moderator: member.is_moderator,
+            joined_at: member.joined_at,
+            online: false
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                data: formattedMembers,
+                pagination: {
+                    total: formattedMembers.length,
+                    page: 1,
+                    pages: 1,
+                    hasMore: false
+                }
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching chamber members:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch chamber members'
+        });
     }
 };
 
@@ -401,6 +593,118 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch messages'
+        });
+    }
+};
+
+export const getChamberMessages = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { chamber_id } = req.params;
+        const { id: userId } = req.user!;
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 20;
+
+        if (!chamber_id) {
+            return res.status(400).json({ error: 'Missing chamber_id' });
+        }
+
+        const { data: chamber, error: chamberError } = await supabase
+            .from('custom_chambers')
+            .select('is_public')
+            .eq('id', chamber_id)
+            .single();
+
+        if (chamberError || !chamber) {
+            return res.status(404).json({ error: 'Chamber not found' });
+        }
+
+        if (!chamber.is_public) {
+            const { data: membership, error: membershipError } = await supabase
+                .from('chamber_members')
+                .select('user_id')
+                .eq('chamber_id', chamber_id)
+                .eq('user_id', userId)
+                .single();
+
+            if (membershipError || !membership) {
+                return res.status(403).json({ error: 'Not authorized to view this chamber' });
+            }
+        }
+
+        const { data: messages, error: messagesError, count } = await supabase
+            .from('chamber_messages')
+            .select(`
+                id,
+                chamber_id,
+                sender_id,
+                message,
+                has_media,
+                media,
+                message_type,
+                reply_to,
+                is_edited,
+                is_deleted,
+                created_at,
+                updated_at,
+                deleted_at,
+                profiles: sender_id (id, user_name, avatar_img),
+                replied_message: reply_to (id, message, sender_id, profiles: sender_id (id, user_name))
+            `, { count: 'exact' })
+            .eq('chamber_id', chamber_id)
+            .order('created_at', { ascending: false })
+            .range((page - 1) * limit, page * limit - 1);
+
+        if (messagesError) throw messagesError;
+
+        const formattedMessages = messages.map((message: any) => ({
+            id: message.id,
+            chamber_id: message.chamber_id,
+            sender_id: message.sender_id,
+            message: message.message,
+            has_media: message.has_media,
+            media: message.media,
+            message_type: message.message_type,
+            reply_to: message.reply_to,
+            is_edited: message.is_edited,
+            is_deleted: message.is_deleted,
+            created_at: message.created_at,
+            updated_at: message.updated_at,
+            deleted_at: message.deleted_at,
+            sender: {
+                id: message.sender_id,
+                user_name: message.profiles.user_name,
+                avatar_img: message.profiles.avatar_img
+            },
+            replied_message: message.reply_to ? {
+                id: message.replied_message.id,
+                message: message.replied_message.message,
+                sender_id: message.replied_message.sender_id,
+                sender: {
+                    id: message.replied_message.sender_id,
+                    user_name: message.replied_message.profiles.user_name
+                }
+            } : null
+        }));
+
+        const totalPages = Math.ceil((count || 0) / limit);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                data: formattedMessages.reverse(),
+                pagination: {
+                    total: count || 0,
+                    page,
+                    pages: totalPages,
+                    hasMore: page < totalPages
+                }
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching chamber messages:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch chamber messages'
         });
     }
 };
