@@ -4,23 +4,41 @@ import {
   getDirectMessages,
   getUserFriends,
   getPublicMessages,
+  getTravelMessages,
+  createChamber,
+  getUserChambers,
+  getChamberMessages,
+  getChamberMembers,
 } from '../controllers/chatmessages.controller';
+import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
 
 // get concversions
-router.get('/get-conversions/:userId', getUserConversations);
+router.get('/get-conversions/:userId', authMiddleware, getUserConversations);
 
 // 🔁 Get direct chat between two users
-router.get('/direct/:chatId', getDirectMessages);
+router.get('/direct/:chatId', authMiddleware, getDirectMessages);
 
 // 👫 Get accepted friends (no chat yet)
-router.get('/friends/:userId', getUserFriends);
+router.get('/friends/:userId', authMiddleware, getUserFriends);
+
+// get global chat
+router.get('/get-global-chat', authMiddleware, getPublicMessages);
+
+// get travel chat
+router.get('/get-travel-chat', authMiddleware, getTravelMessages);
 
 // 👫 Get accepted friends (no chat yet)
-router.get('/get-global-chat', getPublicMessages);
+router.post('/create-chamber', authMiddleware, createChamber);
 
-// 👫 Get accepted friends (no chat yet)
-router.post('/create-chamber', getPublicMessages);
+// get chambers
+router.get('/get-chambers', authMiddleware, getUserChambers);
+
+// get chamber members
+router.get('/get-chamber-members/:chamber_id', authMiddleware, getChamberMembers);
+
+// get chamber messages
+router.get('/get-chamber-messages/:chamber_id', authMiddleware, getChamberMessages);
 
 export default router;
