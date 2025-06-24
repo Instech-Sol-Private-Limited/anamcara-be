@@ -168,7 +168,8 @@ export const getAboutInfo = async (req: Request, res: Response) => {
         twitter_url,
         instagram_url,
         linkedin_url,
-        created_at
+        created_at,
+        avatar_url
       `)
       .eq('id', id)
       .single();
@@ -198,7 +199,8 @@ export const getAboutInfo = async (req: Request, res: Response) => {
         instagram: data.instagram_url,
         linkedin: data.linkedin_url
       },
-      joinDate: data.created_at
+      joinDate: data.created_at,
+      avatar_url: data.avatar_url || null
     };
 
     res.status(200).json({
