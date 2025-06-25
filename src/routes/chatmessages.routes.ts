@@ -9,6 +9,7 @@ import {
   getUserChambers,
   getChamberMessages,
   getChamberMembers,
+  joinChamberByInvite,
 } from '../controllers/chatmessages.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
@@ -31,6 +32,9 @@ router.get('/get-travel-chat', authMiddleware, getTravelMessages);
 
 // 👫 Get accepted friends (no chat yet)
 router.post('/create-chamber', authMiddleware, createChamber);
+
+// join chamber
+router.post('/join-chamber/:invite_code', authMiddleware, joinChamberByInvite);
 
 // get chambers
 router.get('/get-chambers', authMiddleware, getUserChambers);
