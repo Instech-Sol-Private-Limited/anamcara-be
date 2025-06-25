@@ -1,6 +1,15 @@
 import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
 import { getUserEmailFromId, getUserFriends } from './getUserFriends';
+import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
+
+type ChamberUpdateResponse = {
+  success: boolean;
+  data?: any;
+  message?: string;
+  error?: string;
+  code?: string;
+};
 
 export const connectedUsers = new Map<string, Set<string>>();
 
@@ -808,71 +817,90 @@ export const registerSocketHandlers = (io: Server) => {
       message: string;
       reply_to?: string;
     }) => {
-      const { chamber_id, sender_id, message, reply_to } = payload;
-
       try {
-        const { data: membership, error: membershipError } = await supabase
-          .from('chamber_members')
-          .select('user_id, is_moderator')
-          .eq('chamber_id', chamber_id)
-          .eq('user_id', sender_id)
-          .single();
+        const { chamber_id, sender_id, message, reply_to } = payload;
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, sender_id);
 
-        if (membershipError || !membership) {
-          throw new Error('Not authorized to send messages to this chamber');
+        if (!isCreator && !isModerator) {
+          const { data: membership } = await supabase
+            .from('chamber_members')
+            .select('user_id')
+            .eq('chamber_id', chamber_id)
+            .eq('user_id', sender_id)
+            .single();
+
+          if (!membership) {
+            socket.emit('chamber_message_error', {
+              chamber_id,
+              error: 'Not authorized to send messages to this chamber'
+            });
+            return;
+          }
         }
 
-        // If replying, verify the parent message exists in this chamber
+        if (!message || message.trim().length === 0) {
+          socket.emit('chamber_message_error', {
+            chamber_id,
+            error: 'Message cannot be empty'
+          });
+          return;
+        }
+
+        if (message.length > 2000) {
+          socket.emit('chamber_message_error', {
+            chamber_id,
+            error: 'Message must be 2000 characters or less'
+          });
+          return;
+        }
+
         if (reply_to) {
-          const { data: parentMessage, error: parentError } = await supabase
+          const { data: parentMessage } = await supabase
             .from('chamber_messages')
             .select('id')
             .eq('id', reply_to)
             .eq('chamber_id', chamber_id)
             .single();
 
-          if (parentError || !parentMessage) {
-            throw new Error('The message you are replying to does not exist in this chamber');
+          if (!parentMessage) {
+            socket.emit('chamber_message_error', {
+              chamber_id,
+              error: 'The message you are replying to does not exist in this chamber'
+            });
+            return;
           }
         }
 
-        const messageData: any = {
-          chamber_id,
-          sender_id,
-          message,
-          is_edited: false,
-          is_deleted: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-
-        if (reply_to) {
-          messageData.reply_to = reply_to;
-        }
-
-        const { data: insertedMessage, error: insertError } = await supabase
+        const { data: insertedMessage } = await supabase
           .from('chamber_messages')
-          .insert([messageData])
+          .insert([{
+            chamber_id,
+            sender_id,
+            message,
+            reply_to: reply_to || null,
+            is_edited: false,
+            is_deleted: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }])
           .select()
           .single();
 
-        if (insertError || !insertedMessage) {
-          throw new Error(insertError?.message || 'Failed to insert chamber message');
+        if (!insertedMessage) {
+          throw new Error('Failed to insert chamber message');
         }
 
-        // Get sender profile and possibly replied message
         const { data: senderProfile } = await supabase
           .from('profiles')
           .select('id, first_name, last_name, avatar_url')
           .eq('id', sender_id)
           .single();
 
-        const completeMessage: any = {
+        const completeMessage = {
           ...insertedMessage,
           sender: senderProfile
         };
 
-        // If this is a reply, get the parent message details
         if (reply_to) {
           const { data: parentMessage } = await supabase
             .from('chamber_messages')
@@ -895,20 +923,22 @@ export const registerSocketHandlers = (io: Server) => {
           }
         }
 
-        // Send to everyone in the chamber
-        io.to(`chamber_${chamber_id}`).emit('chamber_receive_message', completeMessage);
-        socket.emit('chamber_message_sent', completeMessage);
-
-        // Update last activity timestamp for the chamber
         await supabase
           .from('custom_chambers')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', chamber_id);
 
+        await notifyChamberMembers(chamber_id, 'chamber_receive_message', completeMessage);
+
+        socket.emit('chamber_message_confirmed', {
+          chamber_id,
+          message_id: insertedMessage.id
+        });
+
       } catch (error) {
         console.error('Chamber message send error:', error);
         socket.emit('chamber_message_error', {
-          chamber_id,
+          chamber_id: payload.chamber_id,
           error: error instanceof Error ? error.message : 'Failed to send chamber message'
         });
       }
@@ -1202,74 +1232,437 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
 
+    // Chamber name update
+    socket.on('chamber_update_name', async (
+      payload: {
+        chamber_id: string;
+        new_name: string;
+        updated_by: string;
+      },
+      callback: (response: ChamberUpdateResponse) => void
+    ) => {
+      try {
+        const { chamber_id, new_name, updated_by } = payload;
+
+        // Input validation
+        if (!chamber_id || !new_name || !updated_by) {
+          throw new Error('Missing required fields');
+        }
+
+        if (new_name.length > 100) {
+          throw new Error('Name must be 100 characters or less');
+        }
+
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, updated_by);
+
+        // Check name uniqueness
+        const { data: existing } = await supabase
+          .from('custom_chambers')
+          .select('id')
+          .eq('name', new_name)
+          .neq('id', chamber_id)
+          .single();
+
+        if (existing) {
+          throw new Error('Chamber name already in use');
+        }
+
+        // Update database
+        const { error } = await supabase
+          .from('custom_chambers')
+          .update({
+            name: new_name,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chamber_id);
+
+        if (error) throw error;
+
+        const updatePayload = {
+          chamber_id,
+          new_name,
+          updated_by,
+          updated_at: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(chamber_id, 'chamber_name_updated', updatePayload);
+
+        callback({ success: true, data: updatePayload });
+      } catch (error: unknown) {
+        console.error('Update chamber name error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update chamber name',
+          code: (error as { code?: string }).code
+        });
+      }
+    });
+
+    // Chamber description update
+    socket.on('chamber_update_description', async (
+      payload: {
+        chamber_id: string;
+        new_description: string;
+        updated_by: string;
+      },
+      callback: (response: ChamberUpdateResponse) => void
+    ) => {
+      try {
+        const { chamber_id, new_description, updated_by } = payload;
+
+        if (!chamber_id || !new_description || !updated_by) {
+          throw new Error('Missing required fields');
+        }
+
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, updated_by);
+
+        // Update database
+        const { error } = await supabase
+          .from('custom_chambers')
+          .update({
+            description: new_description,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chamber_id);
+
+        if (error) throw error;
+
+        const updatePayload = {
+          chamber_id,
+          new_description,
+          updated_by,
+          updated_at: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(chamber_id, 'chamber_description_updated', updatePayload);
+
+        callback({ success: true, data: updatePayload });
+      } catch (error: unknown) {
+        console.error('Update chamber description error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update description'
+        });
+      }
+    });
+
+    // Chamber avatar update
+    socket.on('chamber_update_avatar', async (
+      payload: {
+        chamber_id: string;
+        new_avatar: string;
+        updated_by: string;
+      },
+      callback: (response: ChamberUpdateResponse) => void
+    ) => {
+      try {
+        const { chamber_id, new_avatar, updated_by } = payload;
+
+        if (!chamber_id || !new_avatar || !updated_by) {
+          throw new Error('Missing required fields');
+        }
+
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, updated_by);
+
+        // Update database
+        const { error } = await supabase
+          .from('custom_chambers')
+          .update({
+            chamber_img: new_avatar,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chamber_id);
+
+        if (error) throw error;
+
+        const updatePayload = {
+          chamber_id,
+          new_avatar,
+          updated_by,
+          updated_at: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(chamber_id, 'chamber_avatar_updated', updatePayload);
+
+        callback({ success: true, data: updatePayload });
+      } catch (error: unknown) {
+        console.error('Update chamber avatar error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update avatar'
+        });
+      }
+    });
+
     // Chamber member events
-    socket.on('chamber_add_member', async ({
-      chamber_id,
-      user_id,
-      adder_id
-    }: {
+    socket.on('chamber_add_members', async (payload: {
       chamber_id: string;
-      user_id: string;
+      user_ids: string[];
       adder_id: string;
     }) => {
+      const { chamber_id, user_ids, adder_id } = payload;
+      console.log('Adding members:', { chamber_id, user_ids, adder_id });
+
       try {
-        // Verify adder has permissions (moderator or creator)
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, adder_id);
+        if (!isCreator && !isModerator) {
+          socket.emit('chamber_member_error', {
+            chamber_id,
+            error: 'Not authorized to add members',
+            adder_id
+          });
+          return;
+        }
+
+        const { data: existingMembers } = await supabase
+          .from('chamber_members')
+          .select('user_id')
+          .eq('chamber_id', chamber_id)
+          .in('user_id', user_ids);
+
+        const existingUserIds = existingMembers?.map(m => m.user_id) || [];
+        const newUserIds = user_ids.filter(id => !existingUserIds.includes(id));
+
+        if (newUserIds.length === 0) {
+          socket.emit('chamber_member_error', {
+            chamber_id,
+            error: 'All users are already members',
+            adder_id,
+            existingUserIds
+          });
+          return;
+        }
+
+        const { error } = await supabase
+          .from('chamber_members')
+          .insert(newUserIds.map(user_id => ({
+            chamber_id,
+            user_id,
+            joined_at: new Date().toISOString(),
+            is_moderator: false
+          })));
+
+        if (error) throw error;
+
+        await supabase.rpc('increment_member_count', {
+          chamber_id,
+          count: newUserIds.length
+        });
+
+        const { data: userProfiles } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, avatar_url')
+          .in('id', newUserIds);
+
+        if (!userProfiles || userProfiles.length === 0) {
+          throw new Error('User profiles not found');
+        }
+
+        const addedMembersData = {
+          chamber_id,
+          added_users: userProfiles,
+          added_by: adder_id,
+          timestamp: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(
+          chamber_id,
+          'chamber_members_added',
+          addedMembersData
+        );
+
+        socket.emit('chamber_members_add_confirmed', {
+          ...addedMembersData,
+          skipped_users: existingUserIds
+        });
+
+      } catch (error) {
+        console.error('Add members error:', error);
+        socket.emit('chamber_member_error', {
+          chamber_id,
+          adder_id,
+          error: error instanceof Error ? error.message : 'Failed to add members',
+          attempted_ids: user_ids
+        });
+      }
+    });
+
+    // Remove a member from a chamber
+    socket.on('chamber_remove_member', async (payload: {
+      chamber_id: string;
+      user_id: string;
+      removed_by: string;
+    }) => {
+      try {
+        const { chamber_id, user_id, removed_by } = payload;
+        console.log('Removing member:', { chamber_id, user_id, removed_by });
+
+        const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, removed_by);
+        if (!isCreator && !isModerator) {
+          socket.emit('chamber_member_remove_error', {
+            chamber_id,
+            error: 'Not authorized to remove members',
+            removed_by
+          });
+          return;
+        }
+
         const { data: chamber } = await supabase
           .from('custom_chambers')
           .select('creator_id')
           .eq('id', chamber_id)
           .single();
 
-        const { data: adderMembership } = await supabase
-          .from('chamber_members')
-          .select('is_moderator')
-          .eq('chamber_id', chamber_id)
-          .eq('user_id', adder_id)
-          .single();
-
-        if (chamber?.creator_id !== adder_id && (!adderMembership || !adderMembership.is_moderator)) {
-          throw new Error('Not authorized to add members');
+        if (chamber?.creator_id === user_id) {
+          socket.emit('chamber_member_remove_error', {
+            chamber_id,
+            error: 'Cannot remove chamber creator',
+            removed_by
+          });
+          return;
         }
 
-        // Add the member
         const { error } = await supabase
           .from('chamber_members')
-          .insert([{
-            chamber_id,
-            user_id,
-            joined_at: new Date().toISOString(),
-            is_moderator: false
-          }]);
+          .delete()
+          .eq('chamber_id', chamber_id)
+          .eq('user_id', user_id);
 
         if (error) throw error;
 
-        // Update member count
-        await supabase.rpc('increment_member_count', { chamber_id: chamber_id });
+        await supabase.rpc('decrement_member_count', { chamber_id });
 
-        // Get user profile
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, avatar_url')
-          .eq('id', user_id)
-          .single();
-
-        // Notify chamber and the new member
-        io.to(`chamber_${chamber_id}`).emit('chamber_member_added', {
+        const notificationData = {
           chamber_id,
-          user: userProfile,
-          added_by: adder_id,
+          user_id,
+          removed_by,
           timestamp: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(
+          chamber_id,
+          'chamber_member_removed',
+          notificationData
+        );
+
+        // Confirm to remover
+        socket.emit('chamber_member_remove_confirmed', {
+          ...notificationData,
+          success: true
         });
 
       } catch (error) {
-        console.error('Add member error:', error);
-        socket.emit('chamber_member_error', {
-          chamber_id,
-          error: error instanceof Error ? error.message : 'Failed to add member'
+        console.error('Remove member error:', error);
+        socket.emit('chamber_member_remove_error', {
+          chamber_id: payload.chamber_id,
+          user_id: payload.user_id,
+          removed_by: payload.removed_by,
+          error: error instanceof Error ? error.message : 'Failed to remove member'
         });
       }
     });
 
+    // Promote a member to admin
+    socket.on('chamber_promote_to_admin', async (payload: {
+      chamber_id: string;
+      user_id: string;
+      promoted_by: string;
+    }, callback) => {
+      try {
+        const { chamber_id, user_id, promoted_by } = payload;
+
+        // Only creator can promote to admin
+        const { data: chamber } = await supabase
+          .from('custom_chambers')
+          .select('creator_id')
+          .eq('id', chamber_id)
+          .single();
+
+        if (chamber?.creator_id !== promoted_by) {
+          throw new Error('Only chamber creator can promote to admin');
+        }
+
+        // Cannot promote yourself
+        if (user_id === promoted_by) {
+          throw new Error('You are already the creator');
+        }
+
+        // Promote the member
+        const { error } = await supabase
+          .from('chamber_members')
+          .update({ is_moderator: true })
+          .eq('chamber_id', chamber_id)
+          .eq('user_id', user_id);
+
+        if (error) throw error;
+
+        // Notify chamber
+        io.to(`chamber_${chamber_id}`).emit('chamber_member_promoted', {
+          chamber_id,
+          user_id,
+          promoted_by,
+          timestamp: new Date().toISOString()
+        });
+
+        callback({ success: true });
+      } catch (error) {
+        console.error('Promote to admin error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to promote member'
+        });
+      }
+    });
+
+    // Chamber Deletion
+    socket.on('chamber_delete', async (payload: {
+      chamber_id: string;
+      deleted_by: string;
+    }, callback) => {
+      try {
+        const { chamber_id, deleted_by } = payload;
+
+        // Only creator can delete chamber
+        const { data: chamber } = await supabase
+          .from('custom_chambers')
+          .select('creator_id')
+          .eq('id', chamber_id)
+          .single();
+
+        if (chamber?.creator_id !== deleted_by) {
+          throw new Error('Only chamber creator can delete the chamber');
+        }
+
+        // Soft delete in database
+        const { error } = await supabase
+          .from('custom_chambers')
+          .update({ is_active: false, deleted_at: new Date().toISOString() })
+          .eq('id', chamber_id);
+
+        if (error) throw error;
+
+        // Notify all members
+        io.to(`chamber_${chamber_id}`).emit('chamber_deleted', {
+          chamber_id,
+          deleted_by,
+          timestamp: new Date().toISOString()
+        });
+
+        // Disconnect all members from the room
+        const sockets = await io.in(`chamber_${chamber_id}`).fetchSockets();
+        sockets.forEach(socket => {
+          socket.leave(`chamber_${chamber_id}`);
+        });
+
+        callback({ success: true });
+      } catch (error) {
+        console.error('Delete chamber error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete chamber'
+        });
+      }
+    });
 
     // --------------------- Notification Events ------------------
 
