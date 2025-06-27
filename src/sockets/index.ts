@@ -1621,32 +1621,36 @@ export const registerSocketHandlers = (io: Server) => {
     }, callback) => {
       try {
         const { chamber_id, deleted_by } = payload;
+        console.log('Deleting chamber:', { chamber_id, deleted_by });
 
-        // Only creator can delete chamber
-        const { data: chamber } = await supabase
-          .from('custom_chambers')
-          .select('creator_id')
-          .eq('id', chamber_id)
-          .single();
-
-        if (chamber?.creator_id !== deleted_by) {
-          throw new Error('Only chamber creator can delete the chamber');
+        const { isCreator } = await verifyChamberPermissions(chamber_id, deleted_by);
+        if (!isCreator) {
+          callback({
+            success: false,
+            error: 'Only chamber creator can delete the chamber'
+          });
+          return;
         }
 
-        // Soft delete in database
         const { error } = await supabase
           .from('custom_chambers')
-          .update({ is_active: false, deleted_at: new Date().toISOString() })
+          .delete()
           .eq('id', chamber_id);
 
         if (error) throw error;
 
-        // Notify all members
-        io.to(`chamber_${chamber_id}`).emit('chamber_deleted', {
+        const notificationData = {
           chamber_id,
           deleted_by,
           timestamp: new Date().toISOString()
-        });
+        };
+
+        // Notify all chamber members
+        await notifyChamberMembers(
+          chamber_id,
+          'chamber_deleted',
+          notificationData
+        );
 
         // Disconnect all members from the room
         const sockets = await io.in(`chamber_${chamber_id}`).fetchSockets();
@@ -1654,16 +1658,17 @@ export const registerSocketHandlers = (io: Server) => {
           socket.leave(`chamber_${chamber_id}`);
         });
 
+        // Confirm to deleter
         callback({ success: true });
       } catch (error) {
         console.error('Delete chamber error:', error);
-        callback({
-          success: false,
+        socket.emit('chamber_delete_error', {
+          chamber_id: payload.chamber_id,
+          deleted_by: payload.deleted_by,
           error: error instanceof Error ? error.message : 'Failed to delete chamber'
         });
       }
     });
-
     // --------------------- Notification Events ------------------
 
     socket.on('mark_as_read', async ({ id }: { id: string }) => {
