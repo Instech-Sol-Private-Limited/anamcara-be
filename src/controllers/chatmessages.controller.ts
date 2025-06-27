@@ -377,63 +377,180 @@ export const joinChamberByInvite = async (req: Request, res: Response): Promise<
     }
 };
 
-// update chamber
-export const updateChamberDetails = async (req: Request, res: Response): Promise<any> => {
+// get all chambers
+export const getAllChambers = async (req: Request, res: Response): Promise<any> => {
     try {
-        const { chamber_id } = req.params;
-        const { name, chamber_img } = req.body;
         const { id: userId } = req.user!;
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = 12;
+        const offset = (page - 1) * limit;
 
-        if (!chamber_id) {
-            return res.status(400).json({ error: 'Missing chamber ID' });
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing userId' });
         }
 
-        const { data: chamber, error: chamberError } = await supabase
+        const { count: totalChambers } = await supabase
+            .from('custom_chambers')
+            .select('*', { count: 'exact', head: true })
+            .eq('is_active', true);
+
+        const { data: chamberslist, error: ownedError } = await supabase
+            .from('custom_chambers')
+            .select(`
+                *,
+                creator:profiles!creator_id(
+                    id,
+                    first_name,
+                    last_name,
+                    avatar_url
+                )
+            `)
+            .eq('is_active', true)
+            .range(offset, offset + limit - 1)
+            .order('updated_at', { ascending: false });
+
+        if (ownedError) throw ownedError;
+
+        const allChambers = chamberslist.map((chamber: any) => ({
+            id: chamber.id,
+            chat_id: chamber.id,
+            chamber_id: chamber.id,
+            chamber_name: chamber.name,
+            name: chamber.name,
+            description: chamber.description,
+            is_public: chamber.is_public,
+            invite_code: chamber.invite_code,
+            chamber_img: chamber.chamber_img || '',
+            cover_img: chamber.cover_img || '',
+            is_active: chamber.is_active,
+            creator_id: chamber.creator_id,
+            tags: chamber.tags || [],
+            member_count: chamber.member_count || 0,
+            created_at: chamber.created_at,
+            updated_at: chamber.updated_at,
+            creator: {
+                id: chamber.creator_id,
+                user_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim() || 'Creator Name',
+                avatar_url: chamber.creator?.avatar_url || '',
+            }
+        }));
+
+        const totalPages = Math.ceil((totalChambers || 0) / limit);
+
+        res.status(200).json({
+            success: true,
+            data: allChambers,
+            pagination: {
+                total: totalChambers || 0,
+                page: page,
+                pages: totalPages,
+                hasMore: page < totalPages
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching user chambers:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch chambers'
+        });
+    }
+};
+
+export const updateChamber = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { id: userId } = req.user!;
+        const chamberId = req.params.id;
+        const { 
+            name, 
+            description, 
+            is_public, 
+            cover_img,
+            chamber_img
+        } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing userId' });
+        }
+
+        if (!chamberId) {
+            return res.status(400).json({ error: 'Missing chamberId' });
+        }
+
+        const { data: existingChamber, error: fetchError } = await supabase
             .from('custom_chambers')
             .select('creator_id')
-            .eq('id', chamber_id)
+            .eq('id', chamberId)
             .single();
 
-        if (chamberError || !chamber) {
+        if (fetchError) throw fetchError;
+        if (!existingChamber) {
             return res.status(404).json({ error: 'Chamber not found' });
         }
-
-        if (chamber.creator_id !== userId) {
-            return res.status(403).json({ error: 'Only the creator can update chamber details' });
+        if (existingChamber.creator_id !== userId) {
+            return res.status(403).json({ error: 'Unauthorized to update this chamber' });
         }
 
-        const updateData: { name?: string; chamber_img?: string | null; updated_at: string } = {
+        const updateData: any = {
+            name,
+            description,
+            is_public,
             updated_at: new Date().toISOString()
         };
 
-        if (name !== undefined) updateData.name = name;
-        if (chamber_img !== undefined) updateData.chamber_img = chamber_img;
+        if (cover_img) updateData.cover_img = cover_img;
+        if (chamber_img) updateData.chamber_img = chamber_img;
 
-        // Only update if we have something to update
-        if (Object.keys(updateData).length > 1) {
-            const { data: updatedChamber, error: updateError } = await supabase
-                .from('custom_chambers')
-                .update(updateData)
-                .eq('id', chamber_id)
-                .select()
-                .single();
+        const { data: updatedChamber, error: updateError } = await supabase
+            .from('custom_chambers')
+            .update(updateData)
+            .eq('id', chamberId)
+            .select(`
+                *,
+                creator:profiles!creator_id(
+                    id,
+                    first_name,
+                    last_name,
+                    avatar_url
+                )
+            `);
 
-            if (updateError) throw updateError;
+        if (updateError) throw updateError;
 
-            return res.status(200).json({
-                message: 'Chamber updated successfully',
-                chamber: updatedChamber
-            });
-        }
+        const formattedChamber = {
+            id: updatedChamber[0].id,
+            chat_id: updatedChamber[0].id,
+            chamber_id: updatedChamber[0].id,
+            chamber_name: updatedChamber[0].name,
+            name: updatedChamber[0].name,
+            description: updatedChamber[0].description,
+            is_public: updatedChamber[0].is_public,
+            invite_code: updatedChamber[0].invite_code,
+            chamber_img: updatedChamber[0].chamber_img || '',
+            cover_img: updatedChamber[0].cover_img || '',
+            is_active: updatedChamber[0].is_active,
+            creator_id: updatedChamber[0].creator_id,
+            tags: updatedChamber[0].tags || [],
+            member_count: updatedChamber[0].member_count || 0,
+            created_at: updatedChamber[0].created_at,
+            updated_at: updatedChamber[0].updated_at,
+            creator: {
+                id: updatedChamber[0].creator_id,
+                user_name: `${updatedChamber[0].creator?.first_name || ''} ${updatedChamber[0].creator?.last_name || ''}`.trim() || 'Creator Name',
+                avatar_url: updatedChamber[0].creator?.avatar_url || '',
+            }
+        };
 
-        return res.status(200).json({
-            message: 'No changes detected',
-            chamber: chamber
+        res.status(200).json({
+            success: true,
+            data: formattedChamber
         });
 
     } catch (err) {
         console.error('Error updating chamber:', err);
-        res.status(500).json({ error: 'Failed to update chamber' });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update chamber'
+        });
     }
 };
 

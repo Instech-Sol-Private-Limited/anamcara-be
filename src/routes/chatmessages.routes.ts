@@ -10,8 +10,10 @@ import {
   getChamberMessages,
   getChamberMembers,
   joinChamberByInvite,
+  getAllChambers,
+  updateChamber,
 } from '../controllers/chatmessages.controller';
-import { authMiddleware } from '../middleware/auth.middleware';
+import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -38,6 +40,12 @@ router.post('/join-chamber/:invite_code', authMiddleware, joinChamberByInvite);
 
 // get chambers
 router.get('/get-chambers', authMiddleware, getUserChambers);
+
+// get chambers
+router.get('/get-all-chambers', optionalAuthMiddleware, getAllChambers);
+
+// get chambers
+router.put('/update-chamber/:id', optionalAuthMiddleware, updateChamber);
 
 // get chamber members
 router.get('/get-chamber-members/:chamber_id', authMiddleware, getChamberMembers);
