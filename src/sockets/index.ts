@@ -11,6 +11,38 @@ type ChamberUpdateResponse = {
   code?: string;
 };
 
+interface Chamber {
+  id: string;
+  chamber_id: string;
+  name: string;
+  description: string;
+  is_public: boolean;
+  is_active: boolean;
+  creator_id: string;
+  chamber_img: string | null;
+  cover_img: string | null;
+  tags: string[];
+  member_count: number;
+  invite_code: string;
+  created_at: string;
+  updated_at: string;
+  last_message: {
+    id: string;
+    message: string;
+    has_media: boolean;
+    created_at: string;
+    sender_id: string;
+  } | null;
+  is_chamber: boolean;
+  creator: {
+    id: string;
+    user_name: string;
+    avatar_img: string;
+    avatar_url?: string;
+  };
+  is_online?: boolean;
+}
+
 export const connectedUsers = new Map<string, Set<string>>();
 
 export const registerSocketHandlers = (io: Server) => {
@@ -718,14 +750,37 @@ export const registerSocketHandlers = (io: Server) => {
     // --------------------- Chambers Events ------------------
 
     // Join a chamber (group)
-    socket.on('chamber_join', async (payload: {
-      chamber_id: string;
-      user_id: string;
-    }) => {
-      const { chamber_id, user_id } = payload;
+    socket.on('chamber_join', async (
+      payload: {
+        chamber_id: string;
+        user_id: string;
+        invite_code?: string;
+      },
+      callback: (response: {
+        success: boolean;
+        error?: string;
+        chamber?: Chamber;
+        member_count?: number;
+        is_pending?: boolean;
+      }) => void
+    ) => {
+      const { chamber_id, user_id, invite_code } = payload;
 
       try {
-        // Check if chamber exists and is active
+        // 1. Check existing membership
+        const { data: existingMember } = await supabase
+          .from('chamber_members')
+          .select('user_id')
+          .eq('chamber_id', chamber_id)
+          .eq('user_id', user_id)
+          .single();
+
+        if (existingMember) {
+          callback({ success: false, error: 'You are already a member' });
+          return;
+        }
+
+        // 2. Get chamber info
         const { data: chamber, error: chamberError } = await supabase
           .from('custom_chambers')
           .select('id, is_public, is_active, member_count')
@@ -733,55 +788,100 @@ export const registerSocketHandlers = (io: Server) => {
           .single();
 
         if (chamberError || !chamber) {
-          throw new Error(chamberError?.message || 'Chamber not found');
+          callback({ success: false, error: 'Chamber not found' });
+          return;
         }
 
         if (!chamber.is_active) {
-          throw new Error('This chamber is currently inactive');
+          callback({ success: false, error: 'Chamber is inactive' });
+          return;
         }
 
+        // 3. Handle private chambers
         if (!chamber.is_public) {
-          // For private chambers, check if user is a member
-          const { data: membership, error: membershipError } = await supabase
-            .from('chamber_members')
-            .select('user_id')
-            .eq('chamber_id', chamber_id)
-            .eq('user_id', user_id)
-            .single();
+          // Case 1: Using invite code
+          if (invite_code) {
+            const { data: validInvite } = await supabase
+              .from('chamber_invites')
+              .select('id')
+              .eq('chamber_id', chamber_id)
+              .eq('invite_code', invite_code)
+              .eq('status', 'pending')
+              .gte('expires_at', new Date().toISOString())
+              .single();
 
-          if (membershipError || !membership) {
-            throw new Error('Not authorized to join this private chamber');
+            if (!validInvite) {
+              callback({ success: false, error: 'Invalid or expired invite' });
+              return;
+            }
+          }
+          // Case 2: No invite - create join request
+          else {
+            const { error } = await supabase
+              .from('chamber_invites')
+              .insert({
+                chamber_id,
+                user_id,
+                status: 'pending',
+                request_type: 'join_request',
+                invite_code: null // Explicitly set to null
+              });
+
+            if (error) throw error;
+
+            callback({
+              success: true,
+              is_pending: true,
+              error: 'Join request submitted for approval'
+            });
+            return;
           }
         }
 
-        // Join the room
-        socket.join(`chamber_${chamber_id}`);
+        // 4. Add user to chamber
+        const { error: joinError } = await supabase
+          .from('chamber_members')
+          .insert({
+            chamber_id,
+            user_id,
+            joined_at: new Date().toISOString(),
+            is_moderator: false
+          });
 
-        // Get user profile
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, avatar_url')
-          .eq('id', user_id)
+        if (joinError) throw joinError;
+
+        // 5. Update invite if used
+        if (invite_code) {
+          await supabase
+            .from('chamber_invites')
+            .update({
+              status: 'accepted',
+              user_id
+            })
+            .eq('invite_code', invite_code);
+        }
+
+        // 6. Update member count
+        const { data: updatedChamber } = await supabase
+          .from('custom_chambers')
+          .update({ member_count: (chamber.member_count || 0) + 1 })
+          .eq('id', chamber_id)
+          .select('*')
           .single();
 
-        // Notify others in the chamber
-        socket.to(`chamber_${chamber_id}`).emit('chamber_user_joined', {
-          chamber_id,
-          user: userProfile,
-          timestamp: new Date().toISOString()
-        });
+        socket.join(`chamber_${chamber_id}`);
 
-        // Send success response with chamber details
-        socket.emit('chamber_joined', {
-          chamber_id,
-          member_count: chamber.member_count || 0
+        callback({
+          success: true,
+          chamber: updatedChamber,
+          member_count: updatedChamber?.member_count
         });
 
       } catch (error) {
-        console.error('Chamber join error:', error);
-        socket.emit('chamber_join_error', {
-          chamber_id,
-          error: error instanceof Error ? error.message : 'Failed to join chamber'
+        console.error('Join error:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to join'
         });
       }
     });
