@@ -203,10 +203,66 @@ const getReportsByPostId = async (
     }
 };
 
+const getReportedPosts = async (
+    req: Request,
+    res: Response
+): Promise<any> => {
+    try {
+        // Only select reports where thread_id is not null and post_id is null
+        const { data: reports, error: reportsError } = await supabase
+            .from('thread_reports')
+            .select('post_id')
+            .not('post_id', 'is', null)
+            .is('thread_id', null);
+
+        if (reportsError) {
+            return res.status(500).json({ error: 'Failed to fetch reports.' });
+        }
+
+        if (!reports || reports.length === 0) {
+            return res.status(200).json({ data: [], message: 'No reported threads found.' });
+        }
+
+        const countMap: Record<string, number> = {};
+        for (const report of reports) {
+            countMap[report.post_id] = (countMap[report.post_id] || 0) + 1;
+        }
+
+        const postIds = Object.keys(countMap);
+
+        const { data: posts, error: postsError } = await supabase
+            .from('posts')
+            .select('id, content, post_type,feeling_emoji,feeling_label,question_category, is_active')
+            .in('id', postIds);
+
+        if (postsError) {
+            return res.status(500).json({ error: 'Failed to fetch thread details.' });
+        }
+
+        const result = posts.map(post => ({
+    post_id: post.id,
+    content: post.content,
+    post_type: post.post_type,
+    feeling_emoji: post.feeling_emoji,
+    feeling_label: post.feeling_label,
+    question_category: post.question_category,
+    is_active: post.is_active,
+    total_reports: countMap[post.id] || 0,
+}));
+
+        return res.status(200).json(result);
+
+    } catch (err: any) {
+        console.error('Unexpected error:', err);
+        return res.status(500).json({ error: 'Internal server error', message: err.message });
+    }
+};
+
 export {
     createThreadReport,
     getReportsByThreadId,
     getReportedThreads,
     createPostReport,
     getReportsByPostId,
+    getReportedPosts,
 };
