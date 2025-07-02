@@ -171,7 +171,7 @@ export const getUserConversations = async (req: Request, res: Response): Promise
         }
 
         const chatIds = chats.map(chat => chat.id);
-        
+
         const { data: messages, error: messagesError } = await supabase
             .from('chatmessages')
             .select('id, chat_id, sender, message, created_at, has_media, media')
@@ -466,10 +466,10 @@ export const updateChamber = async (req: Request, res: Response): Promise<any> =
     try {
         const { id: userId } = req.user!;
         const chamberId = req.params.id;
-        const { 
-            name, 
-            description, 
-            is_public, 
+        const {
+            name,
+            description,
+            is_public,
             cover_img,
             chamber_img
         } = req.body;
@@ -853,7 +853,7 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
                 updated_at,
                 sender:profiles(id, first_name, last_name, avatar_url)
             `, { count: 'exact' })
-            .order('created_at', { ascending: true })
+            .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
 
         if (error) throw error;
