@@ -76,7 +76,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
-app.use('/api/posts', postsRoutes);
+// app.use('/api/posts', postsRoutes);
 cron.schedule('0 0 * * *', updateDailyInsights);
 
 const server = http.createServer(app);

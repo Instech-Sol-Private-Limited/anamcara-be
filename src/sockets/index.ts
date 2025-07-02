@@ -915,10 +915,12 @@ export const registerSocketHandlers = (io: Server) => {
       chamber_id: string;
       sender_id: string;
       message: string;
+      has_media: boolean;
+      media: string[];
       reply_to?: string;
     }) => {
       try {
-        const { chamber_id, sender_id, message, reply_to } = payload;
+        const { chamber_id, sender_id, message, has_media, media, reply_to } = payload;
         const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, sender_id);
 
         if (!isCreator && !isModerator) {
@@ -938,15 +940,16 @@ export const registerSocketHandlers = (io: Server) => {
           }
         }
 
-        if (!message || message.trim().length === 0) {
+        // At least one of message or media must be present
+        if ((!message || message.trim().length === 0) && (!has_media || !media || media.length === 0)) {
           socket.emit('chamber_message_error', {
             chamber_id,
-            error: 'Message cannot be empty'
+            error: 'Message text or media file is required'
           });
           return;
         }
 
-        if (message.length > 2000) {
+        if (message && message.length > 2000) {
           socket.emit('chamber_message_error', {
             chamber_id,
             error: 'Message must be 2000 characters or less'
@@ -976,7 +979,9 @@ export const registerSocketHandlers = (io: Server) => {
           .insert([{
             chamber_id,
             sender_id,
-            message,
+            message: message && message.trim().length > 0 ? message : null,
+            has_media,
+            media: has_media && media && media.length > 0 ? media : null,
             reply_to: reply_to || null,
             is_edited: false,
             is_deleted: false,
@@ -996,7 +1001,7 @@ export const registerSocketHandlers = (io: Server) => {
           .eq('id', sender_id)
           .single();
 
-        const completeMessage = {
+        const completeMessage: any = {
           ...insertedMessage,
           sender: senderProfile
         };
@@ -1187,148 +1192,63 @@ export const registerSocketHandlers = (io: Server) => {
     });
 
     // Chamber typing indicators
-    socket.on('chamber_typing', async ({
-      chamber_id,
-      sender_id
-    }: {
-      chamber_id: string;
-      sender_id: string;
-    }) => {
-      // Verify user is in the chamber
-      const { data: membership } = await supabase
-        .from('chamber_members')
-        .select('user_id')
-        .eq('chamber_id', chamber_id)
-        .eq('user_id', sender_id)
-        .single();
-
-      if (membership) {
-        socket.to(`chamber_${chamber_id}`).emit('chamber_user_typing', {
-          chamber_id,
-          sender_id,
-          timestamp: new Date().toISOString()
-        });
-      }
-    });
-
-    socket.on('chamber_stop_typing', async ({
-      chamber_id,
-      sender_id
-    }: {
-      chamber_id: string;
-      sender_id: string;
-    }) => {
-      // Verify user is in the chamber
-      const { data: membership } = await supabase
-        .from('chamber_members')
-        .select('user_id')
-        .eq('chamber_id', chamber_id)
-        .eq('user_id', sender_id)
-        .single();
-
-      if (membership) {
-        socket.to(`chamber_${chamber_id}`).emit('chamber_user_stop_typing', {
-          chamber_id,
-          sender_id,
-          timestamp: new Date().toISOString()
-        });
-      }
-    });
-
-    // Get chamber history
-    socket.on('chamber_get_history', async ({
-      chamber_id,
-      user_id,
-      limit = 50,
-      offset = 0
-    }: {
-      chamber_id: string;
-      user_id: string;
-      limit?: number;
-      offset?: number;
-    }) => {
+    socket.on('chamber_typing', async (
+      payload: {
+        chamber_id: string;
+        sender_id: string;
+      },
+    ) => {
       try {
-        // Verify user has access to the chamber
-        const { data: chamber } = await supabase
-          .from('custom_chambers')
-          .select('is_public')
-          .eq('id', chamber_id)
-          .single();
+        const { chamber_id, sender_id } = payload;
 
-        if (!chamber) throw new Error('Chamber not found');
-
-        if (!chamber.is_public) {
-          const { data: membership } = await supabase
-            .from('chamber_members')
-            .select('user_id')
-            .eq('chamber_id', chamber_id)
-            .eq('user_id', user_id)
-            .single();
-
-          if (!membership) throw new Error('Not authorized to view this chamber');
+        if (!chamber_id || !sender_id) {
+          throw new Error('Missing required fields');
         }
 
-        // Get messages with sender profiles
-        const { data: messages, error } = await supabase
-          .from('chamber_messages')
-          .select(`
-        id,
-        chamber_id,
-        sender_id,
-        message,
-        is_edited,
-        is_deleted,
-        created_at,
-        updated_at,
-        reply_to,
-        profiles: sender_id (id, first_name, last_name, avatar_url)
-      `)
-          .eq('chamber_id', chamber_id)
-          .order('created_at', { ascending: false })
-          .range(offset, offset + limit - 1);
+        const typingPayload = {
+          chamber_id,
+          sender_id,
+          timestamp: new Date().toISOString()
+        };
 
-        if (error) throw error;
-
-        // For messages that are replies, get the parent message details
-        const messagesWithReplies = await Promise.all(
-          messages.map(async (msg: any) => {
-            if (!msg.reply_to) return msg;
-
-            const { data: parentMessage } = await supabase
-              .from('chamber_messages')
-              .select(`
-            id,
-            message,
-            sender_id,
-            profiles: sender_id (id, first_name, last_name)
-          `)
-              .eq('id', msg.reply_to)
-              .single();
-
-            return {
-              ...msg,
-              replied_message: parentMessage ? {
-                id: parentMessage.id,
-                message: parentMessage.message,
-                sender: parentMessage.profiles
-              } : null
-            };
-          })
+        await notifyChamberMembers(
+          chamber_id,
+          'chamber_user_typing',
+          typingPayload,
         );
 
-        socket.emit('chamber_history', {
-          chamber_id,
-          messages: messagesWithReplies.reverse(), // Return in chronological order
-          limit,
-          offset
-        });
+      } catch (error: unknown) {
+        console.error('Typing indicator error:', error);
+      }
+    });
 
-      } catch (error) {
-        console.error('Chamber history error:', error);
-        socket.emit('chamber_history_error', {
+    socket.on('chamber_stop_typing', async (
+      payload: {
+        chamber_id: string;
+        sender_id: string;
+      },
+    ) => {
+      try {
+        const { chamber_id, sender_id } = payload;
+
+        if (!chamber_id || !sender_id) {
+          throw new Error('Missing required fields');
+        }
+
+        const stopTypingPayload = {
           chamber_id,
-          error: error instanceof Error ? error.message : 'Failed to load chamber history'
-        });
+          sender_id,
+          timestamp: new Date().toISOString()
+        };
+
+        await notifyChamberMembers(
+          chamber_id,
+          'chamber_user_stop_typing',
+          stopTypingPayload,
+        );
+
+      } catch (error: unknown) {
+        console.error('Stop typing indicator error:', error);
       }
     });
 

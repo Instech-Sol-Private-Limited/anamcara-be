@@ -162,7 +162,8 @@ export const getUserConversations = async (req: Request, res: Response): Promise
         const { data: chats, error: chatsError } = await supabase
             .from('chats')
             .select('id, user_1, user_2, created_at, updated_at')
-            .or(`and(user_1.eq.${userId},user_2.in.(${friendIds.join(',')})),and(user_2.eq.${userId},user_1.in.(${friendIds.join(',')}))`);
+            .or(`and(user_1.eq.${userId},user_2.in.(${friendIds.join(',')})),and(user_2.eq.${userId},user_1.in.(${friendIds.join(',')}))`)
+            .order('updated_at', { ascending: false });
 
         if (chatsError) throw chatsError;
         if (!chats || chats.length === 0) {
@@ -170,10 +171,12 @@ export const getUserConversations = async (req: Request, res: Response): Promise
         }
 
         const chatIds = chats.map(chat => chat.id);
+
         const { data: messages, error: messagesError } = await supabase
             .from('chatmessages')
             .select('id, chat_id, sender, message, created_at, has_media, media')
-            .in('chat_id', chatIds);
+            .in('chat_id', chatIds)
+            .order('created_at', { ascending: false });
 
         if (messagesError) throw messagesError;
 
@@ -214,7 +217,8 @@ export const getUserConversations = async (req: Request, res: Response): Promise
                     id: lastMessage.id,
                     message: lastMessage.message,
                     has_media: lastMessage.has_media,
-                    created_at: lastMessage.created_at
+                    created_at: lastMessage.created_at,
+                    sender: lastMessage.sender
                 } : null,
                 user: {
                     id: otherUserId,
@@ -224,9 +228,11 @@ export const getUserConversations = async (req: Request, res: Response): Promise
                     avatar_img: profile?.avatar_url || ''
                 }
             };
-        }).sort((a, b) =>
-            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-        );
+        }).sort((a, b) => {
+            const aTime = a.last_message?.created_at || a.updated_at;
+            const bTime = b.last_message?.created_at || b.updated_at;
+            return new Date(bTime).getTime() - new Date(aTime).getTime();
+        });
 
         return res.json({ success: true, data: formatted });
     } catch (error) {
@@ -460,10 +466,10 @@ export const updateChamber = async (req: Request, res: Response): Promise<any> =
     try {
         const { id: userId } = req.user!;
         const chamberId = req.params.id;
-        const { 
-            name, 
-            description, 
-            is_public, 
+        const {
+            name,
+            description,
+            is_public,
             cover_img,
             chamber_img
         } = req.body;
@@ -798,7 +804,7 @@ export const getDirectMessages = async (req: Request, res: Response): Promise<an
             .from('chatmessages')
             .select('*', { count: 'exact' })
             .eq('chat_id', chatId)
-            .order('created_at', { ascending: true })
+            .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
 
         if (error) throw error;
@@ -847,7 +853,7 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
                 updated_at,
                 sender:profiles(id, first_name, last_name, avatar_url)
             `, { count: 'exact' })
-            .order('created_at', { ascending: true })
+            .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
 
         if (error) throw error;
