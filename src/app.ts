@@ -22,6 +22,7 @@ import { Server } from 'socket.io';
 import { registerSocketHandlers } from './sockets';
 import friendsRoutes from './routes/friends.routes';
 import postsRoutes from './routes/posts.routes';
+import courseRouter from './routes/course.routes';
 dotenv.config();
 
 const app = express();
@@ -76,7 +77,9 @@ app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
-// app.use('/api/posts', postsRoutes);
+app.use('/api/posts', postsRoutes);
+app.use('/api/course', courseRouter);
+
 cron.schedule('0 0 * * *', updateDailyInsights);
 
 const server = http.createServer(app);
