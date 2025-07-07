@@ -59,7 +59,7 @@ router.patch('/toggle-status/:thread_id', authMiddleware, toggleThreadStatus);
 // ======================= thread's comments ========================
 
 // get all comments(range)
-router.get('/get-comments/:thread_id', optionalAuthMiddleware, getComments);
+router.get('/get-comments', optionalAuthMiddleware, getComments);
 
 // create a new comment
 router.post('/add-comment', authMiddleware, createComment);

@@ -19,23 +19,14 @@ const createReply = async (req: Request, res: Response): Promise<any> => {
 
         const { id: user_id, first_name, last_name } = req.user!;
 
-        const requiredFields = {
-            content,
-            comment_id,
-            user_id,
-            user_name: first_name,
-        };
-
-        for (const [key, value] of Object.entries(requiredFields)) {
-            if (!value) {
-                const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-                return res.status(400).json({ error: `${formattedKey} is required!` });
-            }
+        if (!content || !comment_id || !user_id || !first_name) {
+            return res.status(400).json({ error: 'Missing required fields!' });
         }
 
+        // Fetch parent comment (get thread_id and post_id)
         const { data: commentData, error: commentError } = await supabase
             .from('threadcomments')
-            .select('id, user_id, thread_id, content')
+            .select('id, user_id, thread_id, post_id, content')
             .eq('id', comment_id)
             .single();
 
@@ -43,6 +34,7 @@ const createReply = async (req: Request, res: Response): Promise<any> => {
             return res.status(400).json({ error: 'Parent comment not found!' });
         }
 
+        // Insert reply
         const { data, error } = await supabase
             .from('threadsubcomments')
             .insert([{
@@ -54,36 +46,90 @@ const createReply = async (req: Request, res: Response): Promise<any> => {
             .select();
 
         if (error) {
-            console.error('Supabase insert error:', error);
-            return res.status(500).json({
-                error: error.message || 'Unknown error occurred while adding subcomment!',
-                details: error.details || null,
-                hint: error.hint || null,
-            });
+            return res.status(500).json({ error: error.message || 'Unknown error occurred while adding reply!' });
         }
 
         if (!data || data.length === 0) {
-            return res.status(500).json({ error: 'Failed to add subcomment!' });
+            return res.status(500).json({ error: 'Failed to add reply!' });
         }
 
-        if (commentData && commentData.user_id !== user_id) {
-            const { data: userData, error: userError } = await supabase
+        // Determine if this is a thread or post comment
+        let parentType: 'thread' | 'post', parentId: string, parentTitle: string, parentAuthorId: string;
+        if (commentData.thread_id) {
+            parentType = 'thread';
+            parentId = commentData.thread_id;
+            // Fetch thread info
+            const { data: threadData } = await supabase
+                .from('threads')
+                .select('title, author_id')
+                .eq('id', parentId)
+                .single();
+            parentTitle = threadData?.title || 'a thread';
+            parentAuthorId = threadData?.author_id;
+        } else if (commentData.post_id) {
+            parentType = 'post';
+            parentId = commentData.post_id;
+            // Fetch post info
+            const { data: postData } = await supabase
+                .from('posts')
+                .select('content, user_id')
+                .eq('id', parentId)
+                .single();
+            parentTitle = postData?.content?.slice(0, 30) || 'a post';
+            parentAuthorId = postData?.user_id;
+        } else {
+            return res.status(400).json({ error: 'Comment is not linked to a thread or post.' });
+        }
+
+        // Notify comment author (if not self)
+        if (commentData.user_id !== user_id) {
+            const { data: userData } = await supabase
                 .from('profiles')
                 .select('email')
                 .eq('id', commentData.user_id)
                 .single();
 
-            if (!userError && userData?.email) {
+            if (userData?.email) {
                 await sendNotification({
                     recipientEmail: userData.email,
                     recipientUserId: commentData.user_id,
                     actorUserId: user_id,
-                    threadId: commentData.thread_id,
+                    threadId: parentId, // always use threadId for NotificationInput
                     message: `${first_name}${last_name ? ` ${last_name}` : ''} replied to your comment: **${getCommentPreview(commentData.content)}**`,
-                    type: 'reply',
+                    type: parentType === 'thread' ? 'reply' : 'post_reply',
                     metadata: {
                         comment_id,
+                        reply_id: data[0].id,
                         replier_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+                        [`${parentType}_id`]: parentId,
+                        [`${parentType}_title`]: parentTitle
+                    },
+                });
+            }
+        }
+
+        // Optionally: notify thread/post author if different from comment author and replier
+        if (parentAuthorId && parentAuthorId !== user_id && parentAuthorId !== commentData.user_id) {
+            const { data: parentAuthorProfile } = await supabase
+                .from('profiles')
+                .select('email')
+                .eq('id', parentAuthorId)
+                .single();
+
+            if (parentAuthorProfile?.email) {
+                await sendNotification({
+                    recipientEmail: parentAuthorProfile.email,
+                    recipientUserId: parentAuthorId,
+                    actorUserId: user_id,
+                    threadId: parentId,
+                    message: `${first_name}${last_name ? ` ${last_name}` : ''} replied to a comment on your ${parentType}.`,
+                    type: parentType === 'thread' ? 'reply' : 'post_reply',
+                    metadata: {
+                        comment_id,
+                        reply_id: data[0].id,
+                        replier_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+                        [`${parentType}_id`]: parentId,
+                        [`${parentType}_title`]: parentTitle
                     },
                 });
             }
@@ -91,10 +137,10 @@ const createReply = async (req: Request, res: Response): Promise<any> => {
 
         return res.status(201).json({
             message: 'Reply created successfully!',
+            data: data[0]
         });
 
     } catch (err: any) {
-        console.error('Unexpected error in adding reply:', err);
         return res.status(500).json({
             error: 'Internal server error while creating reply.',
             message: err.message || 'Unexpected failure.',
@@ -111,18 +157,18 @@ const deleteReply = async (
         const { reply_id } = req.params;
         const { id: user_id, role } = req.user!;
 
-        const { data: comment, error: fetchError } = await supabase
+        const { data: reply, error: fetchError } = await supabase
             .from('threadsubcomments')
             .select('id, user_id')
-            .eq('is_deleted', false)
             .eq('id', reply_id)
+            .eq('is_deleted', false)
             .single();
 
-        if (fetchError || !comment) {
+        if (fetchError || !reply) {
             return res.status(404).json({ error: 'Reply not found!' });
         }
 
-        const isAuthor = comment.user_id === user_id;
+        const isAuthor = reply.user_id === user_id;
         const isSuperadmin = role === 'superadmin';
 
         if (!isAuthor && !isSuperadmin) {
@@ -143,13 +189,13 @@ const deleteReply = async (
         return res.status(200).json({ message: 'Reply deleted successfully!' });
 
     } catch (err: any) {
-        console.error('Unexpected error in deleteComment:', err);
         return res.status(500).json({
             error: 'Internal server error while deleting reply.',
             message: err.message || 'Unexpected failure.',
         });
     }
 };
+
 
 // update comment
 const updateReply = async (
@@ -221,50 +267,48 @@ const getReplies = async (
     const user_id = req.user?.id;
 
     if (!comment_id) {
-        return res.status(400).json({ error: 'Thread ID is required.' });
+        return res.status(400).json({ error: 'Comment ID is required.' });
+    }
+
+    // Fetch parent comment to determine thread/post context
+    const { data: commentData, error: commentError } = await supabase
+        .from('threadcomments')
+        .select('thread_id, post_id')
+        .eq('id', comment_id)
+        .single();
+
+    if (commentError || !commentData) {
+        return res.status(404).json({ error: 'Parent comment not found!' });
     }
 
     const { data: replies, error } = await supabase
         .from('threadsubcomments')
-        .select(`
-            *,
-            profiles!inner(avatar_url)
-        `)
+        .select(`*, profiles!inner(id, first_name, last_name, avatar_url, email)`)
         .eq('comment_id', comment_id)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
     if (error) {
-        console.error('Error fetching subcomments:', error);
         return res.status(500).json({ error: error.message });
     }
 
-    const commentsWithReactions = await Promise.all(replies.map(async (reply) => {
+    const repliesWithReactions = await Promise.all(replies.map(async (reply) => {
         let userReaction = null;
-
         if (user_id) {
-            const { data: reactionData, error: reactionError } = await supabase
+            const { data: reactionData } = await supabase
                 .from('thread_reactions')
                 .select('type')
                 .eq('user_id', user_id)
                 .eq('target_type', 'reply')
                 .eq('target_id', reply.id)
                 .maybeSingle();
-
-            if (!reactionError && reactionData) {
-                userReaction = reactionData.type;
-            }
+            if (reactionData) userReaction = reactionData.type;
         }
-
-        return {
-            ...reply,
-            user_reaction: userReaction,
-        };
+        return { ...reply, user_reaction: userReaction };
     }));
 
-    return res.status(200).json({ replies: commentsWithReactions });
-
+    return res.status(200).json({ replies: repliesWithReactions });
 };
 
 // apply like/dislike
@@ -278,18 +322,7 @@ const updateReplyReaction = async (
 
     if (!user_id) return res.status(401).json({ error: 'Unauthorized user!' });
 
-    const { data: existing, error: fetchError } = await supabase
-        .from('thread_reactions')
-        .select('*')
-        .eq('user_id', user_id)
-        .eq('target_id', reply_id)
-        .eq('target_type', 'reply')
-        .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-        return res.status(500).json({ error: fetchError.message });
-    }
-
+    // Fetch reply and parent comment to determine thread/post context
     const { data: replyData, error: replyError } = await supabase
         .from('threadsubcomments')
         .select('id, user_id, content, comment_id, total_likes, total_dislikes, is_deleted')
@@ -303,7 +336,7 @@ const updateReplyReaction = async (
 
     const { data: parentComment, error: commentError } = await supabase
         .from('threadcomments')
-        .select('thread_id')
+        .select('thread_id, post_id')
         .eq('id', replyData.comment_id)
         .single();
 
@@ -311,34 +344,60 @@ const updateReplyReaction = async (
         return res.status(404).json({ error: 'Parent comment not found!' });
     }
 
-    const { data: threadData, error: threadError } = await supabase
-        .from('threads')
-        .select('title')
-        .eq('id', parentComment.thread_id)
-        .single();
-
-    if (threadError || !threadData) {
-        return res.status(404).json({ error: 'Thread not found!' });
+    // Determine if this is a thread or post reply
+    let parentType: 'thread' | 'post', parentId: string, parentTitle: string, parentAuthorId: string;
+    if (parentComment.thread_id) {
+        parentType = 'thread';
+        parentId = parentComment.thread_id;
+        // Fetch thread info
+        const { data: threadData } = await supabase
+            .from('threads')
+            .select('title, author_id')
+            .eq('id', parentId)
+            .single();
+        parentTitle = threadData?.title || 'a thread';
+        parentAuthorId = threadData?.author_id;
+    } else if (parentComment.post_id) {
+        parentType = 'post';
+        parentId = parentComment.post_id;
+        // Fetch post info
+        const { data: postData } = await supabase
+            .from('posts')
+            .select('content, user_id')
+            .eq('id', parentId)
+            .single();
+        parentTitle = postData?.content?.slice(0, 30) || 'a post';
+        parentAuthorId = postData?.user_id;
+    } else {
+        return res.status(400).json({ error: 'Comment is not linked to a thread or post.' });
     }
 
-    const threadTitle = threadData.title || 'a thread';
-    const truncatedTitle = threadTitle.split(' ').length > 3
-        ? threadTitle.split(' ').slice(0, 3).join(' ') + '...'
-        : threadTitle;
+    const truncatedTitle = parentTitle.split(' ').length > 3
+        ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
+        : parentTitle;
+
+    const { data: existing, error: fetchError } = await supabase
+        .from('thread_reactions')
+        .select('*')
+        .eq('user_id', user_id)
+        .eq('target_id', reply_id)
+        .eq('target_type', 'reply')
+        .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+        return res.status(500).json({ error: fetchError.message });
+    }
 
     const shouldNotify = replyData.user_id !== user_id;
 
     let authorProfile = null;
     if (shouldNotify) {
-        const { data: profileData, error: profileError } = await supabase
+        const { data: profileData } = await supabase
             .from('profiles')
             .select('email, first_name, last_name')
             .eq('id', replyData.user_id)
             .single();
-
-        if (!profileError && profileData?.email) {
-            authorProfile = profileData;
-        }
+        if (profileData) authorProfile = profileData;
     }
 
     let newTotalLikes = replyData.total_likes ?? 0;
@@ -372,15 +431,15 @@ const updateReplyReaction = async (
                     recipientEmail: authorProfile.email,
                     recipientUserId: replyData.user_id,
                     actorUserId: user_id,
-                    threadId: parentComment.thread_id,
-                    message: `_${getReactionDisplayName(type)}_ reaction was removed from your reply: "${getContentPreview(replyData.content)}" on thread **${truncatedTitle}**`,
-                    type: 'reaction_removed',
+                    threadId: parentId,
+                    message: `_${getReactionDisplayName(type)}_ reaction was removed from your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
+                    type: parentType === 'thread' ? 'reaction_removed' : 'post_reply_reaction_removed',
                     metadata: {
                         reaction_type: type,
                         reply_id,
                         comment_id: replyData.comment_id,
-                        thread_id: parentComment.thread_id,
-                        thread_title: threadTitle,
+                        [`${parentType}_id`]: parentId,
+                        [`${parentType}_title`]: parentTitle,
                         reply_content: replyData.content,
                         actor_user_id: user_id
                     }
@@ -414,16 +473,16 @@ const updateReplyReaction = async (
                 recipientEmail: authorProfile.email,
                 recipientUserId: replyData.user_id,
                 actorUserId: user_id,
-                threadId: parentComment.thread_id,
-                message: `Reaction changed to _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on thread **${truncatedTitle}**`,
-                type: 'reaction_updated',
+                threadId: parentId,
+                message: `Reaction changed to _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
+                type: parentType === 'thread' ? 'reaction_updated' : 'post_reply_reaction_updated',
                 metadata: {
                     previous_reaction_type: existing.type,
                     new_reaction_type: type,
                     reply_id,
                     comment_id: replyData.comment_id,
-                    thread_id: parentComment.thread_id,
-                    thread_title: threadTitle,
+                    [`${parentType}_id`]: parentId,
+                    [`${parentType}_title`]: parentTitle,
                     reply_content: replyData.content,
                     actor_user_id: user_id
                 }
@@ -455,16 +514,16 @@ const updateReplyReaction = async (
                 recipientEmail: authorProfile.email,
                 recipientUserId: replyData.user_id,
                 actorUserId: user_id,
-                threadId: parentComment.thread_id,
-                message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on thread **${truncatedTitle}**`,
-                type: 'reaction_added',
+                threadId: parentId,
+                message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
+                type: parentType === 'thread' ? 'reaction_added' : 'post_reply_reaction_added',
                 metadata: {
                     reaction_type: type,
                     soulpoints: soulpointsMap[type],
                     reply_id,
                     comment_id: replyData.comment_id,
-                    thread_id: parentComment.thread_id,
-                    thread_title: threadTitle,
+                    [`${parentType}_id`]: parentId,
+                    [`${parentType}_title`]: parentTitle,
                     reply_content: replyData.content,
                     actor_user_id: user_id
                 }
