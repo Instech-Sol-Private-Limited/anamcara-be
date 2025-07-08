@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
-import { getUserEmailFromId, getUserFriends } from './getUserFriends';
+import { getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
 
 type ChamberUpdateResponse = {
@@ -135,6 +135,132 @@ export const registerSocketHandlers = (io: Server) => {
         onlineFriends.forEach(friendEmail => {
           socket.emit('friend_online', friendEmail);
         });
+      }
+    });
+
+
+    // --------------------- Story Views ------------------
+    socket.on('record_story_view', async ({ storyId }: { storyId: string }) => {
+      try {
+        console.log('story_view', storyId)
+        let userEmail: string | null = null;
+        let userId: string | null = null;
+
+        for (const [email, sockets] of connectedUsers.entries()) {
+          if (sockets.has(socket.id)) {
+            userEmail = email;
+            break;
+          }
+        }
+
+        if (!userEmail) {
+          console.error('User not found in connected users');
+          return;
+        }
+
+        // Get viewer's user ID
+        userId = await getUserIdFromEmail(userEmail);
+        if (!userId) {
+          console.error('User ID not found for email:', userEmail);
+          return;
+        }
+
+        // Get story details
+        const { data: story, error: storyError } = await supabase
+          .from('stories')
+          .select('user_id, view_count')
+          .eq('id', storyId)
+          .single();
+
+        if (storyError || !story) {
+          console.error('Story not found:', storyError?.message);
+          return;
+        }
+
+        // Don't record if viewer is the creator
+        if (story.user_id === userId) {
+          return;
+        }
+
+        // Check if view already exists
+        const { data: existingView } = await supabase
+          .from('story_views')
+          .select('id')
+          .eq('story_id', storyId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (existingView) {
+          console.log(`View already exists for story ${storyId} by user ${userId}`);
+          return;
+        }
+
+        // Record the new view
+        const { data: view, error: viewError } = await supabase
+          .from('story_views')
+          .upsert({
+            story_id: storyId,
+            user_id: userId
+          }, {
+            onConflict: 'story_id,user_id'
+          })
+          .select()
+          .single();
+
+        if (viewError) {
+          console.error('View recording failed:', viewError.message);
+          return;
+        }
+
+        // Get updated view count
+        const { count: viewCount } = await supabase
+          .from('story_views')
+          .select('*', { count: 'exact' })
+          .eq('story_id', storyId);
+
+        // Get creator's email
+        const creatorEmail = await getUserEmailFromId(story.user_id);
+        if (!creatorEmail) return;
+
+        // Get viewer details
+        const { data: viewer, error: viewerError } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, avatar_url')
+          .eq('id', userId)
+          .single();
+
+        if (viewerError || !viewer) {
+          console.error('Error fetching viewer details:', viewerError?.message);
+          return;
+        }
+
+        // Prepare view data
+        const viewData = {
+          storyId,
+          viewId: view.id,
+          viewedAt: new Date().toISOString(),
+          viewer,
+          viewCount: viewCount || 0
+        };
+
+        // Notify the creator if online
+        const creatorSockets = connectedUsers.get(creatorEmail);
+        if (creatorSockets) {
+          creatorSockets.forEach(socketId => {
+            io.to(socketId).emit('story_viewed', viewData);
+          });
+        }
+
+        // Also emit to the viewer to update their local state
+        if (connectedUsers.has(userEmail)) {
+          connectedUsers.get(userEmail)?.forEach(socketId => {
+            io.to(socketId).emit('story_view_update', viewData);
+          });
+        }
+
+        console.log(`👀 View recorded for story ${storyId} by ${userEmail}`);
+      } catch (error) {
+        console.error('Error in record_story_view:', error);
       }
     });
 
@@ -425,13 +551,34 @@ export const registerSocketHandlers = (io: Server) => {
     socket.on('public_send_message', async (payload: {
       sender_id: string;
       message: string;
+      reply_to?: string | null;
     }) => {
-      const { sender_id, message } = payload;
+      const { sender_id, message, reply_to } = payload;
 
       try {
+        // Validate message length
+        if (!message.trim() || message.length > 1000) {
+          throw new Error('Message must be between 1 and 1000 characters');
+        }
+
+        // Validate reply_to exists if provided
+        if (reply_to) {
+          const { data: repliedMessage, error: replyError } = await supabase
+            .from('public_chat')
+            .select('id')
+            .eq('id', reply_to)
+            .is('is_deleted', false)
+            .single();
+
+          if (replyError || !repliedMessage) {
+            throw new Error('Original message not found or has been deleted');
+          }
+        }
+
         const messageData = {
           sender_id,
           message,
+          reply_to: reply_to || null,
           is_edited: false,
           is_deleted: false,
           created_at: new Date().toISOString(),
@@ -439,15 +586,59 @@ export const registerSocketHandlers = (io: Server) => {
           deleted_at: null
         };
 
+        // First insert the base message without the reply_to to avoid circular reference
         const { data: insertedMessage, error: insertError } = await supabase
           .from('public_chat')
-          .insert([messageData])
+          .insert([{ ...messageData, reply_to: null }])
           .select()
           .single();
 
         if (insertError || !insertedMessage) {
           throw new Error(insertError?.message || 'Failed to insert public message');
         }
+
+        // If there's a reply_to, update the message with the correct reference
+        if (reply_to) {
+          const { error: updateError } = await supabase
+            .from('public_chat')
+            .update({ reply_to })
+            .eq('id', insertedMessage.id);
+
+          if (updateError) {
+            // Rollback the insertion if update fails
+            await supabase
+              .from('public_chat')
+              .delete()
+              .eq('id', insertedMessage.id);
+            throw new Error(updateError.message || 'Failed to set message reply');
+          }
+
+          // Refetch the complete message with reply data
+          const { data: updatedMessage } = await supabase
+            .from('public_chat')
+            .select(`
+          *,
+          replied_message:public_chat!reply_to (
+            id,
+            message,
+            sender_id,
+            profiles:profiles!public_chat_sender_id_fkey (
+              id,
+              first_name,
+              last_name,
+              avatar_url
+            )
+          )
+        `)
+            .eq('id', insertedMessage.id)
+            .single();
+
+          if (updatedMessage) {
+            insertedMessage.reply_to = reply_to;
+            insertedMessage.replied_message = updatedMessage.replied_message;
+          }
+        }
+
         const { data: senderProfile } = await supabase
           .from('profiles')
           .select('id, first_name, last_name, avatar_url')
@@ -456,10 +647,17 @@ export const registerSocketHandlers = (io: Server) => {
 
         const completeMessage = {
           ...insertedMessage,
-          sender: senderProfile
+          sender: senderProfile,
+          replied_message: insertedMessage.replied_message ? {
+            ...insertedMessage.replied_message,
+            sender: insertedMessage.replied_message.profiles
+          } : null
         };
 
-        // Broadcast to all connected users
+        if (completeMessage.replied_message) {
+          delete completeMessage.replied_message.profiles;
+        }
+
         io.emit('public_receive_message', completeMessage);
         socket.emit('public_message_sent', completeMessage);
 
@@ -589,13 +787,15 @@ export const registerSocketHandlers = (io: Server) => {
     socket.on('travel_send_message', async (payload: {
       sender_id: string;
       message: string;
+      reply_to: string;
     }) => {
-      const { sender_id, message } = payload;
+      const { sender_id, message, reply_to } = payload;
 
       try {
         const messageData = {
           sender_id,
           message,
+          reply_to,
           is_edited: false,
           is_deleted: false,
           created_at: new Date().toISOString(),
