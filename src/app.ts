@@ -80,7 +80,7 @@ app.use('/api/friends', friendsRoutes);
 app.use("/api/stories", storiesRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
-app.use('/api/course', courseRouter);
+app.use('/api/courses', courseRouter);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 

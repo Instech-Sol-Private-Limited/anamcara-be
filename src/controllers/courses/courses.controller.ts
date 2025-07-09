@@ -1,6 +1,21 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../app';
 
+const INSTRUCTOR_SELECT = `
+  id,
+  first_name,
+  last_name,
+  avatar_url,
+  email,
+  bio,
+  expertise,
+  title,
+  company,
+  website_url,
+  linkedin_url,
+  years_experience
+`;
+
 // GET /api/courses - Get all courses with filters and pagination
 export const getAllCourses = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -16,17 +31,16 @@ export const getAllCourses = async (req: Request, res: Response): Promise<void> 
       featured
     } = req.query;
 
+    console.log(req.query);
+
+    // For rating and popular sorts, we need to fetch all data first
+    const needsClientSorting = sort === 'rating' || sort === 'popular';
+
     let query = supabase
       .from('courses')
       .select(`
         *,
-        instructor:profiles!courses_instructor_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        ),
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
         category:course_categories!courses_category_id_fkey (
           id,
           name,
@@ -64,43 +78,64 @@ export const getAllCourses = async (req: Request, res: Response): Promise<void> 
       query = query.eq('is_featured', true);
     }
 
-    // Apply sorting
-    switch (sort) {
-      case 'newest':
-        query = query.order('created_at', { ascending: false });
-        break;
-      case 'oldest':
-        query = query.order('created_at', { ascending: true });
-        break;
-      case 'price_low':
-        query = query.order('price', { ascending: true });
-        break;
-      case 'price_high':
-        query = query.order('price', { ascending: false });
-        break;
-      case 'rating':
-        query = query.order('average_rating', { ascending: false, nullsFirst: false });
-        break;
-      case 'popular':
-        query = query.order('total_enrollments', { ascending: false, nullsFirst: false });
-        break;
-      default:
-        query = query.order('created_at', { ascending: false });
+    // Apply database sorting for simple sorts (not rating/popular)
+    if (!needsClientSorting) {
+      switch (sort) {
+        case 'newest':
+          query = query.order('created_at', { ascending: false });
+          break;
+        case 'oldest':
+          query = query.order('created_at', { ascending: true });
+          break;
+        case 'price_low':
+          query = query.order('price', { ascending: true });
+          break;
+        case 'price_high':
+          query = query.order('price', { ascending: false });
+          break;
+        default:
+          query = query.order('created_at', { ascending: false });
+      }
+
+      // Apply pagination for database-sorted queries
+      const offset = (Number(page) - 1) * Number(limit);
+      query = query.range(offset, offset + Number(limit) - 1);
     }
 
-    // Apply pagination
-    const offset = (Number(page) - 1) * Number(limit);
-    query = query.range(offset, offset + Number(limit) - 1);
-
     const { data, error, count } = await query;
-
     if (error) throw error;
+
+    let sortedData = data;
+    let paginatedData = data;
+
+    // Handle client-side sorting for rating and popular
+    if (needsClientSorting && data) {
+      if (sort === 'rating') {
+        sortedData = [...data].sort((a, b) => {
+          const aRating = a.stats?.average_rating || 0;
+          const bRating = b.stats?.average_rating || 0;
+          return bRating - aRating;
+        });
+      } else if (sort === 'popular') {
+        sortedData = [...data].sort((a, b) => {
+          const aEnrollments = a.stats?.total_enrollments || 0;
+          const bEnrollments = b.stats?.total_enrollments || 0;
+          return bEnrollments - aEnrollments;
+        });
+      }
+
+      // Apply pagination AFTER sorting
+      const offset = (Number(page) - 1) * Number(limit);
+      paginatedData = sortedData.slice(offset, offset + Number(limit));
+    } else {
+      paginatedData = sortedData;
+    }
 
     const totalPages = Math.ceil((count || 0) / Number(limit));
 
     res.json({
       success: true,
-      data,
+      data: paginatedData,
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -125,13 +160,7 @@ export const getFeaturedCourses = async (req: Request, res: Response): Promise<v
       .from('courses')
       .select(`
         *,
-        instructor:profiles!courses_instructor_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        ),
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
         category:course_categories!courses_category_id_fkey (
           id,
           name,
@@ -176,13 +205,7 @@ export const getCourseById = async (req: Request, res: Response): Promise<void> 
       .from('courses')
       .select(`
         *,
-        instructor:profiles!courses_instructor_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        ),
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
         category:course_categories!courses_category_id_fkey (
           id,
           name,
@@ -203,14 +226,16 @@ export const getCourseById = async (req: Request, res: Response): Promise<void> 
           description,
           sort_order,
           lessons:course_lessons!course_lessons_section_id_fkey (
-            id,
-            title,
-            description,
-            type,
-            duration_minutes,
-            is_preview,
-            sort_order
-          )
+  id,
+  title,
+  description,
+  type,
+  duration_minutes,
+  content_url,
+  content_text,
+  is_preview,
+  sort_order
+)
         )
       `)
       .eq('id', id)
@@ -349,13 +374,7 @@ export const searchCourses = async (req: Request, res: Response): Promise<void> 
       .from('courses')
       .select(`
         *,
-        instructor:profiles!courses_instructor_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        ),
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
         category:course_categories!courses_category_id_fkey (
           id,
           name,
@@ -432,13 +451,7 @@ export const getCoursesByCategory = async (req: Request, res: Response): Promise
       .from('courses')
       .select(`
         *,
-        instructor:profiles!courses_instructor_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        ),
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
         category:course_categories!courses_category_id_fkey (
           id,
           name,
@@ -472,10 +485,12 @@ export const getCoursesByCategory = async (req: Request, res: Response): Promise
         query = query.order('price', { ascending: false });
         break;
       case 'rating':
-        query = query.order('average_rating', { ascending: false, nullsFirst: false });
+        // Order by created_at first, then we'll sort by rating in the application
+        query = query.order('created_at', { ascending: false });
         break;
       case 'popular':
-        query = query.order('total_enrollments', { ascending: false, nullsFirst: false });
+        // Order by created_at first, then we'll sort by enrollment count in the application
+        query = query.order('created_at', { ascending: false });
         break;
       default:
         query = query.order('created_at', { ascending: false });
@@ -489,11 +504,29 @@ export const getCoursesByCategory = async (req: Request, res: Response): Promise
 
     if (error) throw error;
 
+    // Apply client-side sorting for rating and popular if needed
+    let sortedData = data;
+    if (sort === 'rating' && data) {
+      sortedData = [...data].sort((a, b) => {
+        const aRating = a.stats?.average_rating || 0;
+        const bRating = b.stats?.average_rating || 0;
+        return bRating - aRating;
+      });
+    } else if (sort === 'popular' && data) {
+      sortedData = [...data].sort((a, b) => {
+        const aEnrollments = a.stats?.total_enrollments || 0;
+        const bEnrollments = b.stats?.total_enrollments || 0;
+        return bEnrollments - aEnrollments;
+      });
+    }
+
+    if (error) throw error;
+
     const totalPages = Math.ceil((count || 0) / Number(limit));
 
     res.json({
       success: true,
-      data,
+      data: sortedData,
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -508,3 +541,101 @@ export const getCoursesByCategory = async (req: Request, res: Response): Promise
     });
   }
 };
+
+
+export const getFeaturedReviews = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { limit = 6 } = req.query;
+
+    const { data, error } = await supabase
+      .from('course_reviews')
+      .select(`
+        *,
+        user:profiles!course_reviews_user_id_fkey (
+          id,
+          first_name,
+          last_name,
+          avatar_url
+        ),
+        course:courses!course_reviews_course_id_fkey (
+          id,
+          title,
+          category:course_categories!courses_category_id_fkey (
+            name
+          )
+        ),
+        enrollment:course_enrollments!course_reviews_enrollment_id_fkey (
+          enrolled_at,
+          completed_at
+        )
+      `)
+      .eq('is_published', true)
+      .gte('rating', 4) // Only high ratings (4-5 stars)
+      .not('review_text', 'is', null)
+      .order('helpful_count', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(Number(limit));
+
+    if (error) throw error;
+
+    // Transform reviews into success story format
+    const successStories = data?.map(review => ({
+      id: review.id,
+      name: `${review.user?.first_name || 'Anonymous'} ${review.user?.last_name || 'User'}`,
+      current_role: getJobTitleByCategory(review.course?.category?.name || 'Developer'),
+      learning_path: review.course?.category?.name || 'General',
+      current_salary: getSalaryByCategory(review.course?.category?.name || 'General'),
+      completion_time: calculateCompletionTime(review.enrollment?.enrolled_at, review.enrollment?.completed_at),
+      testimonial: review.review_text,
+      rating: review.rating,
+      image_url: review.user?.avatar_url || `https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150`,
+      course_title: review.course?.title || 'Course'
+    })) || [];
+
+    res.json({
+      success: true,
+      data: successStories
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch featured reviews'
+    });
+  }
+};
+
+// Helper functions for the backend
+const getJobTitleByCategory = (categoryName: string): string => {
+  const name = categoryName.toLowerCase();
+  if (name.includes('web')) return 'Senior Full Stack Developer';
+  if (name.includes('data')) return 'Lead Data Scientist';
+  if (name.includes('mobile')) return 'Mobile App Developer';
+  if (name.includes('design')) return 'Senior UX Designer';
+  if (name.includes('marketing')) return 'Digital Marketing Manager';
+  if (name.includes('ai')) return 'AI Engineer';
+  if (name.includes('cloud')) return 'Cloud Solutions Architect';
+  return 'Software Developer';
+};
+
+const getSalaryByCategory = (categoryName: string): string => {
+  const name = categoryName.toLowerCase();
+  if (name.includes('web')) return '$85K-$150K';
+  if (name.includes('data')) return '$95K-$180K';
+  if (name.includes('mobile')) return '$80K-$140K';
+  if (name.includes('design')) return '$65K-$120K';
+  if (name.includes('marketing')) return '$55K-$100K';
+  if (name.includes('ai') || name.includes('machine')) return '$120K-$200K';
+  if (name.includes('cloud')) return '$100K-$170K';
+  return '$70K-$130K';
+};
+
+const calculateCompletionTime = (enrolledAt?: string, completedAt?: string): string => {
+  if (!enrolledAt || !completedAt) return '6 months';
+
+  const enrolled = new Date(enrolledAt);
+  const completed = new Date(completedAt);
+  const diffMonths = Math.ceil((completed.getTime() - enrolled.getTime()) / (1000 * 60 * 60 * 24 * 30));
+
+  return `${diffMonths} month${diffMonths !== 1 ? 's' : ''}`;
+};
+
