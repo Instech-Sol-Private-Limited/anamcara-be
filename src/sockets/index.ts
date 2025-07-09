@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
-import { getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
+import { getChatParticipants, getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
 
 type ChamberUpdateResponse = {
@@ -541,6 +541,90 @@ export const registerSocketHandlers = (io: Server) => {
       if (receiver_email && connectedUsers.has(receiver_email)) {
         connectedUsers.get(receiver_email)!.forEach(socketId => {
           io.to(socketId).emit('user_stop_typing', { chatId, userId });
+        });
+      }
+    });
+
+    // Add reaction
+    socket.on('add_reaction', async (payload: {
+      messageId: string,
+      emoji: string,
+      userId: string
+    }) => {
+      const { messageId, emoji, userId } = payload;
+
+      try {
+        // Check if reaction already exists
+        const { data: existingReaction } = await supabase
+          .from('chat_reactions')
+          .select()
+          .eq('target_id', messageId)
+          .eq('user_id', userId)
+          .eq('type', emoji)
+          .maybeSingle();
+
+        if (existingReaction) {
+          // Remove existing reaction
+          const { error: deleteError } = await supabase
+            .from('chat_reactions')
+            .delete()
+            .eq('id', existingReaction.id);
+
+          if (deleteError) throw deleteError;
+        } else {
+          // Add new reaction
+          const { error: insertError } = await supabase
+            .from('chat_reactions')
+            .insert([{
+              user_id: userId,
+              target_id: messageId,
+              target_type: 'message',
+              type: emoji
+            }]);
+
+          if (insertError) throw insertError;
+        }
+
+        // Get updated reactions for this message
+        const { data: reactions } = await supabase
+          .from('chat_reactions')
+          .select('user_id, type')
+          .eq('target_id', messageId);
+
+        // Group by emoji
+        const reactionMap = reactions?.reduce((acc, reaction) => {
+          if (!acc[reaction.type]) acc[reaction.type] = [];
+          acc[reaction.type].push(reaction.user_id);
+          return acc;
+        }, {} as Record<string, string[]>);
+
+        // Get message details
+        const { data: message } = await supabase
+          .from('chatmessages')
+          .select('chat_id, sender')
+          .eq('id', messageId)
+          .single();
+
+        if (!message) throw new Error('Message not found');
+
+        // Emit to all participants in the chat
+        const participants = await getChatParticipants(message.chat_id);
+        participants.forEach(async (participantId: string) => {
+          const email = await getUserEmailFromId(participantId);
+          if (email && connectedUsers.has(email)) {
+            connectedUsers.get(email)!.forEach(socketId => {
+              io.to(socketId).emit('reaction_update', {
+                messageId,
+                reactions: reactionMap || {}
+              });
+            });
+          }
+        });
+
+      } catch (error) {
+        console.error('Reaction error:', error);
+        socket.emit('reaction_error', {
+          error: error instanceof Error ? error.message : 'Failed to update reaction'
         });
       }
     });

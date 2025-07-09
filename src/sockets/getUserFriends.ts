@@ -80,3 +80,12 @@ export const getUserIdFromEmail = async (userEmail: string): Promise<string | nu
         return null;
     }
 };
+
+export async function getChatParticipants(chatId: string): Promise<string[]> {
+  const { data: participants } = await supabase
+    .from('chat_participants')
+    .select('user_id')
+    .eq('chat_id', chatId);
+
+  return participants?.map(p => p.user_id) || [];
+}
