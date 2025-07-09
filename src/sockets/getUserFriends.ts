@@ -59,3 +59,24 @@ export const getUserEmailFromId = async (userId: string): Promise<string | null>
         return null;
     }
 };
+
+
+export const getUserIdFromEmail = async (userEmail: string): Promise<string | null> => {
+    try {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', userEmail)
+            .single();
+
+        if (error || !data) {
+            console.error(`❌ Failed to fetch email for user ${userEmail}:`, error?.message);
+            return null;
+        }
+
+        return data.id;
+    } catch (err) {
+        console.error(`❌ Error in getUserEmailFromId for ${userEmail}:`, err);
+        return null;
+    }
+};
