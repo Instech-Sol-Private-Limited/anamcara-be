@@ -847,6 +847,7 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
             .select(`
                 id,
                 message,
+                reply_to,
                 is_edited,
                 is_deleted,
                 created_at,
@@ -895,6 +896,7 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
             .select(`
                 id,
                 message,
+                reply_to,
                 is_edited,
                 is_deleted,
                 created_at,
