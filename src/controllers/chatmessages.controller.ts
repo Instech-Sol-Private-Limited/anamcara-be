@@ -801,33 +801,46 @@ export const getDirectMessages = async (req: Request, res: Response): Promise<an
 
         const { data: messages, error: messagesError, count } = await supabase
             .from('chatmessages')
-            .select(`
-                *,
-                chat_reactions:chat_reactions(
-                    user_id,
-                    type
-                )
-            `, { count: 'exact' })
+            .select('*', { count: 'exact' })
             .eq('chat_id', chatId)
             .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
 
         if (messagesError) throw messagesError;
 
+        const messageIds = messages?.map(msg => msg.id) || [];
+
+        let reactionsData: Record<string, any> = {};
+        if (messageIds.length > 0) {
+            const { data: reactions, error: reactionsError } = await supabase
+                .from('chat_reactions')
+                .select('*')
+                .in('target_id', messageIds);
+
+            if (reactionsError) throw reactionsError;
+
+            reactionsData = reactions?.reduce((acc, reaction) => {
+                if (!acc[reaction.target_id]) {
+                    acc[reaction.target_id] = [];
+                }
+                acc[reaction.target_id].push(reaction);
+                return acc;
+            }, {} as Record<string, any[]>);
+        }
+
         const messagesWithReactions = messages?.map(message => {
-            const reactions = (message.chat_reactions as Array<{user_id: string, type: string}> || [])
-                .reduce((acc, reaction) => {
-                    if (!acc[reaction.type]) {
-                        acc[reaction.type] = [];
-                    }
-                    acc[reaction.type].push(reaction.user_id);
-                    return acc;
-                }, {} as Record<string, string[]>);
+            const messageReactions = reactionsData[message.id] || [];
+            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+                if (!acc[reaction.type]) {
+                    acc[reaction.type] = [];
+                }
+                acc[reaction.type].push(reaction.user_id);
+                return acc;
+            }, {} as Record<string, string[]>);
 
             return {
                 ...message,
-                reactions: Object.keys(reactions).length > 0 ? reactions : undefined,
-                chat_reactions: undefined
+                reactions: Object.keys(reactions).length > 0 ? reactions : undefined
             };
         });
 
@@ -864,7 +877,7 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
         const limitNumber = Number(limit);
         const offset = (pageNumber - 1) * limitNumber;
 
-        const { data, error, count } = await supabase
+        const { data: messages, error: messagesError, count } = await supabase
             .from('public_chat')
             .select(`
                 id,
@@ -879,14 +892,50 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
             .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
 
-        if (error) throw error;
+        if (messagesError) throw messagesError;
 
+        const messageIds = messages?.map(msg => msg.id) || [];
+
+        let reactionsData: Record<string, any> = {};
+        if (messageIds.length > 0) {
+            const { data: reactions, error: reactionsError } = await supabase
+                .from('chat_reactions')
+                .select('*')
+                .in('target_id', messageIds)
+                .eq('target_type', 'public_chat_message');
+
+            if (reactionsError) throw reactionsError;
+
+            reactionsData = reactions?.reduce((acc, reaction) => {
+                if (!acc[reaction.target_id]) {
+                    acc[reaction.target_id] = [];
+                }
+                acc[reaction.target_id].push(reaction);
+                return acc;
+            }, {} as Record<string, any[]>);
+        }
+
+        const messagesWithReactions = messages?.map(message => {
+            const messageReactions = reactionsData[message.id] || [];
+            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+                if (!acc[reaction.type]) {
+                    acc[reaction.type] = [];
+                }
+                acc[reaction.type].push(reaction.user_id);
+                return acc;
+            }, {} as Record<string, string[]>);
+
+            return {
+                ...message,
+                reactions: reactions
+            };
+        });
         const totalItems = count || 0;
         const hasMore = totalItems > pageNumber * limitNumber;
 
-        return res.json({
+        return res.status(200).json({
             success: true,
-            data: data || [],
+            data: messagesWithReactions || [],
             pagination: {
                 currentPage: pageNumber,
                 limit: limitNumber,
