@@ -1093,6 +1093,74 @@ export const registerSocketHandlers = (io: Server) => {
       socket.broadcast.emit('travel_user_offline', userId);
     });
 
+    // Add reaction
+    socket.on('travel_add_reaction', async (payload: {
+      messageId: string,
+      emoji: string,
+      userId: string
+    }) => {
+      const { messageId, emoji, userId } = payload;
+
+      try {
+        const { data: existingReaction } = await supabase
+          .from('chat_reactions')
+          .select()
+          .eq('target_id', messageId)
+          .eq('user_id', userId)
+          .eq('type', emoji)
+          .maybeSingle();
+
+        if (existingReaction) {
+          const { error: deleteError } = await supabase
+            .from('chat_reactions')
+            .delete()
+            .eq('id', existingReaction.id);
+
+          if (deleteError) throw deleteError;
+        } else {
+          const { error: insertError } = await supabase
+            .from('chat_reactions')
+            .insert([{
+              user_id: userId,
+              target_id: messageId,
+              target_type: 'travel_chat_message',
+              type: emoji
+            }]);
+
+          if (insertError) throw insertError;
+        }
+
+        const { data: reactions } = await supabase
+          .from('chat_reactions')
+          .select('user_id, type')
+          .eq('target_id', messageId);
+
+        const reactionMap = reactions?.reduce((acc, reaction) => {
+          if (!acc[reaction.type]) acc[reaction.type] = [];
+          acc[reaction.type].push(reaction.user_id);
+          return acc;
+        }, {} as Record<string, string[]>);
+
+        const { data: message } = await supabase
+          .from('travel_chat')
+          .select('id')
+          .eq('id', messageId)
+          .single();
+
+        if (!message) throw new Error('Message not found');
+
+        io.emit('travel_reaction_update', {
+          messageId,
+          reactions: reactionMap || {}
+        });
+
+      } catch (error) {
+        console.error('Reaction error:', error);
+        socket.emit('reaction_error', {
+          error: error instanceof Error ? error.message : 'Failed to update reaction'
+        });
+      }
+    });
 
     // --------------------- Chambers Events ------------------
 
@@ -2036,6 +2104,76 @@ export const registerSocketHandlers = (io: Server) => {
         });
       }
     });
+
+    // Add reaction
+    socket.on('chamber_add_reaction', async (payload: {
+      messageId: string,
+      emoji: string,
+      userId: string
+    }) => {
+      const { messageId, emoji, userId } = payload;
+
+      try {
+        const { data: existingReaction } = await supabase
+          .from('chat_reactions')
+          .select()
+          .eq('target_id', messageId)
+          .eq('user_id', userId)
+          .eq('type', emoji)
+          .maybeSingle();
+
+        if (existingReaction) {
+          const { error: deleteError } = await supabase
+            .from('chat_reactions')
+            .delete()
+            .eq('id', existingReaction.id);
+
+          if (deleteError) throw deleteError;
+        } else {
+          const { error: insertError } = await supabase
+            .from('chat_reactions')
+            .insert([{
+              user_id: userId,
+              target_id: messageId,
+              target_type: 'chamber_message',
+              type: emoji
+            }]);
+
+          if (insertError) throw insertError;
+        }
+
+        const { data: reactions } = await supabase
+          .from('chat_reactions')
+          .select('user_id, type')
+          .eq('target_id', messageId);
+
+        const reactionMap = reactions?.reduce((acc, reaction) => {
+          if (!acc[reaction.type]) acc[reaction.type] = [];
+          acc[reaction.type].push(reaction.user_id);
+          return acc;
+        }, {} as Record<string, string[]>);
+
+        const { data: message } = await supabase
+          .from('chamber_messages')
+          .select('id')
+          .eq('id', messageId)
+          .single();
+
+        if (!message) throw new Error('Message not found');
+
+        io.emit('chamber_reaction_update', {
+          messageId,
+          reactions: reactionMap || {}
+        });
+
+      } catch (error) {
+        console.error('Reaction error:', error);
+        socket.emit('reaction_error', {
+          error: error instanceof Error ? error.message : 'Failed to update reaction'
+        });
+      }
+    });
+
     // --------------------- Notification Events ------------------
 
     socket.on('mark_as_read', async ({ id }: { id: string }) => {

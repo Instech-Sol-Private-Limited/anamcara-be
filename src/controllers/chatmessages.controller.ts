@@ -962,7 +962,7 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
         const limitNumber = Number(limit);
         const offset = (pageNumber - 1) * limitNumber;
 
-        const { data, error, count } = await supabase
+        const { data: messages, error: messagesError, count } = await supabase
             .from('travel_chat')
             .select(`
                 id,
@@ -977,14 +977,51 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
             .order('created_at', { ascending: true })
             .range(offset, offset + limitNumber - 1);
 
-        if (error) throw error;
+        if (messagesError) throw messagesError;
+
+        const messageIds = messages?.map(msg => msg.id) || [];
+
+        let reactionsData: Record<string, any> = {};
+        if (messageIds.length > 0) {
+            const { data: reactions, error: reactionsError } = await supabase
+                .from('chat_reactions')
+                .select('*')
+                .in('target_id', messageIds)
+                .eq('target_type', 'travel_chat_message');
+
+            if (reactionsError) throw reactionsError;
+
+            reactionsData = reactions.reduce((acc, reaction) => {
+                if (!acc[reaction.target_id]) {
+                    acc[reaction.target_id] = [];
+                }
+                acc[reaction.target_id].push(reaction);
+                return acc;
+            }, {} as Record<string, any[]>);
+        }
+
+        const messagesWithReactions = messages.map(message => {
+            const messageReactions = reactionsData[message.id] || [];
+            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+                if (!acc[reaction.type]) {
+                    acc[reaction.type] = [];
+                }
+                acc[reaction.type].push(reaction.user_id);
+                return acc;
+            }, {} as Record<string, string[]>);
+
+            return {
+                ...message,
+                reactions
+            };
+        });
 
         const totalItems = count || 0;
         const hasMore = totalItems > pageNumber * limitNumber;
 
         return res.json({
             success: true,
-            data: data || [],
+            data: messagesWithReactions,
             pagination: {
                 currentPage: pageNumber,
                 limit: limitNumber,
@@ -995,7 +1032,7 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
         });
 
     } catch (error) {
-        console.error('Error fetching public messages:', error);
+        console.error('Error fetching travel messages:', error);
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch messages'
@@ -1015,7 +1052,7 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
             return;
         }
 
-        // Verify chamber exists and check access
+        // Verify chamber exists
         const { data: chamber, error: chamberError } = await supabase
             .from('custom_chambers')
             .select('is_public')
@@ -1027,7 +1064,6 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
             return;
         }
 
-        // Check membership for private chambers
         if (!chamber.is_public) {
             const { data: membership, error: membershipError } = await supabase
                 .from('chamber_members')
@@ -1042,7 +1078,6 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
             }
         }
 
-        // Fetch messages with pagination
         const { data: messages, error: messagesError, count } = await supabase
             .from('chamber_messages')
             .select(`
@@ -1059,15 +1094,34 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
                 created_at,
                 updated_at,
                 deleted_at,
-                profiles: sender_id (id, first_name, last_name, avatar_url, email),
-                replied_message: reply_to (id, message, sender_id, profiles: sender_id (id, first_name, last_name, avatar_url, email))
+                profiles: sender_id (id, first_name, last_name, avatar_url),
+                replied_message: reply_to (id, message, sender_id, profiles: sender_id (id, first_name, last_name, avatar_url))
             `, { count: 'exact' })
             .eq('chamber_id', chamber_id)
             .order('created_at', { ascending: false })
             .range((page - 1) * limit, page * limit - 1);
 
-        if (messagesError) {
-            throw messagesError;
+        if (messagesError) throw messagesError;
+
+        const messageIds = messages?.map(msg => msg.id) || [];
+
+        let reactionsData: Record<string, any> = {};
+        if (messageIds.length > 0) {
+            const { data: reactions, error: reactionsError } = await supabase
+                .from('chat_reactions')
+                .select('*')
+                .in('target_id', messageIds)
+                .eq('target_type', 'chamber_message');
+
+            if (reactionsError) throw reactionsError;
+
+            reactionsData = reactions.reduce((acc, reaction) => {
+                if (!acc[reaction.target_id]) {
+                    acc[reaction.target_id] = [];
+                }
+                acc[reaction.target_id].push(reaction);
+                return acc;
+            }, {} as Record<string, any[]>);
         }
 
         const formattedMessages: ChamberMessage[] = messages.map((message: any) => {
@@ -1079,13 +1133,22 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
                         : null
                 : null;
 
+            const messageReactions = reactionsData[message.id] || [];
+            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+                if (!acc[reaction.type]) {
+                    acc[reaction.type] = [];
+                }
+                acc[reaction.type].push(reaction.user_id);
+                return acc;
+            }, {} as Record<string, string[]>);
+
             return {
                 id: message.id,
                 chamber_id: message.chamber_id,
                 sender_id: message.sender_id,
                 message: message.message,
                 has_media: message.has_media,
-                media: media,
+                media,
                 message_type: message.message_type || 'text',
                 reply_to: message.reply_to,
                 is_edited: message.is_edited,
@@ -1111,7 +1174,8 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
                         user_name: `${message.replied_message.profiles.first_name} ${message.replied_message.profiles.last_name}`.trim(),
                         avatar_img: message.replied_message.profiles.avatar_url
                     }
-                } : null
+                } : null,
+                reactions
             };
         });
 
