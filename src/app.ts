@@ -1,7 +1,9 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { authMiddleware } from './middleware/auth.middleware';
 import { createClient } from '@supabase/supabase-js';
 import { OpenAI } from 'openai';
@@ -24,7 +26,7 @@ import friendsRoutes from './routes/friends.routes';
 import storiesRoutes from './routes/stories.routes';
 import postsRoutes from './routes/posts.routes';
 import courseRouter from './routes/course.routes';
-dotenv.config();
+import enrollmentRoutes from './routes/enrollment.routes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -81,6 +83,7 @@ app.use("/api/stories", storiesRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
+app.use('/api/enrollment', enrollmentRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 
