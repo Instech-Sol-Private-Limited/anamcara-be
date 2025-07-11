@@ -21,9 +21,8 @@ import { getDailyInsights } from './controllers/dailyinsights.controller';
 import { Server } from 'socket.io';
 import { registerSocketHandlers } from './sockets';
 import friendsRoutes from './routes/friends.routes';
-import storiesRoutes from './routes/stories.routes';
 import postsRoutes from './routes/posts.routes';
-import courseRouter from './routes/course.routes';
+
 dotenv.config();
 
 const app = express();
@@ -77,18 +76,15 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
 app.use('/api/friends', friendsRoutes);
-app.use("/api/stories", storiesRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
-app.use('/api/courses', courseRouter);
-
 cron.schedule('0 0 * * *', updateDailyInsights);
 
 const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['http://localhost:3000', 'http://localhost:3001', ],
     methods: ['GET', 'POST'],
     credentials: true,
   },
