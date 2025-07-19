@@ -21,11 +21,12 @@ import { getDailyInsights } from './controllers/dailyinsights.controller';
 import { Server } from 'socket.io';
 import { registerSocketHandlers } from './sockets';
 import friendsRoutes from './routes/friends.routes';
-import storiesRoutes from './routes/stories.routes';
 import postsRoutes from './routes/posts.routes';
 import courseRouter from './routes/course.routes';
 import enrollmentRoutes from './routes/enrollment.routes';
 import { getActiveStreams, registerStreamingHandlers } from './sockets/streaming.handler';
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -85,7 +86,6 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
 app.use('/api/friends', friendsRoutes);
-app.use("/api/stories", storiesRoutes);
 app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);

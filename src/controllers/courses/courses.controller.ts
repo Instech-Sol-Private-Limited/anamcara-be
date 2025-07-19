@@ -271,7 +271,7 @@ export const getCourseCategories = async (req: Request, res: Response): Promise<
     const { data, error } = await supabase
       .from('course_categories')
       .select(`
-        *,
+        *, 
         courses!courses_category_id_fkey (
           id
         )
@@ -639,3 +639,393 @@ const calculateCompletionTime = (enrolledAt?: string, completedAt?: string): str
   return `${diffMonths} month${diffMonths !== 1 ? 's' : ''}`;
 };
 
+
+// GET /api/courses/instructor/:instructorId - Get courses by instructor
+export const getCoursesByInstructor = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { instructorId } = req.params;
+    const {
+      page = 1,
+      limit = 12,
+      status = 'all',
+      sort = 'created_at'
+    } = req.query;
+
+    let query = supabase
+      .from('courses')
+      .select(`
+        *,
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
+        category:course_categories!courses_category_id_fkey (
+          id,
+          name,
+          slug,
+          color,
+          icon_url
+        ),
+        stats:course_stats!course_stats_course_id_fkey (
+          total_enrollments,
+          total_completions,
+          average_rating,
+          total_reviews,
+          completion_rate
+        )
+      `, { count: 'exact' })
+      .eq('instructor_id', instructorId);
+
+    // Filter by status if not 'all'
+    if (status !== 'all') {
+      query = query.eq('status', status);
+    }
+
+    // Apply sorting
+    switch (sort) {
+      case 'title':
+        query = query.order('title', { ascending: true });
+        break;
+      case 'created_at':
+        query = query.order('created_at', { ascending: false });
+        break;
+      case 'enrollment_count':
+        query = query.order('created_at', { ascending: false }); // We'll sort by enrollments client-side
+        break;
+      default:
+        query = query.order('created_at', { ascending: false });
+    }
+
+    const { data, error, count } = await query;
+
+    if (error) throw error;
+
+    // Client-side sorting for enrollment count
+    let sortedData = data;
+    if (sort === 'enrollment_count' && data) {
+      sortedData = [...data].sort((a, b) => {
+        const aEnrollments = a.stats?.total_enrollments || 0;
+        const bEnrollments = b.stats?.total_enrollments || 0;
+        return bEnrollments - aEnrollments;
+      });
+    }
+
+    // Add enrollment_count and rating to each course for frontend compatibility
+    const coursesWithStats = sortedData?.map(course => ({
+      ...course,
+      enrollment_count: course.stats?.total_enrollments || 0,
+      rating: course.stats?.average_rating || 0
+    })) || [];
+
+    const totalPages = Math.ceil((count || 0) / Number(limit));
+
+    res.json({
+      success: true,
+      data: coursesWithStats,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total: count || 0,
+        totalPages
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch instructor courses'
+    });
+  }
+};
+
+// DELETE /api/courses/:id - Delete course
+export const deleteCourse = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { instructorId } = req.body; // Pass instructor ID for authorization
+
+    // First check if course exists and belongs to instructor
+    const { data: course, error: fetchError } = await supabase
+      .from('courses')
+      .select('id, instructor_id, status')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !course) {
+      res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+      return;
+    }
+
+    // Check if instructor owns this course
+    if (course.instructor_id !== instructorId) {
+      res.status(403).json({
+        success: false,
+        message: 'Unauthorized to delete this course'
+      });
+      return;
+    }
+
+    // Check if course has enrollments
+    const { data: enrollments, error: enrollError } = await supabase
+      .from('course_enrollments')
+      .select('id')
+      .eq('course_id', id)
+      .limit(1);
+
+    if (enrollError) throw enrollError;
+
+    if (enrollments && enrollments.length > 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Cannot delete course with active enrollments. Archive it instead.'
+      });
+      return;
+    }
+
+    // Delete course (this will cascade delete related data)
+    const { error: deleteError } = await supabase
+      .from('courses')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw deleteError;
+
+    res.json({
+      success: true,
+      message: 'Course deleted successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to delete course'
+    });
+  }
+};
+
+// PATCH /api/courses/:id/status - Update course status
+export const updateCourseStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { status, instructorId } = req.body;
+
+    // Validate status
+    const validStatuses = ['draft', 'published', 'archived'];
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid status. Must be draft, published, or archived'
+      });
+      return;
+    }
+
+    // Check if course exists and belongs to instructor
+    const { data: course, error: fetchError } = await supabase
+      .from('courses')
+      .select('id, instructor_id, status')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !course) {
+      res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+      return;
+    }
+
+    if (course.instructor_id !== instructorId) {
+      res.status(403).json({
+        success: false,
+        message: 'Unauthorized to update this course'
+      });
+      return;
+    }
+
+    // Update course status
+    const { data, error } = await supabase
+      .from('courses')
+      .update({ 
+        status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data,
+      message: 'Course status updated successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update course status'
+    });
+  }
+};
+
+// POST /api/courses - Create new course
+export const createCourse = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const {
+      title,
+      short_description,
+      description,
+      category_id,
+      difficulty,
+      price,
+      instructor_id,
+      duration_hours,
+      thumbnail_url,
+      language = 'English',
+      requirements = [],
+      what_you_will_learn = [],
+      status = 'draft'
+    } = req.body;
+
+    // Validate required fields
+    if (!title || !short_description || !description || !category_id || !difficulty || !instructor_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+      return;
+    }
+
+    // Create course
+    const { data, error } = await supabase
+      .from('courses')
+      .insert({
+        title,
+        short_description,
+        description,
+        category_id,
+        difficulty,
+        price: price || 0,
+        instructor_id,
+        duration_hours: duration_hours || 0,
+        thumbnail_url,
+        language,
+        requirements,
+        what_you_will_learn,
+        status,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select(`
+        *,
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
+        category:course_categories!courses_category_id_fkey (
+          id,
+          name,
+          slug,
+          color,
+          icon_url
+        )
+      `)
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({
+      success: true,
+      data,
+      message: 'Course created successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to create course'
+    });
+  }
+};
+
+// PUT /api/courses/:id - Update course
+export const updateCourse = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const {
+      title,
+      short_description,
+      description,
+      category_id,
+      difficulty,
+      price,
+      instructor_id,
+      duration_hours,
+      thumbnail_url,
+      language,
+      requirements,
+      what_you_will_learn
+    } = req.body;
+
+    // Check if course exists and belongs to instructor
+    const { data: course, error: fetchError } = await supabase
+      .from('courses')
+      .select('id, instructor_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !course) {
+      res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+      return;
+    }
+
+    if (course.instructor_id !== instructor_id) {
+      res.status(403).json({
+        success: false,
+        message: 'Unauthorized to update this course'
+      });
+      return;
+    }
+
+    // Update course
+    const { data, error } = await supabase
+      .from('courses')
+      .update({
+        title,
+        short_description,
+        description,
+        category_id,
+        difficulty,
+        price,
+        duration_hours,
+        thumbnail_url,
+        language,
+        requirements,
+        what_you_will_learn,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select(`
+        *,
+        instructor:profiles!courses_instructor_id_fkey (${INSTRUCTOR_SELECT}),
+        category:course_categories!courses_category_id_fkey (
+          id,
+          name,
+          slug,
+          color,
+          icon_url
+        )
+      `)
+      .single();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data,
+      message: 'Course updated successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update course'
+    });
+  }
+};
