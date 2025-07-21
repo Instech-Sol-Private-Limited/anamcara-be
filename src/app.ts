@@ -24,7 +24,8 @@ import friendsRoutes from './routes/friends.routes';
 import postsRoutes from './routes/posts.routes';
 import courseRouter from './routes/course.routes';
 import enrollmentRoutes from './routes/enrollment.routes';
-import { getActiveStreams, registerStreamingHandlers } from './sockets/streaming.handler';
+import streamsRoutes from './routes/streams.routes';
+import { registerStreamingHandlers } from './sockets/streaming.handler';
 
 dotenv.config();
 
@@ -90,7 +91,7 @@ app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
 app.use('/api/enrollment', enrollmentRoutes);
-app.get('/api/streams', authMiddleware, getActiveStreams);
+app.use('/api/streams', authMiddleware, streamsRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 

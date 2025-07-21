@@ -5,6 +5,8 @@ import { supabase } from '../app';
 interface Stream {
   id: string;
   email: string;
+  title: string;
+  category: string;
   participants: Set<string>;
   creator: string;
   createdAt: string;
@@ -20,9 +22,11 @@ export const registerStreamingHandlers = (io: Server) => {
 
     sendActiveStreamsToClient(socket);
 
-    socket.on('create_stream', async ({ streamId, email, thumbnailUrl }: {
+    socket.on('create_stream', async ({ streamId, email, title, category, thumbnailUrl }: {
       streamId: string;
       email: string;
+      title: string;
+      category: string;
       thumbnailUrl?: string;
     }) => {
       if (activeStreams.has(streamId)) {
@@ -30,43 +34,77 @@ export const registerStreamingHandlers = (io: Server) => {
         return;
       }
 
-      const newStream: Stream = {
-        id: streamId,
-        email,
-        participants: new Set([socket.id]),
-        creator: socket.id,
-        createdAt: new Date().toISOString(),
-        thumbnailUrl: thumbnailUrl || null
-      };
-
-      activeStreams.set(streamId, newStream);
-      messageCounts.set(streamId, 0);
-      socket.join(streamId);
-
       try {
-        const { data, error } = await supabase.from('active_streams').insert([{
-          stream_id: streamId,
-          email: email,
-          creator_socket: socket.id,
-          created_at: new Date().toISOString(),
-          viewer_count: 1,
-          thumbnail_url: thumbnailUrl || null
-        }]).select();
+        let categoryId: string;
+
+        const { data: existingCategory, error: categoryError } = await supabase
+          .from('stream_categories')
+          .select('id')
+          .eq('name', category)
+          .single();
+
+        if (categoryError || !existingCategory) {
+          const { data: newCategory, error: createError } = await supabase
+            .from('stream_categories')
+            .insert([{ name: category }])
+            .select('id')
+            .single();
+
+          if (createError || !newCategory) {
+            throw createError || new Error('Failed to create category');
+          }
+
+          categoryId = newCategory.id;
+          console.log(`📌 Created new category: ${category} (ID: ${categoryId})`);
+        } else {
+          categoryId = existingCategory.id;
+          console.log(`🔍 Found existing category: ${category} (ID: ${categoryId})`);
+        }
+
+        const newStream: Stream = {
+          id: streamId,
+          email,
+          title,
+          category: categoryId,
+          participants: new Set([socket.id]),
+          creator: socket.id,
+          createdAt: new Date().toISOString(),
+          thumbnailUrl: thumbnailUrl || null
+        };
+
+        activeStreams.set(streamId, newStream);
+        messageCounts.set(streamId, 0);
+        socket.join(streamId);
+
+        const { data, error } = await supabase
+          .from('active_streams')
+          .insert([{
+            stream_id: streamId,
+            email: email,
+            stream_title: title,
+            stream_category_id: categoryId,
+            creator_socket: socket.id,
+            created_at: new Date().toISOString(),
+            viewer_count: 1,
+            thumbnail_url: thumbnailUrl || null
+          }])
+          .select();
 
         if (error) throw error;
 
         console.log(`🎥 Stream created in Supabase:`, data);
+        broadcastStreamsUpdate(io);
+
       } catch (error) {
-        console.error('Error creating stream in Supabase:', error);
-        socket.emit('streamError', { message: 'Failed to create stream record.' });
+        console.error('Error in stream creation:', error);
         activeStreams.delete(streamId);
         messageCounts.delete(streamId);
         socket.leave(streamId);
-        return;
-      }
 
-      console.log(`🎥 Stream created: ${streamId} by ${email}`);
-      broadcastStreamsUpdate(io);
+        socket.emit('streamError', {
+          message: error instanceof Error ? error.message : 'Failed to create stream'
+        });
+      }
     });
 
     socket.on('join_stream', async ({ streamId, email }: { streamId: string; email: string }) => {
@@ -260,6 +298,8 @@ function getStreamsWithViewerCount() {
   return Array.from(activeStreams.values()).map((stream) => ({
     id: stream.id,
     email: stream.email,
+    title: stream.title,
+    category: stream.category,
     createdAt: stream.createdAt,
     viewerCount: stream.participants.size,
     thumbnailUrl: stream.thumbnailUrl,
@@ -268,14 +308,21 @@ function getStreamsWithViewerCount() {
 
 export const getActiveStreams = async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabase.from('active_streams').select(`
-      stream_id,
-      email,
-      creator_socket,
-      created_at,
-      viewer_count,
-      thumbnail_url
-    `);
+    const { data, error } = await supabase
+      .from('active_streams')
+      .select(`
+        stream_id,
+        email,
+        stream_title,
+        creator_socket,
+        created_at,
+        viewer_count,
+        thumbnail_url,
+        stream_category_id (
+          name
+        )
+      `)
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
 
@@ -285,10 +332,13 @@ export const getActiveStreams = async (req: Request, res: Response) => {
       streams: data.map(stream => ({
         id: stream.stream_id,
         email: stream.email,
+        title: stream.stream_title,
         creator_socket: stream.creator_socket,
         createdAt: stream.created_at,
         viewerCount: stream.viewer_count,
         thumbnailUrl: stream.thumbnail_url,
+        // @ts-ignore
+        category: stream.stream_category_id?.name || 'Uncategorized'
       })),
     });
   } catch (error) {
