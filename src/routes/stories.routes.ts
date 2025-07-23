@@ -5,12 +5,12 @@ import { authMiddleware } from "../middleware/auth.middleware";
 const router = express.Router();
 
 // Create a new story
-router.post("/create-story", authMiddleware, createStory);
+router.post("/create-story", createStory);
 
 // Delete a story
-router.delete("/delete-story/:id", authMiddleware, deleteStory);
+router.delete("/delete-story/:id", deleteStory);
 
 // Get all stories from friends (last 24 hours)
-router.get("/get-stories", authMiddleware, getStories);
+router.get("/get-stories", getStories);
 
 export default router;

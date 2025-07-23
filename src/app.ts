@@ -24,6 +24,7 @@ import friendsRoutes from './routes/friends.routes';
 import postsRoutes from './routes/posts.routes';
 import courseRouter from './routes/course.routes';
 import enrollmentRoutes from './routes/enrollment.routes';
+import storiesRoutes from './routes/stories.routes';
 import streamsRoutes from './routes/streams.routes';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 
@@ -63,7 +64,13 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173', 'http://localhost:5174'],
+  // origin: [
+  //   'http://localhost:3000',
+  //   'http://localhost:3001',
+  //   'http://localhost:5173',
+  //   'http://localhost:5174'
+  // ],
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -91,6 +98,7 @@ app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
 app.use('/api/enrollment', enrollmentRoutes);
+app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
@@ -99,14 +107,30 @@ const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173', 'http://localhost:5174'],
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      'http://localhost:5174'
+    ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
   },
-  transports: ['websocket', 'polling'],
-  allowEIO3: true
+  transports: ['websocket', 'polling']
 });
 
-// Basic connection logging
+export const streamIo = new Server(server, {
+  path: '/stream-socket',
+  cors: {
+    origin: [
+      'http://localhost:5173',
+      'http://localhost:5174'
+    ],
+    methods: ['GET', 'POST']
+  },
+  transports: ['websocket']
+});
+
 io.on('connection', (socket) => {
   console.log(`New client connected: ${socket.id}`);
   
@@ -119,10 +143,19 @@ io.on('connection', (socket) => {
   });
 });
 
+streamIo.on('connection', (socket) => {
+  console.log(`New streaming client connected: ${socket.id}`);
+  
+  socket.on('disconnect', () => {
+    console.log(`Streaming client disconnected: ${socket.id}`);
+  });
+});
+
 registerSocketHandlers(io);
-registerStreamingHandlers(io);
+registerStreamingHandlers(streamIo);
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`⚡ Socket.IO listening on ws://localhost:${PORT}`);
+  console.log(`⚡ Main Socket.IO listening on ws://localhost:${PORT}`);
+  console.log(`📹 Stream Socket.IO listening on ws://localhost:${PORT}/stream-socket`);
 });
