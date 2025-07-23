@@ -1,15 +1,16 @@
 import sgMail from "@sendgrid/mail";
+import dotenv from 'dotenv'; dotenv.config();
 
+dotenv.config();
 
- const SENDGRID_API_KEY="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"
- sgMail.setApiKey(SENDGRID_API_KEY);
+sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 
 export const sendVerificationEmail = async (to: string) => {
   const verificationUrl = `http://localhost:5173/auth/verify-email?user=${to}`;
 
   const msg = {
     to,
-    from: "react631@gmail.com", 
+    from: "react631@gmail.com",
     subject: "Please Verify Your Email - Anamcara",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
@@ -49,12 +50,12 @@ export const sendVerificationEmail = async (to: string) => {
 
 
 
-export const sendResetPasswordEmail = async (to: string , token: string) => {
+export const sendResetPasswordEmail = async (to: string, token: string) => {
   const resetPasswordUrl = `http://localhost:5173/auth/reset-password?token=${token}`;
 
   const msg = {
     to,
-    from: "react631@gmail.com", 
+    from: "react631@gmail.com",
     subject: "Reset Your Password - Anamcara",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
