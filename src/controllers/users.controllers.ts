@@ -2,15 +2,12 @@ import { Request, Response } from "express";
 import { supabase } from "../app";
 import bcrypt from "bcryptjs";
 import { userSchema } from "../config/validations";
-import { sendVerificationEmail , sendResetPasswordEmail } from "../config/mailer";
+import { sendVerificationEmail, sendResetPasswordEmail } from "../config/mailer";
 import { v4 as uuidv4 } from "uuid";
-import { generateAccessToken, generateRefreshToken , verifyResetToken } from "../config/generateTokens";
+import { generateAccessToken, generateRefreshToken, verifyResetToken } from "../config/generateTokens";
 import jwt from "jsonwebtoken";
 
 const RESET_PASSWORD_SECRET = "anamcara_reset_password_secret";
-
-
-
 
 export const registerController = async (
   req: Request,
@@ -26,7 +23,7 @@ export const registerController = async (
     if (validationError) {
       return res.status(400).json({
         error: "Validation failed.",
-        details: validationError.details.map((d) => d.message),
+        details: validationError.details.map((d: any) => d.message),
       });
     }
 
@@ -97,7 +94,6 @@ export const registerController = async (
   }
 };
 
-
 export const verifyEmailController = async (
   req: Request,
   res: Response
@@ -141,7 +137,6 @@ export const verifyEmailController = async (
   }
 };
 
-
 export const loginController = async (req: Request, res: Response): Promise<any> => {
   try {
     const { email, password } = req.body;
@@ -182,9 +177,6 @@ export const loginController = async (req: Request, res: Response): Promise<any>
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    // Optional: store refresh token in database or send in HttpOnly cookie
-
-    // Send response
     const { password: _, ...userInfo } = user;
 
     return res.status(200).json({
@@ -200,8 +192,6 @@ export const loginController = async (req: Request, res: Response): Promise<any>
     return res.status(500).json({ error: "Internal server error." });
   }
 };
-
-
 
 export const forgotPasswordController = async (
   req: Request,
@@ -244,9 +234,6 @@ export const forgotPasswordController = async (
   }
 };
 
-
-
-
 export const resetPasswordController = async (req: Request, res: Response): Promise<any> => {
   try {
     const { token } = req.query;
@@ -285,5 +272,164 @@ export const resetPasswordController = async (req: Request, res: Response): Prom
   } catch (error) {
     console.error("Reset password error:", error);
     return res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+export const becomeSellerController = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const {
+      niche,
+      description,
+      city,
+      country,
+      slogan,
+      languages
+    } = req.body;
+
+    // Validate required fields
+    const requiredFields = { niche, description, city, country, slogan, languages };
+    const missingFields = Object.entries(requiredFields)
+      .filter(([_, value]) => !value)
+      .map(([key]) => key);
+
+    if (missingFields.length > 0) {
+      // @ts-ignore
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`,
+        status: 400
+      });
+    }
+
+    // Check if profile exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from('sellers')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+
+    let operationResponse;
+    
+    if (existingProfile) {
+      // Update existing profile
+      const { data, error } = await supabase
+        .from('sellers')
+        .update({
+          niche,
+          description,
+          city,
+          country,
+          slogan,
+          languages: JSON.stringify(languages),
+        })
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      operationResponse = {
+        status: 200,
+        message: 'Seller profile updated successfully',
+        data
+      };
+    } else {
+      // Create new profile
+      const { data, error } = await supabase
+        .from('sellers')
+        .insert({
+          user_id: userId,
+          niche,
+          description,
+          city,
+          country,
+          slogan,
+          languages: JSON.stringify(languages)
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      operationResponse = {
+        status: 201,
+        message: 'Seller profile created successfully',
+        data
+      };
+    }
+
+    res.status(operationResponse.status).json({
+      success: true,
+      message: operationResponse.message,
+      data: operationResponse.data,
+      metadata: {
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error processing seller profile:', error.message);
+    
+    let status = 500;
+    let message = 'Failed to process seller profile';
+
+    if (error.code === '23505') { // Postgres unique violation
+      status = 409;
+      message = 'Seller profile already exists for this user';
+    } else if (error.response?.status === 400) {
+      status = 400;
+      message = error.response.data?.message || 'Validation failed';
+    }
+
+    res.status(status).json({
+      success: false,
+      message,
+      error: error.message,
+      status,
+      metadata: {
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+};
+
+export const getSellerDataController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      return res.status(200).json({
+        success: true,
+        message: 'No seller profile found',
+        hasProfile: false
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      hasProfile: true,
+      data: {
+        ...data,
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error fetching seller data:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch seller data',
+      error: error.message
+    });
   }
 };
