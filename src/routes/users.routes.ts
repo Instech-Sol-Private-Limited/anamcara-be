@@ -6,7 +6,11 @@ import {
    forgotPasswordController,
    resetPasswordController,
    becomeSellerController,
-   getSellerDataController
+   getSellerDataController,
+   addSellerservice,
+   getAllServices,
+   getSellerServices,
+   getServiceById
 } from '../controllers/users.controllers';
 import { authMiddleware } from '../middleware/auth.middleware';
 
@@ -28,5 +32,13 @@ router.post("/reset-password", resetPasswordController);
 router.post("/become-seller", authMiddleware, becomeSellerController);
 
 router.get("/get-seller-data", authMiddleware, getSellerDataController);
+
+router.post("/add-seller-service", authMiddleware, addSellerservice);
+
+router.post("/get-all-services", authMiddleware, getAllServices);
+
+router.get("/get-seller-services", authMiddleware, getSellerServices);
+
+router.get("/get-service/:id", authMiddleware, getServiceById);
 
 export default router;

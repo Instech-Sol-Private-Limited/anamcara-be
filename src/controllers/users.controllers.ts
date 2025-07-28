@@ -312,7 +312,7 @@ export const becomeSellerController = async (req: Request, res: Response): Promi
     if (checkError) throw checkError;
 
     let operationResponse;
-    
+
     if (existingProfile) {
       // Update existing profile
       const { data, error } = await supabase
@@ -372,7 +372,7 @@ export const becomeSellerController = async (req: Request, res: Response): Promi
 
   } catch (error: any) {
     console.error('Error processing seller profile:', error.message);
-    
+
     let status = 500;
     let message = 'Failed to process seller profile';
 
@@ -429,6 +429,316 @@ export const getSellerDataController = async (req: Request, res: Response): Prom
     res.status(500).json({
       success: false,
       message: 'Failed to fetch seller data',
+      error: error.message
+    });
+  }
+};
+
+export const addSellerservice = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const {
+      seller_id,
+      service_title,
+      service_category,
+      description,
+      keywords,
+      thumbnails,
+      features,
+      plans
+    } = req.body;
+
+    if (!seller_id || !service_title || !description) {
+      return res.status(400).json({
+        success: false,
+        message: 'Seller ID, service title, and description are required'
+      });
+    }
+
+    const { data: serviceData, error: serviceError } = await supabase
+      .from('services')
+      .insert([{
+        seller_id,
+        service_title,
+        service_category,
+        description,
+        keywords: keywords || [],
+        thumbnails: thumbnails || [],
+      }])
+      .select();
+
+    if (serviceError) {
+      throw serviceError;
+    }
+
+    const serviceId = serviceData[0].id;
+
+    if (plans && plans.length > 0) {
+      const formattedPlans = plans.map((plan: any) => ({
+        service_id: serviceId,
+        plan_name: plan.name,
+        plan_price: plan.price,
+        // revisions: plan.revisions || 1,
+        is_active: plan.active !== false,
+        plan_features: plan.features || []
+      }));
+
+      const { error: plansError } = await supabase
+        .from('services_plan')
+        .insert(formattedPlans);
+
+      if (plansError) {
+        throw plansError;
+      }
+    }
+
+    const { data: completeService, error: fetchError } = await supabase
+      .from('services')
+      .select(`
+        *,
+        services_plan (*)
+      `)
+      .eq('id', serviceId)
+      .single();
+
+    if (fetchError) {
+      throw fetchError;
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Service created successfully',
+      data: completeService
+    });
+
+  } catch (error: any) {
+    console.error('Error creating service:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create service',
+      error: error.message
+    });
+  }
+};
+
+export const getAllServices = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+
+    const { data: services, error, count } = await supabase
+      .from('services')
+      .select(`
+        *,
+        seller:seller_id (
+          id,
+          niche,
+          city,
+          country,
+          slogan,
+          user:user_id (
+            avatar_url,
+            first_name,
+            last_name,
+            email
+          )
+        ),
+        services_plan (*)
+      `, { count: 'exact' })
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const formattedServices = services.map(service => ({
+      ...service,
+      seller: {
+        ...service.seller,
+        avatar_url: service.seller.user?.avatar_url,
+        first_name: service.seller.user?.first_name,
+        last_name: service.seller.user?.last_name,
+        email: service.seller.user?.email
+      }
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedServices,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count,
+        itemsPerPage: limit
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error fetching services:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch services',
+      error: error.message
+    });
+  }
+};
+
+export const getSellerServices = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    // First get the seller's profile data
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('avatar_url, first_name, last_name, email')
+      .eq('id', userId)  // Using id which equals user_id
+      .single();
+
+    if (profileError) throw profileError;
+
+    // Get services where seller_id matches the user's seller profile
+    const { data: services, error: servicesError } = await supabase
+      .from('services')
+      .select(`
+        *,
+        services_plan (*)
+      `)
+      .eq('seller_id', userId);  // Assuming seller_id in services table is the user_id
+
+    if (servicesError) throw servicesError;
+
+    // Combine the data
+    const responseData = services.map(service => ({
+      ...service,
+      seller_profile: profile
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: responseData
+    });
+
+  } catch (error: any) {
+    console.error('Error fetching seller services:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch seller services',
+      error: error.message
+    });
+  }
+};
+
+export const getServiceById = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const serviceId = req.params.id;
+
+    const { data: service, error: serviceError } = await supabase
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .maybeSingle();
+
+    if (serviceError) throw serviceError;
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    // 2. Get all needed data in parallel
+    const [
+      { data: plans, error: plansError },
+      { data: seller, error: sellerError },
+      { data: profile, error: profileError },
+      { data: relatedServices, error: relatedError }
+    ] = await Promise.all([
+      supabase
+        .from('services_plan')
+        .select('*')
+        .eq('service_id', serviceId),
+      supabase
+        .from('sellers')
+        .select('*')
+        .eq('user_id', service.seller_id)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('avatar_url, first_name, last_name, email')
+        .eq('id', service.seller_id)
+        .maybeSingle(),
+      supabase
+        .from('services')
+        .select(`
+          id,
+          service_title,
+          thumbnails,
+          service_category,
+          services_plan (plan_price)
+        `)
+        .eq('seller_id', service.seller_id)
+        .neq('id', serviceId)
+        .limit(4)
+    ]);
+
+    // Handle errors
+    if (plansError) throw plansError;
+    if (sellerError) throw sellerError;
+    if (profileError) throw profileError;
+    if (relatedError) throw relatedError;
+
+    // 3. Build the seller profile data
+    const sellerProfile = seller ? {
+      ...seller,
+      avatar_url: profile?.avatar_url || null,
+      first_name: profile?.first_name || null,
+      last_name: profile?.last_name || null,
+      email: profile?.email || null,
+      city: seller.city || null,
+      country: seller.country || null,
+      rating: seller.rating || null,
+      completed_jobs: seller.completed_jobs || null,
+      response_time: seller.response_time || null
+    } : null;
+
+    // 4. Process related services
+    const formattedRelatedServices = (relatedServices || []).map(svc => ({
+      id: svc.id,
+      service_title: svc.service_title,
+      service_category: svc.service_category,
+      thumbnails: svc.thumbnails?.[0] ? [svc.thumbnails[0]] : [],
+      seller_profile: sellerProfile ? {
+        avatar_url: sellerProfile.avatar_url,
+        first_name: sellerProfile.first_name,
+        last_name: sellerProfile.last_name,
+        user_id: service.seller_id
+      } : null,
+      price: svc.services_plan?.reduce((min, p) => Math.min(min, p.plan_price), svc.services_plan?.[0]?.plan_price || 0) || 0
+    }));
+
+    // 5. Build final response
+    const responseData = {
+      ...service,
+      services_plan: plans || [],
+      seller_profile: sellerProfile,
+      related_services: formattedRelatedServices
+    };
+
+    res.status(200).json({
+      success: true,
+      data: responseData
+    });
+
+  } catch (error: any) {
+    console.error('Error fetching service:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch service',
       error: error.message
     });
   }
