@@ -11,7 +11,7 @@ import {
    getAllServices,
    getSellerServices,
    getServiceById
-} from '../controllers/users.controllers';
+} from '../controllers/users.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = express.Router();

@@ -56,7 +56,6 @@ export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Middleware to allow WebSocket upgrade requests
 app.use((req, res, next) => {
   if (req.path.includes('/socket.io/') || req.headers.upgrade === 'websocket') {
     return next();
@@ -113,7 +112,10 @@ export const io = new Server(server, {
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:5173',
-      'http://localhost:5174'
+      'http://localhost:5174',
+      'https://anamcara.ai',
+      'https://nirvana.anamcara.ai',
+      'https://soulstream.anamcara.ai',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
@@ -126,7 +128,9 @@ export const streamIo = new Server(server, {
   cors: {
     origin: [
       'http://localhost:5173',
-      'http://localhost:5174'
+      'http://localhost:5174',
+      'https://anamcara.ai',
+      'https://soulstream.anamcara.ai',
     ],
     methods: ['GET', 'POST']
   },
@@ -135,11 +139,11 @@ export const streamIo = new Server(server, {
 
 io.on('connection', (socket) => {
   console.log(`New client connected: ${socket.id}`);
-  
+
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
   });
-  
+
   socket.on('error', (error) => {
     console.error(`Socket error: ${error}`);
   });
@@ -147,7 +151,7 @@ io.on('connection', (socket) => {
 
 streamIo.on('connection', (socket) => {
   console.log(`New streaming client connected: ${socket.id}`);
-  
+
   socket.on('disconnect', () => {
     console.log(`Streaming client disconnected: ${socket.id}`);
   });
