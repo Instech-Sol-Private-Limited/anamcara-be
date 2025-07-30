@@ -398,7 +398,8 @@ export const becomeSellerController = async (req: Request, res: Response): Promi
 
 export const getSellerDataController = async (req: Request, res: Response): Promise<any> => {
   try {
-    const userId = req.user?.id;
+    // const userId = req.user?.id;
+    const userId = req.params?.id;
 
     const { data, error } = await supabase
       .from('sellers')

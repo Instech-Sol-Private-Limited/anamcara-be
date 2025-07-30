@@ -31,7 +31,7 @@ router.post("/reset-password", resetPasswordController);
 
 router.post("/become-seller", authMiddleware, becomeSellerController);
 
-router.get("/get-seller-data", authMiddleware, getSellerDataController);
+router.get("/get-seller-data/:id", authMiddleware, getSellerDataController);
 
 router.post("/add-seller-service", authMiddleware, addSellerservice);
 
