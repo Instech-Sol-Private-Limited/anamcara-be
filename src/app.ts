@@ -130,6 +130,7 @@ export const streamIo = new Server(server, {
       'http://localhost:5173',
       'http://localhost:5174',
       'https://anamcara.ai',
+      'https://nirvana.anamcara.ai',
       'https://soulstream.anamcara.ai',
     ],
     methods: ['GET', 'POST']

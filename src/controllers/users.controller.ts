@@ -398,7 +398,8 @@ export const becomeSellerController = async (req: Request, res: Response): Promi
 
 export const getSellerDataController = async (req: Request, res: Response): Promise<any> => {
   try {
-    const userId = req.user?.id;
+    // const userId = req.user?.id;
+    const userId = req.params?.id;
 
     const { data, error } = await supabase
       .from('sellers')
@@ -443,10 +444,11 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
       description,
       keywords,
       thumbnails,
-      features,
-      plans
+      plans,
+      booking_prices
     } = req.body;
 
+    // Validate required fields
     if (!seller_id || !service_title || !description) {
       return res.status(400).json({
         success: false,
@@ -454,6 +456,16 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
       });
     }
 
+    // Validate booking prices (must be array of exactly 3 numbers)
+    if (!Array.isArray(booking_prices) || booking_prices.length !== 3 || 
+        !booking_prices.every(price => typeof price === 'number')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Booking prices must be an array of exactly 3 numbers'
+      });
+    }
+
+    // Insert main service data
     const { data: serviceData, error: serviceError } = await supabase
       .from('services')
       .insert([{
@@ -463,6 +475,8 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
         description,
         keywords: keywords || [],
         thumbnails: thumbnails || [],
+        is_active: true,
+        bookingcall_array: booking_prices
       }])
       .select();
 
@@ -472,14 +486,13 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
 
     const serviceId = serviceData[0].id;
 
+    // Insert service plans if they exist
     if (plans && plans.length > 0) {
       const formattedPlans = plans.map((plan: any) => ({
         service_id: serviceId,
         plan_name: plan.name,
         plan_price: plan.price,
-        // revisions: plan.revisions || 1,
         is_active: plan.active !== false,
-        plan_features: plan.features || []
       }));
 
       const { error: plansError } = await supabase
@@ -491,6 +504,7 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
       }
     }
 
+    // Fetch complete service data with plans
     const { data: completeService, error: fetchError } = await supabase
       .from('services')
       .select(`
@@ -526,39 +540,45 @@ export const getAllServices = async (req: Request, res: Response): Promise<any> 
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
-    const { data: services, error, count } = await supabase
+    const { data: services, error: servicesError, count } = await supabase
       .from('services')
-      .select(`
-        *,
-        seller:seller_id (
-          id,
-          niche,
-          city,
-          country,
-          slogan,
-          user:user_id (
-            avatar_url,
-            first_name,
-            last_name,
-            email
-          )
-        ),
-        services_plan (*)
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
+      .eq('is_active', true)
       .range(offset, offset + limit - 1)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (servicesError) throw servicesError;
+
+    const sellerIds = services.map(service => service.seller_id);
+
+    const { data: sellers, error: sellersError } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', sellerIds);
+
+    if (sellersError) throw sellersError;
+
+    const sellerMap = new Map(sellers.map(seller => [seller.id, seller]));
+
+    const { data: servicePlans, error: plansError } = await supabase
+      .from('services_plan')
+      .select('*')
+      .in('service_id', services.map(s => s.id));
+
+    if (plansError) throw plansError;
+
+    const plansMap = new Map();
+    servicePlans.forEach(plan => {
+      if (!plansMap.has(plan.service_id)) {
+        plansMap.set(plan.service_id, []);
+      }
+      plansMap.get(plan.service_id).push(plan);
+    });
 
     const formattedServices = services.map(service => ({
       ...service,
-      seller: {
-        ...service.seller,
-        avatar_url: service.seller.user?.avatar_url,
-        first_name: service.seller.user?.first_name,
-        last_name: service.seller.user?.last_name,
-        email: service.seller.user?.email
-      }
+      seller: sellerMap.get(service.seller_id) || null,
+      services_plan: plansMap.get(service.id) || []
     }));
 
     res.status(200).json({
