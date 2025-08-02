@@ -35,7 +35,7 @@ router.get("/get-seller-data/:id", authMiddleware, getSellerDataController);
 
 router.post("/add-seller-service", authMiddleware, addSellerservice);
 
-router.post("/get-all-services", authMiddleware, getAllServices);
+router.get("/get-all-services", authMiddleware, getAllServices);
 
 router.get("/get-seller-services", authMiddleware, getSellerServices);
 
