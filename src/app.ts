@@ -28,6 +28,7 @@ import storiesRoutes from './routes/stories.routes';
 import streamsRoutes from './routes/streams.routes';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 import userRoutes from './routes/users.routes';
+import availableSlotsRoutes from './routes/availability.routes';
 
 dotenv.config();
 
@@ -100,6 +101,7 @@ app.use('/api/courses', courseRouter);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
+app.use('/api/slots', authMiddleware, availableSlotsRoutes);
 app.use('/api/users', userRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);

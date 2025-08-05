@@ -19,15 +19,15 @@ const router = express.Router();
 // ======================= users ========================
 
 // Create a new user
-router.post('/register', registerController);
+// router.post('/register', registerController);
 
-router.get('/verify', verifyEmailController);
+// router.get('/verify', verifyEmailController);
 
-router.post('/login', loginController);
+// router.post('/login', loginController);
 
-router.post("/forgot-password", forgotPasswordController);
+// router.post("/forgot-password", forgotPasswordController);
 
-router.post("/reset-password", resetPasswordController);
+// router.post("/reset-password", resetPasswordController);
 
 router.post("/become-seller", authMiddleware, becomeSellerController);
 
