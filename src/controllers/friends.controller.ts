@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { supabase } from '../app';
 import { sendNotification } from '../sockets/emitNotification';
 
-// Send friend request
 const sendFriendRequest = async (req: Request, res: Response) => {
   try {
     const { senderId, receiverId } = req.body;
@@ -156,121 +155,118 @@ const sendFriendRequest = async (req: Request, res: Response) => {
   }
 };
 
-    // Accept friend request
-    const acceptFriendRequest = async (req: Request, res: Response) => {
-      try {
-        const { friendshipId, userId } = req.body;
+const acceptFriendRequest = async (req: Request, res: Response) => {
+  try {
+    const { friendshipId, userId } = req.body;
 
-        // Get friendship details
-        const { data: friendship } = await supabase
-          .from('friendships')
-          .select(`
+    // Get friendship details
+    const { data: friendship } = await supabase
+      .from('friendships')
+      .select(`
         *,
         sender:profiles!friendships_sender_id_fkey(first_name, last_name, email),
         receiver:profiles!friendships_receiver_id_fkey(first_name, last_name, email)
       `)
-          .eq('id', friendshipId)
-          .single();
+      .eq('id', friendshipId)
+      .single();
 
-        if (!friendship) {
-          res.status(404).json({
-            success: false,
-            message: 'Friend request not found'
-          });
-          return;
-        }
+    if (!friendship) {
+      res.status(404).json({
+        success: false,
+        message: 'Friend request not found'
+      });
+      return;
+    }
 
-        // Update friendship status
-        const { data: updatedFriendship, error } = await supabase
-          .from('friendships')
-          .update({ status: 'accepted' })
-          .eq('id', friendshipId)
-          .select()
-          .single();
+    // Update friendship status
+    const { data: updatedFriendship, error } = await supabase
+      .from('friendships')
+      .update({ status: 'accepted' })
+      .eq('id', friendshipId)
+      .select()
+      .single();
 
-        if (error) {
-          res.status(400).json({
-            success: false,
-            message: error.message
-          });
-          return;
-        }
+    if (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+      return;
+    }
 
-        // Send notification to sender
-        const accepterName = friendship.receiver_id === userId
-          ? `${friendship.receiver.first_name} ${friendship.receiver.last_name || ''}`.trim()
-          : `${friendship.sender.first_name} ${friendship.sender.last_name || ''}`.trim();
+    // Send notification to sender
+    const accepterName = friendship.receiver_id === userId
+      ? `${friendship.receiver.first_name} ${friendship.receiver.last_name || ''}`.trim()
+      : `${friendship.sender.first_name} ${friendship.sender.last_name || ''}`.trim();
 
-        const senderEmail = friendship.sender.email;
+    const senderEmail = friendship.sender.email;
 
-        await sendNotification({
-          recipientEmail: senderEmail,
-          recipientUserId: friendship.sender_id,
-          actorUserId: userId,
-          threadId: '', // Not used for friendships
-          message: `**${accepterName}** accepted your _friend request_`,
-          type: 'friend_request_accepted',
-          metadata: {
-            friendship_id: friendshipId,
-            accepter_name: accepterName,
-            accepter_id: userId
-          }
-        });
-
-        res.json({
-          success: true,
-          data: updatedFriendship,
-          message: 'Friend request accepted'
-        });
-        return;
-      } catch (error) {
-        console.error('Error accepting friend request:', error);
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error'
-        });
-        return;
+    await sendNotification({
+      recipientEmail: senderEmail,
+      recipientUserId: friendship.sender_id,
+      actorUserId: userId,
+      threadId: '', // Not used for friendships
+      message: `**${accepterName}** accepted your _friend request_`,
+      type: 'friend_request_accepted',
+      metadata: {
+        friendship_id: friendshipId,
+        accepter_name: accepterName,
+        accepter_id: userId
       }
-    };
+    });
 
-    // Reject friend request
-    const rejectFriendRequest = async (req: Request, res: Response) => {
-      try {
-        const { friendshipId } = req.body;
+    res.json({
+      success: true,
+      data: updatedFriendship,
+      message: 'Friend request accepted'
+    });
+    return;
+  } catch (error) {
+    console.error('Error accepting friend request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+    return;
+  }
+};
 
-        const { data, error } = await supabase
-          .from('friendships')
-          .update({ status: 'rejected' })
-          .eq('id', friendshipId)
-          .select()
-          .single();
-        if (error) {
-          res.status(400).json({
-            success: false,
-            message: error.message
-          });
-          return;
-        }
+const rejectFriendRequest = async (req: Request, res: Response) => {
+  try {
+    const { friendshipId } = req.body;
 
-        res.json({
-          success: true,
-          data,
-          message: 'Friend request rejected'
-        });
-        return;
-      } catch (error) {
-        console.error('Error rejecting friend request:', error);
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error'
-        });
-        return;
-      }
-    };
+    const { data, error } = await supabase
+      .from('friendships')
+      .update({ status: 'rejected' })
+      .eq('id', friendshipId)
+      .select()
+      .single();
+    if (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message
+      });
+      return;
+    }
 
+    res.json({
+      success: true,
+      data,
+      message: 'Friend request rejected'
+    });
+    return;
+  } catch (error) {
+    console.error('Error rejecting friend request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+    return;
+  }
+};
 
-    export {
-      sendFriendRequest,
-      acceptFriendRequest,
-      rejectFriendRequest,
-    };
+export {
+  sendFriendRequest,
+  acceptFriendRequest,
+  rejectFriendRequest,
+};

@@ -1,6 +1,20 @@
 import { Request, Response } from 'express';
 import { supabase } from '../app';
-import { differenceInMinutes, parseISO } from 'date-fns';
+import { sendNotification } from '../sockets/emitNotification';
+import {
+    getCurrentWeekStartDate,
+    handleConfirmedStatus,
+    handleErrorResponse,
+    handleCancelledStatus,
+    handleCompletedStatus,
+    handleOtherStatus,
+} from '../services/slots.service'
+import {
+    formatDateToYYYYMMDD,
+    isValidAvailability,
+    formatTimeToAMPM,
+    formatDateToReadable,
+} from '../services/index.service';
 
 interface DayAvailability {
     enabled: boolean;
@@ -23,179 +37,6 @@ interface Availability {
     Saturday: DayAvailability;
     Sunday: DayAvailability;
 }
-
-// Zoom API Configuration
-const ZOOM_CONFIG = {
-    accountId: process.env.ZOOM_ACCOUNT_ID!,
-    clientId: process.env.ZOOM_CLIENT_ID!,
-    clientSecret: process.env.ZOOM_CLIENT_SECRET!,
-    apiBaseUrl: 'https://api.zoom.us/v2'
-};
-
-// Zoom API Functions
-const getZoomAccessToken = async (): Promise<string> => {
-    const credentials = Buffer.from(
-        `${ZOOM_CONFIG.clientId}:${ZOOM_CONFIG.clientSecret}`
-    ).toString('base64');
-
-    const response = await fetch('https://zoom.us/oauth/token', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-            grant_type: 'account_credentials',
-            account_id: ZOOM_CONFIG.accountId,
-        }),
-    });
-
-
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Failed to get Zoom access token: ${errorData.error_description || errorData.error}`);
-    }
-
-    const data = await response.json();
-    return data.access_token;
-};
-
-const generateMeetingPassword = (): string => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
-};
-
-const createZoomMeeting = async (meetingData: {
-    topic: string;
-    startTime: Date;
-    duration: number;
-    timezone?: string;
-}) => {
-    const accessToken = await getZoomAccessToken();
-
-    const meetingRequest = {
-        topic: meetingData.topic,
-        type: 2, // Scheduled meeting
-        start_time: meetingData.startTime.toISOString(),
-        duration: meetingData.duration,
-        timezone: meetingData.timezone || 'UTC',
-        password: generateMeetingPassword(),
-        settings: {
-            host_video: true,
-            participant_video: true,
-            join_before_host: false,
-            mute_upon_entry: true,
-            waiting_room: true,
-            auto_recording: 'none',
-        },
-    };
-
-    const response = await fetch(`${ZOOM_CONFIG.apiBaseUrl}/users/me/meetings`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(meetingRequest),
-    });
-
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Failed to create Zoom meeting: ${errorData.message || 'Unknown error'}`);
-    }
-
-    return await response.json();
-};
-
-// Helper Functions
-const getCurrentWeekStartDate = (): Date => {
-    const date = new Date();
-    const day = date.getDay();
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-    return new Date(date.setDate(diff));
-};
-
-const formatDateToYYYYMMDD = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-};
-
-const calculateDuration = (startTime: string, endTime: string): number => {
-    const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [endHour, endMinute] = endTime.split(':').map(Number);
-
-    const startTotalMinutes = startHour * 60 + startMinute;
-    const endTotalMinutes = endHour * 60 + endMinute;
-
-    return endTotalMinutes - startTotalMinutes;
-};
-
-const parseDateAndTime = (dateStr: string, timeStr: string): Date => {
-    const date = new Date(dateStr);
-    const [hours, minutes] = timeStr.split(':').map(Number);
-
-    date.setHours(hours, minutes, 0, 0);
-    return date;
-};
-
-const validateBookingRequest = (data: any): { isValid: boolean; errors: string[] } => {
-    const errors: string[] = [];
-
-    if (!data.date) errors.push('Date is required');
-    if (!data.slot || !data.slot.start || !data.slot.end) errors.push('Valid time slot is required');
-    if (!data.name) errors.push('Seller name is required');
-    if (typeof data.price !== 'number' || data.price < 0) errors.push('Valid price is required');
-    if (!data.title) errors.push('Service title is required');
-    if (!data.id) errors.push('Service ID is required');
-
-    // Validate date format
-    if (data.date && isNaN(Date.parse(data.date))) {
-        errors.push('Invalid date format');
-    }
-
-    // Validate time format
-    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-    if (data.slot?.start && !timeRegex.test(data.slot.start)) {
-        errors.push('Invalid start time format');
-    }
-    if (data.slot?.end && !timeRegex.test(data.slot.end)) {
-        errors.push('Invalid end time format');
-    }
-
-    return {
-        isValid: errors.length === 0,
-        errors
-    };
-};
-
-const isValidAvailability = (availability: any): boolean => {
-    try {
-        const requiredDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-        if (!requiredDays.every(day => day in availability)) {
-            return false;
-        }
-
-        for (const day of requiredDays) {
-            const dayAvailability = availability[day];
-            if (typeof dayAvailability.enabled !== 'boolean') return false;
-
-            if (!Array.isArray(dayAvailability.slots)) return false;
-
-            for (const slot of dayAvailability.slots) {
-                if (!slot.id || typeof slot.id !== 'string') return false;
-                if (!slot.start || !isValidTime(slot.start)) return false;
-                if (!slot.end || !isValidTime(slot.end)) return false;
-            }
-        }
-
-        return true;
-    } catch {
-        return false;
-    }
-};
-
-const isValidTime = (time: string): boolean => {
-    return /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time);
-};
 
 const DEFAULT_AVAILABILITY: Availability = {
     Monday: { enabled: false, slots: [] },
@@ -405,7 +246,7 @@ export const bookingASlot = async (req: Request, res: Response): Promise<any> =>
             const hasConflict = existingBookings.some(booking => {
                 const existingStart = parseTime(booking.meeting_start_time);
                 const existingEnd = parseTime(booking.meeting_end_time);
-                
+
                 return (
                     (newStart >= existingStart && newStart < existingEnd) ||
                     (newEnd > existingStart && newEnd <= existingEnd) ||
@@ -414,14 +255,13 @@ export const bookingASlot = async (req: Request, res: Response): Promise<any> =>
             });
 
             if (hasConflict) {
-                return res.status(409).json({ 
+                return res.status(409).json({
                     error: 'Time slot overlaps with an existing booking',
                     details: 'Please choose a different time slot'
                 });
             }
         }
 
-        // Fetch buyer's anamcoins
         const { data: coinsData, error: coinsError } = await supabase
             .from('anamcoins')
             .select('available_coins, spent_coins')
@@ -438,7 +278,6 @@ export const bookingASlot = async (req: Request, res: Response): Promise<any> =>
             return res.status(400).json({ error: 'Insufficient anamcoins' });
         }
 
-        // Deduct anamcoins
         const { error: deductError } = await supabase
             .from('anamcoins')
             .update({
@@ -450,7 +289,6 @@ export const bookingASlot = async (req: Request, res: Response): Promise<any> =>
 
         if (deductError) throw deductError;
 
-        // Create the booking
         const { data: bookingData, error: bookingError } = await supabase
             .from('slots_booking')
             .insert({
@@ -475,6 +313,63 @@ export const bookingASlot = async (req: Request, res: Response): Promise<any> =>
 
         if (bookingError) throw bookingError;
 
+        // await scheduleMeetingCompletionCheck(bookingData.id, meeting_date, meeting_end_time);
+
+        const { data: sellerData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', bookingData.seller_id);
+
+        if (!sellerData) {
+            throw new Error('Could not fetch buyer or seller information');
+        }
+
+        const formattedDate = formatDateToReadable(bookingData.meeting_date);
+        const formattedTime = formatTimeToAMPM(bookingData.meeting_start_time);
+
+        await sendNotification({
+            recipientEmail: sellerData[0].email,
+            recipientUserId: seller_id,
+            actorUserId: null,
+            threadId: null,
+            message: `You have received a new booking request from _${bookingData.buyer_name}_ for **"${bookingData.service_title}"** on _${formattedDate}_ at **${formattedTime}**.`,
+            type: 'slot_booking',
+            metadata: {
+                booking_id: bookingData.id,
+                service_title: bookingData.service_title,
+                meeting_date: bookingData.meeting_date,
+                meeting_time: bookingData.meeting_start_time,
+                buyer_name: bookingData.buyer_name,
+                formatted_date: formattedDate,
+                formatted_time: formattedTime
+            }
+        });
+
+        const { data: buyerData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', bookingData.buyer_id);
+
+        if (buyerData && buyerData.length > 0) {
+            await sendNotification({
+                recipientEmail: buyerData[0].email,
+                recipientUserId: buyer_id,
+                actorUserId: null,
+                threadId: null,
+                message: `Your booking request for **"${bookingData.service_title}"** with _**${bookingData.seller_name}**_ on _${formattedDate}_ at **${formattedTime}** has been submitted successfully.`,
+                type: 'slot_booking_confirmation',
+                metadata: {
+                    booking_id: bookingData.id,
+                    service_title: bookingData.service_title,
+                    meeting_date: bookingData.meeting_date,
+                    meeting_time: bookingData.meeting_start_time,
+                    seller_name: bookingData.seller_name,
+                    formatted_date: formattedDate,
+                    formatted_time: formattedTime
+                }
+            });
+        }
+
         res.status(201).json({
             message: 'Meeting request sent to seller successfully.',
             booking: bookingData
@@ -495,6 +390,7 @@ export const getBookedSlots = async (req: Request, res: Response): Promise<void>
 
         const currentDate = new Date().toISOString().split('T')[0];
 
+        console.log(userId)
         const { data: slotsData, error: slotsError } = await supabase
             .from('slots_booking')
             .select(`*`)
@@ -504,6 +400,7 @@ export const getBookedSlots = async (req: Request, res: Response): Promise<void>
             .order('meeting_start_time', { ascending: true })
             .limit(20);
 
+            console.log(slotsData)
         if (slotsError) {
             throw slotsError;
         }
@@ -536,6 +433,7 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
     try {
         const { id, status } = req.body;
 
+        // Fetch booking data
         const { data: bookingData, error: fetchError } = await supabase
             .from('slots_booking')
             .select('*')
@@ -543,365 +441,31 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
             .single();
 
         if (fetchError || !bookingData) {
-            res.status(404).json({
+            return res.status(404).json({
                 success: false,
                 error: 'Booking not found'
             });
-            return;
         }
 
-        if (bookingData.is_historical) {
-            res.status(400).json({
-                success: false,
-                error: 'Cannot modify historical records'
-            });
-            return;
+        // Format date/time for notifications
+        const formattedDate = formatDateToReadable(bookingData.meeting_date);
+        const formattedTime = formatTimeToAMPM(bookingData.meeting_start_time);
+
+        // Handle different status updates
+        switch (status) {
+            case 'confirmed':
+                return await handleConfirmedStatus(res, bookingData, id, formattedDate, formattedTime);
+            case 'cancelled':
+            case 'declined':
+                return await handleCancelledStatus(res, bookingData, id, status, formattedDate, formattedTime);
+            case 'completed':
+            case 'no_show':
+                return await handleCompletedStatus(res, bookingData, id, status, formattedDate);
+            default:
+                return await handleOtherStatus(res, bookingData, id, status);
         }
-
-        if (status === 'confirmed') {
-            if (bookingData.zoom_meeting_created) {
-                const { data: updatedBooking, error: updateError } = await supabase
-                    .from('slots_booking')
-                    .update({
-                        booking_status: status,
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', id)
-                    .select()
-                    .single();
-
-                if (updateError) throw new Error(`Failed to update booking: ${updateError.message}`);
-
-                return res.status(200).json({
-                    success: true,
-                    message: 'Booking confirmed (existing Zoom meeting)',
-                    data: updatedBooking
-                });
-            }
-
-            const meetingStartTime = parseISO(`${bookingData.meeting_date}T${bookingData.meeting_start_time}`);
-            const meetingEndTime = parseISO(`${bookingData.meeting_date}T${bookingData.meeting_end_time}`);
-            const duration = differenceInMinutes(meetingEndTime, meetingStartTime);
-
-            const zoomMeeting = await createZoomMeeting({
-                topic: `${bookingData.service_title} - 1:1 Consultation`,
-                startTime: meetingStartTime,
-                duration: duration,
-                timezone: 'UTC'
-            });
-
-            const { data: updatedBooking, error: updateError } = await supabase
-                .from('slots_booking')
-                .update({
-                    booking_status: status,
-                    zoom_meeting_id: zoomMeeting.id,
-                    zoom_join_url: zoomMeeting.join_url,
-                    zoom_password: zoomMeeting.password,
-                    zoom_host_url: zoomMeeting.host_url,
-                    zoom_meeting_created: true,
-                    meeting_status: 'scheduled',
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', id)
-                .select()
-                .single();
-
-            if (updateError) {
-                try {
-                    const accessToken = await getZoomAccessToken();
-                    await fetch(`${ZOOM_CONFIG.apiBaseUrl}/meetings/${zoomMeeting.id}`, {
-                        method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                        },
-                    });
-                } catch (cleanupError) {
-                    console.error('Failed to cleanup Zoom meeting after database error:', cleanupError);
-                }
-                throw new Error(`Failed to update booking: ${updateError.message}`);
-            }
-
-            return res.status(200).json({
-                success: true,
-                message: 'Booking confirmed and Zoom meeting created',
-                data: updatedBooking
-            });
-        }
-
-        if (status === 'cancelled' || status === 'declined') {
-            if (bookingData.zoom_meeting_created && bookingData.zoom_meeting_id) {
-                try {
-                    const accessToken = await getZoomAccessToken();
-                    await fetch(`${ZOOM_CONFIG.apiBaseUrl}/meetings/${bookingData.zoom_meeting_id}`, {
-                        method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                        },
-                    });
-                } catch (zoomError) {
-                    console.error('Failed to delete Zoom meeting:', zoomError);
-                }
-            }
-
-            const { data: updatedBooking, error: updateError } = await supabase
-                .from('slots_booking')
-                .update({
-                    booking_status: status,
-                    zoom_meeting_id: null,
-                    zoom_join_url: null,
-                    zoom_password: null,
-                    zoom_host_url: null,
-                    zoom_meeting_created: false,
-                    meeting_status: 'cancelled',
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', id)
-                .select()
-                .single();
-
-            if (updateError) throw new Error(`Failed to update booking: ${updateError.message}`);
-
-            return res.status(200).json({
-                success: true,
-                message: 'Booking cancelled and marked as historical',
-                data: updatedBooking
-            });
-        }
-
-        const { data: updatedBooking, error: updateError } = await supabase
-            .from('slots_booking')
-            .update({
-                booking_status: status,
-                updated_at: new Date().toISOString(),
-                is_historical: status === 'completed' || status === 'no_show'
-            })
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (updateError) throw new Error(`Failed to update booking status: ${updateError.message}`);
-
-        res.status(200).json({
-            success: true,
-            message: 'Booking status updated',
-            data: updatedBooking
-        });
-
     } catch (error) {
         console.error('Error updating booking status:', error);
-
-        if (error instanceof Error && error.message.includes('Zoom')) {
-            res.status(503).json({
-                success: false,
-                error: 'Failed to create meeting room',
-                details: 'Meeting scheduling service is temporarily unavailable'
-            });
-            return;
-        }
-
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            details: error instanceof Error ? error.message : 'Unknown error occurred'
-        });
-    }
-};
-
-export const createBooking = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                error: 'Unauthorized - User not authenticated'
-            });
-            return;
-        }
-
-        const bookingData = req.body;
-        console.log('Booking request data:', bookingData);
-
-        // Validate request data
-        const validation = validateBookingRequest(bookingData);
-        if (!validation.isValid) {
-            res.status(400).json({
-                success: false,
-                error: 'Validation failed',
-                details: validation.errors
-            });
-            return;
-        }
-
-        const { date, slot, name, price, title, id: serviceId } = bookingData;
-
-        const meetingStartTime = parseDateAndTime(date, slot.start);
-        const meetingEndTime = parseDateAndTime(date, slot.end);
-        const duration = calculateDuration(slot.start, slot.end);
-
-        if (meetingStartTime <= new Date()) {
-            res.status(400).json({
-                success: false,
-                error: 'Cannot schedule meetings in the past'
-            });
-            return;
-        }
-
-        const { data: serviceData, error: serviceError } = await supabase
-            .from('services')
-            .select('seller_id, service_title')
-            .eq('id', serviceId)
-            .single();
-
-        if (serviceError || !serviceData) {
-            res.status(404).json({
-                success: false,
-                error: 'Service not found'
-            });
-            return;
-        }
-
-        // Get buyer (current user) details
-        const { data: buyerData, error: buyerError } = await supabase
-            .from('profiles')
-            .select('first_name, last_name')
-            .eq('id', userId)
-            .single();
-
-        if (buyerError) {
-            console.warn('Could not fetch buyer details:', buyerError);
-        }
-
-        const buyerName = buyerData
-            ? `${buyerData.first_name || ''} ${buyerData.last_name || ''}`.trim() || 'User'
-            : 'User';
-
-        // Check for existing booking conflicts
-        const { data: existingBookings, error: conflictError } = await supabase
-            .from('scheduled_meetings')
-            .select('id')
-            .eq('seller_id', serviceData.seller_id)
-            .eq('meeting_date', meetingStartTime.toISOString().split('T')[0])
-            .eq('meeting_start_time', slot.start + ':00')
-            .eq('meeting_status', 'scheduled');
-
-        if (conflictError) {
-            throw new Error(`Error checking booking conflicts: ${conflictError.message}`);
-        }
-
-        if (existingBookings && existingBookings.length > 0) {
-            res.status(409).json({
-                success: false,
-                error: 'This time slot is already booked'
-            });
-            return;
-        }
-
-        // Create Zoom meeting
-        console.log('Creating Zoom meeting...');
-        const zoomMeeting = await createZoomMeeting({
-            topic: `${title} - 1:1 Consultation`,
-            startTime: meetingStartTime,
-            duration: duration,
-            timezone: 'UTC'
-        });
-
-        console.log('Zoom meeting created successfully:', zoomMeeting.id);
-
-        // Store the meeting in database
-        const meetingRecord = {
-            service_id: serviceId,
-            seller_id: serviceData.seller_id,
-            buyer_id: userId,
-            meeting_date: meetingStartTime.toISOString().split('T')[0],
-            meeting_start_time: slot.start + ':00',
-            meeting_end_time: slot.end + ':00',
-            duration_minutes: duration,
-            price: price,
-            service_title: title,
-            seller_name: name,
-            buyer_name: buyerName,
-            zoom_meeting_id: zoomMeeting.id,
-            zoom_join_url: zoomMeeting.join_url,
-            zoom_password: zoomMeeting.password,
-            zoom_host_url: zoomMeeting.host_url,
-            meeting_status: 'scheduled',
-            payment_status: 'paid',
-            zoom_meeting_created: true,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        };
-
-        const { data: savedMeeting, error: saveError } = await supabase
-            .from('scheduled_meetings')
-            .insert(meetingRecord)
-            .select('*')
-            .single();
-
-        if (saveError) {
-            // If database save fails, try to delete the Zoom meeting
-            try {
-                const accessToken = await getZoomAccessToken();
-                await fetch(`${ZOOM_CONFIG.apiBaseUrl}/meetings/${zoomMeeting.id}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                    },
-                });
-            } catch (cleanupError) {
-                console.error('Failed to cleanup Zoom meeting after database error:', cleanupError);
-            }
-
-            throw new Error(`Failed to save meeting: ${saveError.message}`);
-        }
-
-        console.log('Meeting saved successfully:', savedMeeting.id);
-
-        // Return success response
-        res.status(201).json({
-            success: true,
-            message: 'Booking created successfully',
-            data: {
-                bookingId: savedMeeting.id,
-                meetingDate: meetingStartTime.toISOString(),
-                duration: duration,
-                price: price,
-                serviceTitle: title,
-                sellerName: name,
-                buyerName: buyerName,
-                status: 'scheduled',
-                // Don't return Zoom links in response for security
-                zoomMeetingCreated: true
-            }
-        });
-
-    } catch (error) {
-        console.error('Error in createBooking:', error);
-
-        // Handle specific Zoom API errors
-        if (error instanceof Error && error.message.includes('Zoom')) {
-            res.status(503).json({
-                success: false,
-                error: 'Failed to create meeting room',
-                details: 'Meeting scheduling service is temporarily unavailable'
-            });
-            return;
-        }
-
-        // Handle database errors
-        if (error instanceof Error && error.message.includes('Failed to save meeting')) {
-            res.status(500).json({
-                success: false,
-                error: 'Database error',
-                details: 'Could not save booking information'
-            });
-            return;
-        }
-
-        // Generic error handling
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            details: error instanceof Error ? error.message : 'Unknown error occurred'
-        });
+        handleErrorResponse(res, error);
     }
 };

@@ -21,7 +21,6 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: 'Missing required fields!' });
     }
 
-    // Fetch parent (thread or post) and author
     let parentData, parentError, authorId, parentTitle;
     if (targetType === 'thread') {
       ({ data: parentData, error: parentError } = await supabase
@@ -49,18 +48,18 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
 
     // Insert comment
     const user_name =
-  (first_name && first_name.trim()) ? `${first_name}${last_name ? ` ${last_name}` : ''}` :
-  (last_name && last_name.trim()) ? last_name :
-  (email && email.trim()) ? email :
-  'Anonymous';
+      (first_name && first_name.trim()) ? `${first_name}${last_name ? ` ${last_name}` : ''}` :
+        (last_name && last_name.trim()) ? last_name :
+          (email && email.trim()) ? email :
+            'Anonymous';
 
-const insertObj: any = {
-  content,
-  imgs,
-  user_name,
-  user_id,
-};
-    console.log(insertObj)
+    const insertObj: any = {
+      content,
+      imgs,
+      user_name,
+      user_id,
+    };
+
     if (targetType === 'thread') insertObj.thread_id = targetId;
     else insertObj.post_id = targetId;
 
@@ -112,112 +111,112 @@ const insertObj: any = {
 
 // delete comment
 const deleteComment = async (
-    req: Request<{ comment_id: string }> & { user?: { id: string; role?: string } },
-    res: Response
+  req: Request<{ comment_id: string }> & { user?: { id: string; role?: string } },
+  res: Response
 ): Promise<any> => {
-    try {
-        const { comment_id } = req.params;
-        const { id: user_id, role } = req.user!;
+  try {
+    const { comment_id } = req.params;
+    const { id: user_id, role } = req.user!;
 
-        const { data: comment, error: fetchError } = await supabase
-            .from('threadcomments')
-            .select('id, user_id')
-            .eq('id', comment_id)
-            .eq('is_deleted', false)
-            .single();
+    const { data: comment, error: fetchError } = await supabase
+      .from('threadcomments')
+      .select('id, user_id')
+      .eq('id', comment_id)
+      .eq('is_deleted', false)
+      .single();
 
-        if (fetchError || !comment) {
-            return res.status(404).json({ error: 'Comment not found!' });
-        }
-
-        const isAuthor = comment.user_id === user_id;
-        const isSuperadmin = role === 'superadmin';
-
-        if (!isAuthor && !isSuperadmin) {
-            return res.status(403).json({ error: 'Permission denied!' });
-        }
-
-        const { error: deleteError } = await supabase
-            .from('threadcomments')
-            .update({
-                is_deleted: true,
-            })
-            .eq('id', comment_id);
-
-        if (deleteError) {
-            return res.status(500).json({ error: deleteError.message });
-        }
-
-        return res.status(200).json({ message: 'Comment deleted successfully!' });
-
-    } catch (err: any) {
-        console.error('Unexpected error in deleteComment:', err);
-        return res.status(500).json({
-            error: 'Internal server error while deleting comment.',
-            message: err.message || 'Unexpected failure.',
-        });
+    if (fetchError || !comment) {
+      return res.status(404).json({ error: 'Comment not found!' });
     }
+
+    const isAuthor = comment.user_id === user_id;
+    const isSuperadmin = role === 'superadmin';
+
+    if (!isAuthor && !isSuperadmin) {
+      return res.status(403).json({ error: 'Permission denied!' });
+    }
+
+    const { error: deleteError } = await supabase
+      .from('threadcomments')
+      .update({
+        is_deleted: true,
+      })
+      .eq('id', comment_id);
+
+    if (deleteError) {
+      return res.status(500).json({ error: deleteError.message });
+    }
+
+    return res.status(200).json({ message: 'Comment deleted successfully!' });
+
+  } catch (err: any) {
+    console.error('Unexpected error in deleteComment:', err);
+    return res.status(500).json({
+      error: 'Internal server error while deleting comment.',
+      message: err.message || 'Unexpected failure.',
+    });
+  }
 };
 
 // update comment
 const updateComment = async (
-    req: Request<{ comment_id: string }> & { user?: { id: string; role?: string; } },
-    res: Response
+  req: Request<{ comment_id: string }> & { user?: { id: string; role?: string; } },
+  res: Response
 ): Promise<any> => {
-    try {
-        const { comment_id } = req.params;
-        const { content, imgs } = req.body;
-        const { id: user_id, role } = req.user!;
+  try {
+    const { comment_id } = req.params;
+    const { content, imgs } = req.body;
+    const { id: user_id, role } = req.user!;
 
-        const { data: existingComment, error: fetchError } = await supabase
-            .from('threadcomments')
-            .select('*')
-            .eq('id', comment_id)
-            .eq('is_deleted', false)
-            .single();
+    const { data: existingComment, error: fetchError } = await supabase
+      .from('threadcomments')
+      .select('*')
+      .eq('id', comment_id)
+      .eq('is_deleted', false)
+      .single();
 
-        if (fetchError || !existingComment) {
-            return res.status(404).json({ error: 'Comment not found!' });
-        }
-
-        const isOwner = existingComment.user_id === user_id;
-        const isSuperadmin = role === 'superadmin';
-
-        if (!isOwner && !isSuperadmin) {
-            return res.status(403).json({ error: 'Permission denied!' });
-        }
-
-        if (!content || typeof content !== 'string' || !content.trim()) {
-            return res.status(400).json({ error: 'Content is required and must be a non-empty string.' });
-        }
-
-        const { error: updateError } = await supabase
-            .from('threadcomments')
-            .update({
-                content,
-                imgs,
-                is_edited: true
-            })
-            .eq('id', comment_id);
-
-        if (updateError) {
-            console.error('Supabase update error:', updateError);
-            return res.status(500).json({
-                error: updateError.message || 'Failed to update comment.',
-                details: updateError.details || null,
-                hint: updateError.hint || null,
-            });
-        }
-
-        return res.status(200).json({ message: 'Comment updated successfully!' });
-
-    } catch (err: any) {
-        console.error('Unexpected error in updateComment:', err);
-        return res.status(500).json({
-            error: 'Internal server error while updating comment.',
-            message: err.message || 'Unexpected failure.',
-        });
+    if (fetchError || !existingComment) {
+      return res.status(404).json({ error: 'Comment not found!' });
     }
+
+    const isOwner = existingComment.user_id === user_id;
+    const isSuperadmin = role === 'superadmin';
+
+    if (!isOwner && !isSuperadmin) {
+      return res.status(403).json({ error: 'Permission denied!' });
+    }
+
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'Content is required and must be a non-empty string.' });
+    }
+
+    const { error: updateError } = await supabase
+      .from('threadcomments')
+      .update({
+        content,
+        imgs,
+        is_edited: true
+      })
+      .eq('id', comment_id);
+
+    if (updateError) {
+      console.error('Supabase update error:', updateError);
+      return res.status(500).json({
+        error: updateError.message || 'Failed to update comment.',
+        details: updateError.details || null,
+        hint: updateError.hint || null,
+      });
+    }
+
+    return res.status(200).json({ message: 'Comment updated successfully!' });
+
+  } catch (err: any) {
+    console.error('Unexpected error in updateComment:', err);
+    return res.status(500).json({
+      error: 'Internal server error while updating comment.',
+      message: err.message || 'Unexpected failure.',
+    });
+  }
 };
 
 // get all comment by thread_id
@@ -520,10 +519,10 @@ const updateCommentReaction = async (
 };
 
 export {
-    createComment,
-    deleteComment,
-    updateComment,
-    getComments,
-    updateCommentReaction,
+  createComment,
+  deleteComment,
+  updateComment,
+  getComments,
+  updateCommentReaction,
 };
 

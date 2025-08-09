@@ -1,6 +1,6 @@
 import express from 'express';
 
-import { bookingASlot, createBooking, getAvailability, getBookedSlots, getUserSlots, updateAvailability, updateBookingStatus } from '../controllers/availableslots.controller';
+import { bookingASlot, getAvailability, getBookedSlots, getUserSlots, updateAvailability, updateBookingStatus } from '../controllers/availableslots.controller';
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ router.get('/get-booked-slot/:id', getBookedSlots);
 
 router.put('/change-status', updateBookingStatus);
 
-router.post('/create-booking', createBooking);
+// router.post('/create-booking', createBooking);
 
 // router.post('/reset', resetAvailability);
 
