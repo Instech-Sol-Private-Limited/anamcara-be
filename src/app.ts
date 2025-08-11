@@ -26,8 +26,12 @@ import courseRouter from './routes/course.routes';
 import enrollmentRoutes from './routes/enrollment.routes';
 import storiesRoutes from './routes/stories.routes';
 import streamsRoutes from './routes/streams.routes';
-import { registerStreamingHandlers } from './sockets/streaming.handler';
 import userRoutes from './routes/users.routes';
+import availableSlotsRoutes from './routes/availability.routes';
+import productsRoutes from './routes/products.routes';
+import { handleZoomWebhook } from './controllers/zoomwebhook.controller';
+import { registerStreamingHandlers } from './sockets/streaming.handler';
+import { setupPaymentCron } from './services/paymentcron.service';
 
 dotenv.config();
 
@@ -82,10 +86,11 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).send(`<h1>Server is running...</h1>`);
 });
-
+app.post('/api/webhooks/zoom', express.json(), handleZoomWebhook);
 app.use('/api/conversations', authMiddleware, conversationRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/threads', threadsRoutes);
@@ -100,9 +105,11 @@ app.use('/api/courses', courseRouter);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
-app.use('/api/users', userRoutes);
+app.use('/api/slots', authMiddleware, availableSlotsRoutes);
+app.use('/api/products', authMiddleware, productsRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
+setupPaymentCron()
 
 const server = http.createServer(app);
 
