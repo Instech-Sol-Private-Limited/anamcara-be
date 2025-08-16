@@ -29,6 +29,7 @@ import streamsRoutes from './routes/streams.routes';
 import userRoutes from './routes/users.routes';
 import availableSlotsRoutes from './routes/availability.routes';
 import productsRoutes from './routes/products.routes';
+import vaultRoutes from './routes/vault.routes';
 import { handleZoomWebhook } from './controllers/zoomwebhook.controller';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 import { setupPaymentCron } from './services/paymentcron.service';
@@ -107,6 +108,7 @@ app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 app.use('/api/slots', authMiddleware, availableSlotsRoutes);
 app.use('/api/products', authMiddleware, productsRoutes);
+app.use('/api/vault', authMiddleware, vaultRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron()
