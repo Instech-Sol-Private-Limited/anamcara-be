@@ -15,6 +15,7 @@ import profileRoutes from './routes/profile.routes';
 import reportRoutes from './routes/reports.routes';
 import notificationsRoutes from './routes/notifications.routes';
 import chatMessageRoutes from './routes/chatmessages.routes';
+import soulStoriesRoutes from './routes/soulStories.routes';
 import cron from 'node-cron';
 import updateDailyInsights from './crons/dailyInsightsCron';
 import { getDailyInsights } from './controllers/dailyinsights.controller';
@@ -107,7 +108,7 @@ app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 app.use('/api/slots', authMiddleware, availableSlotsRoutes);
 app.use('/api/products', authMiddleware, productsRoutes);
-
+app.use('/api/soul-stories', soulStoriesRoutes);
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron()
 
