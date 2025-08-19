@@ -43,7 +43,7 @@ export const soulStoriesServices = {
   
       const { data: analyticsData, error: analyticsError } = await supabase
         .from('soul_stories')
-        .select('*')
+        .select('*').eq('author_id', userId)
 
 
       if (analyticsError) {
@@ -240,7 +240,7 @@ export const soulStoriesServices = {
         stories: [],
         pagination: {
           page: options.page,
-          limit: options.limit, // Use actual limit
+          limit: options.limit,
           total: 0,
           totalPages: 0,
           hasMore: false,
@@ -249,6 +249,55 @@ export const soulStoriesServices = {
           prevPage: null
         }
       };
+    }
+  },
+  async deleteStory(userId:string,story_id:string){
+    try {
+      // Check if story exists and user owns it
+      const { data: story, error: checkError } = await supabase
+        .from('soul_stories')
+        .select('id, author_id')
+        .eq('id', story_id)
+        .single();
+
+      if (checkError || !story) {
+        throw new Error('Story not found');
+      }
+
+      if (story.author_id !== userId) {
+        throw new Error('Unauthorized to delete this story');
+      }
+
+      // Delete episodes first (due to foreign key constraint)
+      const { error: episodesError } = await supabase
+        .from('soul_story_episodes')
+        .delete()
+        .eq('story_id', story_id);
+
+      if (episodesError) {
+        console.error('Error deleting episodes:', episodesError);
+        throw new Error('Failed to delete episodes');
+      }
+
+      // Delete the main story
+      const { error: storyError } = await supabase
+        .from('soul_stories')
+        .delete()
+        .eq('id', story_id);
+
+      if (storyError) {
+        console.error('Error deleting story:', storyError);
+        throw new Error('Failed to delete story');
+      }
+
+      return {
+        success: true,
+        message: 'Story and episodes deleted successfully'
+      };
+
+    } catch (error) {
+      console.error('Error in deleteStory service:', error);
+      throw error; // Re-throw to be handled by controller
     }
   }
 };
