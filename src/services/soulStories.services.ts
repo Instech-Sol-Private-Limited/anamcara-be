@@ -43,7 +43,7 @@ export const soulStoriesServices = {
   
       const { data: analyticsData, error: analyticsError } = await supabase
         .from('soul_stories')
-        .select('*')
+        .select('*').eq('author_id', userId)
 
 
       if (analyticsError) {
@@ -240,7 +240,7 @@ export const soulStoriesServices = {
         stories: [],
         pagination: {
           page: options.page,
-          limit: options.limit, // Use actual limit
+          limit: options.limit,
           total: 0,
           totalPages: 0,
           hasMore: false,
@@ -250,5 +250,345 @@ export const soulStoriesServices = {
         }
       };
     }
+  },
+  async deleteStory(userId:string,story_id:string){
+    try {
+      // Check if story exists and user owns it
+      const { data: story, error: checkError } = await supabase
+        .from('soul_stories')
+        .select('id, author_id')
+        .eq('id', story_id)
+        .single();
+
+      if (checkError || !story) {
+        throw new Error('Story not found');
+      }
+
+      if (story.author_id !== userId) {
+        throw new Error('Unauthorized to delete this story');
+      }
+
+      // Delete episodes first (due to foreign key constraint)
+      const { error: episodesError } = await supabase
+        .from('soul_story_episodes')
+        .delete()
+        .eq('story_id', story_id);
+
+      if (episodesError) {
+        console.error('Error deleting episodes:', episodesError);
+        throw new Error('Failed to delete episodes');
+      }
+
+      // Delete the main story
+      const { error: storyError } = await supabase
+        .from('soul_stories')
+        .delete()
+        .eq('id', story_id);
+
+      if (storyError) {
+        console.error('Error deleting story:', storyError);
+        throw new Error('Failed to delete story');
+      }
+
+      return {
+        success: true,
+        message: 'Story and episodes deleted successfully'
+      };
+
+    } catch (error) {
+      console.error('Error in deleteStory service:', error);
+      throw error; // Re-throw to be handled by controller
+    }
+  },
+  purchaseContent: async (userId: string, storyId: string, contentData: Array<{type: 'page' | 'episode', identifier: string | number, coins: number}>) => {
+    try {
+      // Get existing access for this user and story
+      const { data: existingAccess, error: accessError } = await supabase
+        .from('user_content_purchases')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('story_id', storyId)
+        .single();
+
+      let currentHighestPage = existingAccess?.highest_page_access || 0;
+      let currentEpisodes = existingAccess?.accessible_episode_urls || [];
+      let totalSpent = existingAccess?.total_coins_spent || 0;
+      let totalRevenue = existingAccess?.author_revenue || 0;
+
+      // Process each content item
+      contentData.forEach(item => {
+        if (item.type === 'page') {
+          const pageNum = typeof item.identifier === 'number' ? item.identifier : parseInt(item.identifier);
+          if (pageNum > currentHighestPage) {
+            currentHighestPage = pageNum;
+          }
+        } else if (item.type === 'episode') {
+          if (!currentEpisodes.includes(item.identifier)) {
+            currentEpisodes.push(item.identifier);
+          }
+        }
+        totalSpent += item.coins;
+        totalRevenue += item.coins;
+      });
+
+      // Determine content_type
+      let contentType = 'page';
+      if (contentData.some(item => item.type === 'episode')) {
+        contentType = 'episode';
+      }
+
+      // Update or insert the access record
+      const { data: upsertData, error: accessUpdateError } = await supabase
+        .from('user_content_purchases')
+        .upsert({
+          user_id: userId,
+          story_id: storyId,
+          content_type: contentType,
+          content_identifier: 'access',
+          coins_paid: contentData.reduce((sum, item) => sum + item.coins, 0),
+          author_revenue: totalRevenue,
+          highest_page_access: currentHighestPage,
+          accessible_episode_urls: currentEpisodes,
+          total_coins_spent: totalSpent,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,story_id'
+        });
+
+      if (accessUpdateError) {
+        console.log('❌ Upsert error details:', {
+          error: accessUpdateError,
+          data: {
+            user_id: userId,
+            story_id: storyId,
+            content_type: contentType,
+            content_identifier: 'access',
+            coins_paid: contentData.reduce((sum, item) => sum + item.coins, 0),
+            author_revenue: totalRevenue,
+            highest_page_access: currentHighestPage,
+            accessible_episode_urls: currentEpisodes,
+            total_coins_spent: totalSpent
+          }
+        });
+        throw new Error(`Failed to update story access: ${accessUpdateError.message}`);
+      }
+
+      // Handle coin transfers
+      const totalCoins = contentData.reduce((sum, item) => sum + item.coins, 0);
+
+      // Get user's current coins
+      const { data: userCoins, error: userError } = await supabase
+        .from('anamcoins')
+        .select('available_coins, spent_coins, total_coins')
+        .eq('user_id', userId)
+        .single();
+
+      if (userError || !userCoins) {
+        throw new Error('User coins account not found');
+      }
+
+      if (userCoins.available_coins < totalCoins) {
+        throw new Error(`Insufficient coins. Need ${totalCoins}, have ${userCoins.available_coins}`);
+      }
+
+      // Update user coins (deduct)
+      const { error: userUpdateError } = await supabase
+        .from('anamcoins')
+        .update({
+          available_coins: userCoins.available_coins - totalCoins,
+          spent_coins: (userCoins.spent_coins || 0) + totalCoins,
+          total_coins: userCoins.total_coins  // Keep total_coins unchanged (available + spent)
+        })
+        .eq('user_id', userId);
+
+      if (userUpdateError) {
+        throw new Error('Failed to update user coins');
+      }
+
+      // Get story author's current coins
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select('author_id')
+        .eq('id', storyId)
+        .single();
+
+      if (storyError || !story) {
+        throw new Error('Story not found');
+      }
+
+      const { data: authorCoins, error: authorError } = await supabase
+        .from('anamcoins')
+        .select('available_coins, total_coins')
+        .eq('user_id', story.author_id)
+        .single();
+
+      if (authorError || !authorCoins) {
+        throw new Error('Author coins account not found');
+      }
+
+      // Update author coins (add)
+      const { error: authorUpdateError } = await supabase
+        .from('anamcoins')
+        .update({
+          available_coins: authorCoins.available_coins + totalCoins,
+          total_coins: authorCoins.total_coins + totalCoins  // Increase total_coins
+        })
+        .eq('user_id', story.author_id);
+
+      if (authorUpdateError) {
+        throw new Error('Failed to update author coins');
+      }
+
+      return {
+        success: true,
+        highest_page_access: currentHighestPage,
+        accessible_episodes: currentEpisodes,
+        total_coins_spent: totalSpent,
+        author_revenue: totalRevenue,
+        message: 'Content purchased successfully'
+      };
+
+    } catch (error) {
+      console.error('Error purchasing content:', error);
+      throw error;
+    }
+  }, 
+  
+  getStoryAccess: async (userId: string, storyId: string) => {
+    try {
+      // Get story details
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select('id, title, category, story_type, asset_type, free_pages, free_episodes')
+        .eq('id', storyId)
+        .single();
+  
+      if (storyError || !story) {
+        throw new Error('Story not found');
+      }
+  
+      // Get user's access for this story from existing table
+      const { data: userAccess } = await supabase
+        .from('user_content_purchases')  // Use existing table
+        .select('*')
+        .eq('user_id', userId)
+        .eq('story_id', storyId)
+        .single();
+  
+      if (story.asset_type === 'document') {
+        // PDF Story - Return total accessible pages
+        const totalAccessiblePages = story.free_pages + (userAccess?.highest_page_access || 0);
+        
+        return {
+          story_id: storyId,
+          story_title: story.title,
+          story_category: story.category,
+          story_type: 'PDF',
+          free_pages: story.free_pages,
+          purchased_pages: userAccess?.highest_page_access || 0,
+          total_accessible_pages: totalAccessiblePages,
+          total_coins_spent: userAccess?.total_coins_spent || 0,
+          author_revenue: userAccess?.author_revenue || 0
+        };
+  
+      } else if (story.asset_type === 'video') {
+        // Video Story - Return accessible episode URLs
+        const accessibleEpisodes = userAccess?.accessible_episode_urls || [];
+        const totalAccessibleEpisodes = story.free_episodes + accessibleEpisodes.length;
+        
+        return {
+          story_id: storyId,
+          story_title: story.title,
+          story_category: story.category,
+          story_type: 'Video',
+          free_episodes: story.free_episodes,
+          accessible_episode_urls: accessibleEpisodes,
+          total_accessible_episodes: totalAccessibleEpisodes,
+          total_coins_spent: userAccess?.total_coins_spent || 0,
+          author_revenue: userAccess?.author_revenue || 0
+        };
+      }
+  
+      throw new Error('Invalid story type');
+  
+    } catch (error) {
+      console.error('Error getting story access:', error);
+      throw error;
+    }
+  },
+  getUserRevenue: async (userId: string) => {
+    try {
+      // Get all stories created by the user
+      const { data: userStories, error: storiesError } = await supabase
+        .from('soul_stories')
+        .select('id, title, category, story_type, asset_type')
+        .eq('author_id', userId);
+
+      if (storiesError) {
+        throw new Error('Failed to fetch user stories');
+      }
+
+      if (!userStories || userStories.length === 0) {
+        return {
+          user_id: userId,
+          total_revenue: 0,
+          total_stories: 0,
+          story_revenue: []
+        };
+      }
+
+      // Get all purchases for user's stories from the correct table name
+      const storyIds = userStories.map(story => story.id);
+      const { data: purchases, error: purchasesError } = await supabase
+        .from('user_content_purchases')  // Fixed: correct table name with underscore
+        .select('story_id, author_revenue, total_coins_spent, highest_page_access, accessible_episode_urls')
+        .in('story_id', storyIds);
+
+      if (purchasesError) {
+        throw new Error('Failed to fetch story purchases');
+      }
+
+      // Group revenue by story
+      const storyRevenue = userStories.map(story => {
+        const storyPurchases = purchases?.filter(p => p.story_id === story.id) || [];
+        
+        // Calculate total revenue for this story
+        const totalRevenue = storyPurchases.reduce((sum, p) => sum + (p.author_revenue || 0), 0);
+        
+        // Count pages sold (highest page access)
+        const pagesSold = storyPurchases.reduce((max, p) => Math.max(max, p.highest_page_access || 0), 0);
+        
+        // Count episodes sold (number of accessible episode URLs)
+        const episodesSold = storyPurchases.reduce((sum, p) => sum + (p.accessible_episode_urls?.length || 0), 0);
+
+        return {
+          story_id: story.id,
+          story_title: story.title,
+          story_category: story.category,
+          story_type: story.story_type,
+          asset_type: story.asset_type,
+          total_revenue: totalRevenue,
+          pages_sold: pagesSold,
+          episodes_sold: episodesSold,
+          total_coins_earned: totalRevenue
+        };
+      });
+
+      const totalRevenue = storyRevenue.reduce((sum, story) => sum + story.total_revenue, 0);
+
+      return {
+        user_id: userId,
+        total_revenue:totalRevenue,
+        total_stories: userStories.length,
+        story_revenue: storyRevenue
+      };
+
+    } catch (error) {
+      console.error('Error fetching user revenue:', error);
+      throw error;
+    }
   }
 };
+
+
+

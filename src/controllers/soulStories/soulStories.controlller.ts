@@ -208,3 +208,148 @@ export const getStories = async (req: Request, res: Response) => {
     });
   }
 };
+export const deleteeStory = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
+    const { story_id } = req.params; // Changed from req.body to req.params
+    
+    if (!story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    await soulStoriesServices.deleteStory(userId, story_id);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Story deleted successfully'
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+export const purchaseContent = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { storyId, contentData } = req.body;
+    console.log('Controller received:', { storyId, contentData }); // Add this log
+
+    if (!storyId || !contentData || !Array.isArray(contentData)) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: storyId, contentData (array)'
+      });
+      return;
+    }
+
+    if (contentData.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Content data array cannot be empty'
+      });
+      return; // Keep this return for early exit
+    }
+
+    // Validate each content item
+    for (const item of contentData) {
+      if (!item.type || !['page', 'episode'].includes(item.type) || 
+          item.identifier === undefined || item.coins <= 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Each content item must have: type (page/episode), identifier, coins > 0'
+        });
+        return; // Keep this return for early exit
+      }
+    }
+
+    const result = await soulStoriesServices.purchaseContent(userId, storyId, contentData);
+    res.status(200).json(result); // Remove 'return' here
+
+  } catch (error) {
+    console.error('Error in purchaseContent controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to purchase content'
+    });
+  }
+};
+
+export const getStoryAccess = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { storyId } = req.params;
+    console.log('Controller received storyId:', storyId); // Add this log
+
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    const accessStatus = await soulStoriesServices.getStoryAccess(userId, storyId);
+
+    res.status(200).json({
+      success: true,
+      data: accessStatus
+    });
+
+  } catch (error) {
+    console.error('Error in getStoryAccess controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to get story access'
+    });
+  }
+};
+
+export const getUserRevenue = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const revenue = await soulStoriesServices.getUserRevenue(userId);
+
+    res.status(200).json({
+      success: true,
+      data: revenue
+    });
+
+  } catch (error) {
+    console.error('Error in getUserRevenue controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to fetch user revenue'
+    });
+  }
+};
