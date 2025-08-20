@@ -208,3 +208,36 @@ export const getStories = async (req: Request, res: Response) => {
     });
   }
 };
+export const deleteeStory = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
+    const { story_id } = req.params; // Changed from req.body to req.params
+    
+    if (!story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    await soulStoriesServices.deleteStory(userId, story_id);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Story deleted successfully'
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
