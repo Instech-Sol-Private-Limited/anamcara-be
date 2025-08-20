@@ -12,6 +12,7 @@ interface CreateDigitalAssetRequest {
   title: string;
   description: string;
   tags: string[];
+  category: string;
   priceAnamCoins: number;
   redeemAccessBonus: boolean;
   visibility: string;
@@ -25,6 +26,7 @@ interface UpdateProductRequest {
   title?: string;
   description?: string;
   tags?: string[];
+  category: string;
   priceAnamCoins?: number;
   redeemAccessBonus?: boolean;
   visibility?: string;
@@ -54,6 +56,7 @@ const createDigitalAsset = async (req: Request, res: Response): Promise<void> =>
       title,
       description,
       tags,
+      category,
       priceAnamCoins,
       redeemAccessBonus,
       license,
@@ -68,6 +71,7 @@ const createDigitalAsset = async (req: Request, res: Response): Promise<void> =>
         title,
         description,
         tags,
+        category,
         price_anam_coins: priceAnamCoins,
         redeem_access_bonus: redeemAccessBonus,
         visibility: 'public',
@@ -321,11 +325,12 @@ const updateProduct = async (req: Request, res: Response): Promise<void> => {
       description,
       tags,
       priceAnamCoins,
-      redeemAccessBonus,  // Changed
+      redeemAccessBonus,
+      category,
       visibility,
       license,
       assets,
-      thumbnail,  // Added
+      thumbnail,
       status
     } = req.body as UpdateProductRequest;
 
@@ -364,12 +369,13 @@ const updateProduct = async (req: Request, res: Response): Promise<void> => {
       title: title || existingProduct.title,
       description: description || existingProduct.description,
       tags: tags || existingProduct.tags,
+      category: category || existingProduct.category,
       price_anam_coins: priceAnamCoins !== undefined ? priceAnamCoins : existingProduct.price_anam_coins,
-      redeem_access_bonus: redeemAccessBonus !== undefined ? redeemAccessBonus : existingProduct.redeem_access_bonus,  // Changed
+      redeem_access_bonus: redeemAccessBonus !== undefined ? redeemAccessBonus : existingProduct.redeem_access_bonus, 
       visibility: visibility || existingProduct.visibility,
       license: license || existingProduct.license,
       assets: assets || existingProduct.assets,
-      thumbnail: thumbnail || existingProduct.thumbnail  // Added
+      thumbnail: thumbnail || existingProduct.thumbnail
     };
 
     if (isAdmin && status) {
@@ -471,16 +477,16 @@ const processPurchase = async (req: Request, res: Response): Promise<any> => {
 
     // Validate request
     if (purchaseType === 'gift' && !recipientId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Recipient ID is required for gift purchases' 
+      return res.status(400).json({
+        success: false,
+        message: 'Recipient ID is required for gift purchases'
       });
     }
 
     if (purchaseType === 'gift' && recipientId === userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cannot gift to yourself' 
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot gift to yourself'
       });
     }
 
@@ -496,9 +502,9 @@ const processPurchase = async (req: Request, res: Response): Promise<any> => {
     }
 
     if (product.status !== 'approved') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Product is not available for purchase' 
+      return res.status(400).json({
+        success: false,
+        message: 'Product is not available for purchase'
       });
     }
 
