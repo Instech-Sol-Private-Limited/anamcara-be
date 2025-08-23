@@ -353,3 +353,36 @@ export const getUserRevenue = async (req: Request, res: Response): Promise<void>
     });
   }
 };
+export const searchAllContent = async (req: Request, res: Response) => {
+  try {
+    const { query, category } = req.body;
+    console.log('Received query:', query, 'category:', category);
+    
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
+    if (!query || !category) {
+      res.status(400).json({ 
+        success: false,
+        message: 'Search query and category are required' 
+      });
+      return;
+    }
+
+    const searchResults = await soulStoriesServices.searchAllContent(query as string, category as string, userId as string);
+    
+    // Just return the searchResults directly since it already has success: true
+    res.status(200).json(searchResults);
+    
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Search failed',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};

@@ -2,7 +2,7 @@ import express from 'express';
 import { authMiddleware } from "../middleware/auth.middleware";
 import { createStory, getAnalytics, getStories,deleteeStory, purchaseContent,        // Add this
     getStoryAccess,         // Add this
-    getUserRevenue } from "../controllers/soulStories/soulStories.controlller"
+    getUserRevenue,searchAllContent } from "../controllers/soulStories/soulStories.controlller"
 
 const router = express.Router();
 
@@ -13,4 +13,5 @@ router.delete("/delete-story/:story_id", authMiddleware, deleteeStory);
 router.post("/purchase-content",authMiddleware,purchaseContent);
 router.get("/story-access/:storyId",authMiddleware,getStoryAccess);
 router.get("/user-revenue",authMiddleware,getUserRevenue)
+router.post("/search",authMiddleware,searchAllContent)
 export default router;

@@ -1,4 +1,5 @@
 import { supabase } from '../app';
+import { searchAllContent } from '../controllers/soulStories/soulStories.controlller';
 
 export const soulStoriesServices = {
   createStory: async (storyData: any,episodes:any[]=[], userId: string) => {
@@ -318,10 +319,8 @@ export const soulStoriesServices = {
       // Process each content item
       contentData.forEach(item => {
         if (item.type === 'page') {
-          const pageNum = typeof item.identifier === 'number' ? item.identifier : parseInt(item.identifier);
-          if (pageNum > currentHighestPage) {
-            currentHighestPage = pageNum;
-          }
+          // For pages, increment the highest page access by 1 for each page purchased
+          currentHighestPage += 1;
         } else if (item.type === 'episode') {
           if (!currentEpisodes.includes(item.identifier)) {
             currentEpisodes.push(item.identifier);
@@ -587,8 +586,139 @@ export const soulStoriesServices = {
       console.error('Error fetching user revenue:', error);
       throw error;
     }
+  }, 
+  searchAllContent: async (query: string, category: string, userId: string) => {
+    try {
+      console.log('Search params:', { query, category, userId });
+      
+      let supabaseQuery = supabase
+        .from('soul_stories')
+        .select(`
+          *,
+          soul_story_episodes(
+            id,
+            episode_number,
+            title,
+            description,
+            video_url,
+            thumbnail_url
+          )
+        `, { count: 'exact' });
+
+      // Apply category filter if specified
+      if (category && category !== 'all') {
+        supabaseQuery = supabaseQuery.eq('category', category);
+        console.log('Filtering by category:', category);
+      }
+
+      // Add comprehensive text search if query is not 'all'
+      if (query && query.toLowerCase() !== 'all') {
+        console.log('Adding comprehensive text search for:', query);
+        
+        // Search across multiple fields - if ANY field contains the query, return the story
+        supabaseQuery = supabaseQuery.or(
+          `title.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`
+        );
+      }
+
+      supabaseQuery = supabaseQuery.order('created_at', { ascending: false });
+
+      console.log('Final query built');
+
+      const { data: stories, error, count } = await supabaseQuery;
+
+      if (error) {
+        console.log('Search error:', error.message);
+        return {
+          success: false,
+          data: {
+            analytics: {
+              total_stories: 0,
+              published_stories: 0,
+              total_free_pages: 0,
+              total_free_episodes: 0
+            },
+            stories: []
+          }
+        };
+      }
+
+      console.log('Raw stories found:', stories?.length || 0);
+      if (stories && stories.length > 0) {
+        console.log('Sample stories:', stories.slice(0, 3).map(s => ({ 
+          id: s.id, 
+          title: s.title, 
+          description: s.description,
+          tags: s.tags,
+          category: s.category
+        })));
+      }
+
+      // Transform stories to include main URL and episode URLs EXACTLY like getStories
+      const transformedStories = (stories || []).map(story => {
+        if (story.content_type === 'episodes' && story.soul_story_episodes) {
+          // For episode-based stories, return main URL + episode URLs
+          return {
+            ...story,
+            main_url: story.asset_url, // Main story URL (can be series trailer/cover)
+            episode_urls: story.soul_story_episodes.map((ep: any) => ({
+              episode_number: ep.episode_number,
+              title: ep.title,
+              description: ep.description,
+              video_url: ep.video_url, // Individual episode video URL
+              thumbnail_url: ep.thumbnail_url
+            }))
+          };
+        } else {
+          // For single asset stories, return main URL
+          return {
+            ...story,
+            main_url: story.asset_url, // Main story URL
+            episode_urls: null // No episodes
+          };
+        }
+      });
+
+      // Calculate analytics
+      const analytics = {
+        total_stories: transformedStories.length,
+        published_stories: transformedStories.filter(story => story.status === 'published').length,
+        total_free_pages: transformedStories.reduce((sum, story) => sum + (story.free_pages || 0), 0),
+        total_free_episodes: transformedStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0)
+      };
+
+      // Get top 20 results
+      const top20Results = transformedStories.slice(0, 20);
+
+      console.log('Final results:', {
+        totalFound: transformedStories.length,
+        returned: top20Results.length,
+        analytics
+      });
+
+      return {
+        success: true,
+        data: {
+          analytics,
+          stories: top20Results
+        }
+      };
+
+    } catch (error) {
+      console.error('Error in searchAllContent:', error);
+      return {
+        success: false,
+        data: {
+          analytics: {
+            total_stories: 0,
+            published_stories: 0,
+            total_free_pages: 0,
+            total_free_episodes: 0
+          },
+          stories: []
+        }
+      };
+    }
   }
 };
-
-
 
