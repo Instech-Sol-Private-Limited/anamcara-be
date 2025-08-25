@@ -111,7 +111,8 @@ const getProductsByUser = async (req: Request, res: Response): Promise<void> => 
   try {
     const { userId } = req.params;
 
-    const { data: products, error } = await supabase
+    // First, get all products for the user
+    const { data: products, error: productsError } = await supabase
       .from('products')
       .select(`
         *,
@@ -122,17 +123,49 @@ const getProductsByUser = async (req: Request, res: Response): Promise<void> => 
           email,
           avatar_url
         )
-      `) // ✅ properly closed here
+      `)
       .eq('creator_id', userId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      throw new Error(`Database error: ${error.message}`);
+    if (productsError) {
+      throw new Error(`Database error: ${productsError.message}`);
     }
+
+    // Get active boosts for these products
+    const productIds = products?.map(p => p.id) || [];
+    let boostedProductsMap = new Map();
+
+    if (productIds.length > 0) {
+      const { data: boosts, error: boostsError } = await supabase
+        .from('boosts')
+        .select('*')
+        .in('product_id', productIds)
+        .gt('end_time', new Date().toISOString())
+        .order('created_at', { ascending: false });
+
+      if (boostsError) {
+        console.error('Error fetching boosts:', boostsError.message);
+      } else {
+        // Create a map of product_id to boost data
+        boosts?.forEach(boost => {
+          boostedProductsMap.set(boost.product_id, boost);
+        });
+      }
+    }
+    // Enhance products with boost information
+    const productsWithBoost = products?.map(product => {
+      const boostData = boostedProductsMap.get(product.id);
+
+      return {
+        ...product,
+        is_boosted: !!boostData,
+        boost_details: boostData || null
+      };
+    }) || [];
 
     res.status(200).json({
       success: true,
-      products: products || []
+      products: productsWithBoost
     });
 
   } catch (error: any) {
@@ -144,11 +177,71 @@ const getProductsByUser = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
-const getApprovedProducts = async (req: Request, res: Response): Promise<void> => {
+// const getApprovedProducts = async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const { search, tags, sortBy = 'created_at', sortOrder = 'desc' } = req.query;
+//     let query = supabase
+//       .from('products')
+//       .select(`
+//         *,
+//         creator:profiles (
+//           id,
+//           first_name,
+//           last_name,
+//           email,
+//           avatar_url
+//         )
+//       `)
+//       .eq('status', 'approved')
+//       .eq('visibility', 'public')
+//       .order(sortBy as string, { ascending: sortOrder === 'asc' });
+
+//     if (search) {
+//       query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+//     }
+
+//     if (tags) {
+//       const tagArray = (tags as string).split(',');
+//       query = query.contains('tags', tagArray);
+//     }
+
+//     const { data: products, error } = await query;
+
+//     if (error) {
+//       throw new Error(`Database error: ${error.message}`);
+//     }
+
+//     const transformedProducts = products?.map(product => ({
+//       ...product,
+//       creator_id: product.creator?.id || product.creator_id,
+//       creator: {
+//         first_name: product.creator?.first_name || null,
+//         last_name: product.creator?.last_name || null,
+//         email: product.creator?.email || null,
+//         avatar_url: product.creator?.avatar_url || null
+//       }
+//     })) || [];
+
+//     res.status(200).json({
+//       success: true,
+//       products: transformedProducts
+//     });
+
+//   } catch (error: any) {
+//     console.error('Error fetching approved products:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || 'Failed to fetch approved products'
+//     });
+//   }
+// };
+
+const getApprovedProducts = async (req: Request, res: Response): Promise<any> => {
   try {
     const { search, tags, sortBy = 'created_at', sortOrder = 'desc' } = req.query;
+    const userId = req.user?.id;
 
-    let query = supabase
+    let baseQuery = supabase
       .from('products')
       .select(`
         *,
@@ -161,38 +254,140 @@ const getApprovedProducts = async (req: Request, res: Response): Promise<void> =
         )
       `)
       .eq('status', 'approved')
-      .eq('visibility', 'public')
-      .order(sortBy as string, { ascending: sortOrder === 'asc' });
+      .eq('visibility', 'public');
 
     if (search) {
-      query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+      baseQuery = baseQuery.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
     }
 
     if (tags) {
       const tagArray = (tags as string).split(',');
-      query = query.contains('tags', tagArray);
+      baseQuery = baseQuery.contains('tags', tagArray);
     }
 
-    const { data: products, error } = await query;
+    const { data: allProducts, error } = await baseQuery;
 
     if (error) {
       throw new Error(`Database error: ${error.message}`);
     }
 
-    const transformedProducts = products?.map(product => ({
-      ...product,
-      creator_id: product.creator?.id || product.creator_id,
-      creator: {
-        first_name: product.creator?.first_name || null,
-        last_name: product.creator?.last_name || null,
-        email: product.creator?.email || null,
-        avatar_url: product.creator?.avatar_url || null
-      }
-    })) || [];
+    if (!userId || !allProducts || allProducts.length === 0) {
+      const transformedProducts = allProducts?.map(product => ({
+        ...product,
+        creator_id: product.creator?.id || product.creator_id,
+        creator: {
+          first_name: product.creator?.first_name || null,
+          last_name: product.creator?.last_name || null,
+          email: product.creator?.email || null,
+          avatar_url: product.creator?.avatar_url || null
+        }
+      })) || [];
+
+      return res.status(200).json({
+        success: true,
+        products: transformedProducts
+      });
+    }
+
+    const { data: userPreferences } = await supabase
+      .from('user_preferences')
+      .select('product_keywords')
+      .eq('user_id', userId)
+      .single();
+
+    const userKeywords = userPreferences?.product_keywords || {};
+
+    const productsWithScores = allProducts.map(product => {
+      const productTags = product.tags || [];
+      let preferenceScore = 0;
+
+      productTags.forEach((tag: any) => {
+        const cleanTag = tag.toLowerCase().trim();
+        preferenceScore += userKeywords[cleanTag] || 0;
+      });
+
+      const averageRating = product.average_rating || 0;
+
+      const newnessScore = new Date(product.created_at).getTime();
+
+      return {
+        ...product,
+        preferenceScore,
+        averageRating,
+        newnessScore
+      };
+    });
+
+    const preferredProducts = productsWithScores
+      .filter(product => product.preferenceScore > 0)
+      .sort((a, b) => b.preferenceScore - a.preferenceScore);
+
+    const topRatedProducts = productsWithScores
+      .filter(product => product.averageRating > 0)
+      .sort((a, b) => b.averageRating - a.averageRating);
+
+    const newProducts = productsWithScores
+      .sort((a, b) => b.newnessScore - a.newnessScore);
+
+    const totalProducts = allProducts.length;
+    const preferredCount = Math.floor(totalProducts * 0.5);
+    const topRatedCount = Math.floor(totalProducts * 0.3);
+    const newCount = Math.floor(totalProducts * 0.2);
+
+    const selectedPreferred = preferredProducts.slice(0, preferredCount);
+    const selectedTopRated = topRatedProducts
+      .filter(product => !selectedPreferred.includes(product))
+      .slice(0, topRatedCount);
+    const selectedNew = newProducts
+      .filter(product => !selectedPreferred.includes(product) && !selectedTopRated.includes(product))
+      .slice(0, newCount);
+
+    let finalProducts = [...selectedPreferred, ...selectedTopRated, ...selectedNew];
+
+    if (finalProducts.length < totalProducts) {
+      const remainingProducts = productsWithScores.filter(
+        product => !finalProducts.includes(product)
+      );
+      finalProducts = [...finalProducts, ...remainingProducts.slice(0, totalProducts - finalProducts.length)];
+    }
+
+    const transformedProducts = finalProducts.map(product => ({
+      id: product.id,
+      created_at: product.created_at,
+      title: product.title,
+      description: product.description,
+      tags: product.tags,
+      price_anam_coins: product.price_anam_coins,
+      redeem_access_bonus: product.redeem_access_bonus,
+      visibility: product.visibility,
+      license: product.license,
+      assets: product.assets,
+      thumbnail: product.thumbnail,
+      status: product.status,
+      creator_id: product.creator_id,
+      updated_at: product.updated_at,
+      average_rating: product.average_rating,
+      creator: product.creator ? {
+        id: product.creator.id,
+        first_name: product.creator.first_name,
+        last_name: product.creator.last_name,
+        email: product.creator.email,
+        avatar_url: product.creator.avatar_url
+      } : null,
+      preference_score: product.preferenceScore,
+      calculated_rating: product.averageRating
+    }));
 
     res.status(200).json({
       success: true,
-      products: transformedProducts
+      products: transformedProducts,
+      metadata: {
+        total: totalProducts,
+        preferred: selectedPreferred.length,
+        top_rated: selectedTopRated.length,
+        new: selectedNew.length,
+        user_has_preferences: Object.keys(userKeywords).length > 0
+      }
     });
 
   } catch (error: any) {
@@ -371,7 +566,7 @@ const updateProduct = async (req: Request, res: Response): Promise<void> => {
       tags: tags || existingProduct.tags,
       category: category || existingProduct.category,
       price_anam_coins: priceAnamCoins !== undefined ? priceAnamCoins : existingProduct.price_anam_coins,
-      redeem_access_bonus: redeemAccessBonus !== undefined ? redeemAccessBonus : existingProduct.redeem_access_bonus, 
+      redeem_access_bonus: redeemAccessBonus !== undefined ? redeemAccessBonus : existingProduct.redeem_access_bonus,
       visibility: visibility || existingProduct.visibility,
       license: license || existingProduct.license,
       assets: assets || existingProduct.assets,
@@ -469,7 +664,7 @@ const deleteProduct = async (req: Request, res: Response): Promise<void> => {
 
 
 
-// -------------- Product purchase Route --------------
+// -------------- Product purchase API --------------
 const processPurchase = async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.user?.id!;
@@ -1020,10 +1215,9 @@ const completeResale = async (req: Request, res: Response): Promise<any> => {
 };
 
 
-// -------------- Product rating and reviews --------------
+// -------------- Product reviews API --------------
 
-// Get all reviews for a product
-export const getProductReviews = async (req: Request, res: Response): Promise<any> => {
+const getProductReviews = async (req: Request, res: Response): Promise<any> => {
   try {
     const { productId } = req.params;
     const { page = 1, limit = 10, sortBy = 'created_at', order = 'desc' } = req.query;
@@ -1134,8 +1328,7 @@ export const getProductReviews = async (req: Request, res: Response): Promise<an
   }
 };
 
-// Create a new review
-export const createReview = async (req: Request, res: Response): Promise<any> => {
+const createReview = async (req: Request, res: Response): Promise<any> => {
   try {
     const { productId } = req.params;
     const { rating, title, comment } = req.body;
@@ -1272,8 +1465,7 @@ export const createReview = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
-// Update a review
-export const updateReview = async (req: Request, res: Response): Promise<any> => {
+const updateReview = async (req: Request, res: Response): Promise<any> => {
   try {
     const { reviewId } = req.params;
     const { rating, title, comment } = req.body;
@@ -1384,8 +1576,7 @@ export const updateReview = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
-// Delete a review (soft delete)
-export const deleteReview = async (req: Request, res: Response): Promise<any> => {
+const deleteReview = async (req: Request, res: Response): Promise<any> => {
   try {
     const { reviewId } = req.params;
     const userId = req.user?.id;
@@ -1448,8 +1639,7 @@ export const deleteReview = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
-// Vote on a review (helpful/unhelpful)
-export const voteOnReview = async (req: Request, res: Response): Promise<any> => {
+const voteOnReview = async (req: Request, res: Response): Promise<any> => {
   try {
     const { reviewId } = req.params;
     const { voteType } = req.body;
@@ -1601,8 +1791,7 @@ export const voteOnReview = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
-// Get user's reviews
-export const getUserReviews = async (req: Request, res: Response): Promise<any> => {
+const getUserReviews = async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.user?.id;
     const { page = 1, limit = 10 } = req.query;
@@ -1684,6 +1873,196 @@ export const getUserReviews = async (req: Request, res: Response): Promise<any> 
   }
 };
 
+// -------------- Product boost or promotion--------------
+const createBoost = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id!;
+    const { product_id, boost_type, boost_percentage, boost_duration, boost_cost } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Use Supabase's transaction capability
+    const { data: result, error: transactionError } = await supabase.rpc('create_boost_transaction', {
+      p_user_id: userId,
+      p_product_id: product_id,
+      p_boost_type: boost_type,
+      p_boost_percentage: boost_percentage,
+      p_boost_duration: boost_duration,
+      p_boost_cost: boost_cost
+    });
+
+    if (transactionError) {
+      return res.status(500).json({ error: 'Failed to create boost: ' + transactionError.message });
+    }
+
+    if (result && result.error) {
+      const statusCode = result.error.includes('Insufficient') ? 400 : 404;
+      return res.status(statusCode).json({ error: result.error });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Boost created successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error creating boost:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+};
+
+const getActiveBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { productId } = req.params;
+
+    const { data: boosts, error } = await supabase
+      .rpc('get_active_boosts', { product_id: productId });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getUserBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+
+    const { data: boosts, error } = await supabase
+      .from('boosts')
+      .select(`
+        *,
+        product:products(
+          id,
+          title,
+          thumbnail
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch user boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching user boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getMarketplaceBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: boosts, error } = await supabase
+      .from('boosts')
+      .select(`
+        *,
+        product:products(
+          id,
+          title,
+          category,
+          price_anam_coins,
+          status,
+          thumbnail,
+          user_id,
+          user:profiles(
+            id,
+            username,
+            avatar_url
+          )
+        )
+      `)
+      .eq('status', 'active')
+      .gt('end_time', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch marketplace boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching marketplace boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getActiveFeaturedProducts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const now = new Date().toISOString();
+
+    const { error: expireError } = await supabase
+      .from("boosts")
+      .update({ status: "expired" })
+      .lte("end_time", now)
+      .neq("status", "expired");
+
+    if (expireError) {
+      console.error("Error expiring boosts:", expireError);
+    }
+
+    const { data: boostedProducts, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        creator:profiles (
+          id,
+          first_name,
+          last_name,
+          email,
+          avatar_url
+        ),
+        boosts!inner (
+          id,
+          end_time
+        )
+      `)
+      .eq("status", "approved")
+      .gt("boosts.end_time", now)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching boosted products:", error);
+      return res.status(500).json({ success: false, error: "Failed to fetch featured products" });
+    }
+
+    // 3. Attach flags
+    const featuredProducts =
+      boostedProducts?.map((product) => ({
+        ...product,
+        featured: true,
+        is_boosted: true,
+      })) || [];
+
+    res.status(200).json({
+      success: true,
+      products: featuredProducts,
+      count: featuredProducts.length,
+    });
+  } catch (error: any) {
+    console.error("Error fetching featured products:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
 export {
   createDigitalAsset,
   getProductsByUser,
@@ -1697,5 +2076,20 @@ export {
   processPurchase,
   getMyLibraryProducts,
   initiateResale,
-  completeResale
+  completeResale,
+  voteOnReview,
+  getUserReviews,
+
+  // rating and reviews
+  getProductReviews,
+  createReview,
+  updateReview,
+  deleteReview,
+
+  // boost products
+  createBoost,
+  getActiveFeaturedProducts,
+  getActiveBoosts,
+  getUserBoosts,
+  getMarketplaceBoosts,
 };

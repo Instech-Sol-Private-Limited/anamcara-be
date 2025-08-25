@@ -6,6 +6,11 @@ import { sendVerificationEmail, sendResetPasswordEmail } from "../config/mailer"
 import { v4 as uuidv4 } from "uuid";
 import { generateAccessToken, generateRefreshToken, verifyResetToken } from "../config/generateTokens";
 import jwt from "jsonwebtoken";
+import { generateAIDescription } from "../services/openai.service";
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
+import crypto from 'crypto';
+
 
 const RESET_PASSWORD_SECRET = "anamcara_reset_password_secret";
 
@@ -457,8 +462,8 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
     }
 
     // Validate booking prices (must be array of exactly 3 numbers)
-    if (!Array.isArray(booking_prices) || booking_prices.length !== 3 || 
-        !booking_prices.every(price => typeof price === 'number')) {
+    if (!Array.isArray(booking_prices) || booking_prices.length !== 3 ||
+      !booking_prices.every(price => typeof price === 'number')) {
       return res.status(400).json({
         success: false,
         message: 'Booking prices must be an array of exactly 3 numbers'
@@ -534,22 +539,209 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
   }
 };
 
+// export const getAllServices = async (req: Request, res: Response): Promise<any> => {
+//   try {
+//     const page = parseInt(req.query.page as string) || 1;
+//     const limit = parseInt(req.query.limit as string) || 10;
+//     const offset = (page - 1) * limit;
+
+//     const { data: services, error: servicesError, count } = await supabase
+//       .from('services')
+//       .select('*', { count: 'exact' })
+//       .eq('is_active', true)
+//       .range(offset, offset + limit - 1)
+//       .order('created_at', { ascending: false });
+
+//     if (servicesError) throw servicesError;
+
+//     const sellerIds = services.map(service => service.seller_id);
+
+//     const { data: sellers, error: sellersError } = await supabase
+//       .from('profiles')
+//       .select('*')
+//       .in('id', sellerIds);
+
+//     if (sellersError) throw sellersError;
+
+//     const sellerMap = new Map(sellers.map(seller => [seller.id, seller]));
+
+//     const { data: servicePlans, error: plansError } = await supabase
+//       .from('services_plan')
+//       .select('*')
+//       .in('service_id', services.map(s => s.id));
+
+//     if (plansError) throw plansError;
+
+//     const plansMap = new Map();
+//     servicePlans.forEach(plan => {
+//       if (!plansMap.has(plan.service_id)) {
+//         plansMap.set(plan.service_id, []);
+//       }
+//       plansMap.get(plan.service_id).push(plan);
+//     });
+
+//     const formattedServices = services.map(service => ({
+//       ...service,
+//       seller: sellerMap.get(service.seller_id) || null,
+//       services_plan: plansMap.get(service.id) || []
+//     }));
+
+//     res.status(200).json({
+//       success: true,
+//       data: formattedServices,
+//       pagination: {
+//         currentPage: page,
+//         totalPages: Math.ceil((count || 0) / limit),
+//         totalItems: count,
+//         itemsPerPage: limit
+//       }
+//     });
+
+//   } catch (error: any) {
+//     console.error('Error fetching services:', error.message);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch services',
+//       error: error.message
+//     });
+//   }
+// };
+
 export const getAllServices = async (req: Request, res: Response): Promise<any> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
+    const userId = req.user?.id;
 
-    const { data: services, error: servicesError, count } = await supabase
+    // First, get all services without pagination to apply personalized sorting
+    const { data: allServices, error: allServicesError } = await supabase
       .from('services')
-      .select('*', { count: 'exact' })
-      .eq('is_active', true)
-      .range(offset, offset + limit - 1)
-      .order('created_at', { ascending: false });
+      .select('*')
+      .eq('is_active', true);
 
-    if (servicesError) throw servicesError;
+    if (allServicesError) throw allServicesError;
 
-    const sellerIds = services.map(service => service.seller_id);
+    let finalServices = allServices;
+    let userHasPreferences = false;
+    let topKeywords: string[] = [];
+
+    // Apply personalized sorting if user is authenticated
+    if (userId && allServices && allServices.length > 0) {
+      // Get user preferences
+      const { data: userPreferences } = await supabase
+        .from('user_preferences')
+        .select('service_keywords')
+        .eq('user_id', userId)
+        .single();
+
+      // Check if user has service preferences
+      userHasPreferences = userPreferences?.service_keywords !== null &&
+        userPreferences?.service_keywords !== undefined &&
+        typeof userPreferences?.service_keywords === 'object' &&
+        Object.keys(userPreferences.service_keywords).length > 0;
+
+      const userKeywords = userPreferences?.service_keywords || {};
+
+      if (userHasPreferences) {
+        // Get top 5 most used keywords from user preferences
+        topKeywords = Object.entries(userKeywords)
+          .sort(([, scoreA], [, scoreB]) => (scoreB as number) - (scoreA as number))
+          .slice(0, 5)
+          .map(([keyword]) => keyword.toLowerCase().trim());
+
+        // Calculate scores for each service based on user preferences
+        const servicesWithScores = allServices.map(service => {
+          const serviceKeywords = service.keywords || [];
+          let preferenceScore = 0;
+          let topKeywordMatch = false;
+
+          // Calculate preference score based on user's keyword history
+          serviceKeywords.forEach((keyword: string) => {
+            const cleanKeyword = keyword.toLowerCase().trim();
+            const keywordScore = userKeywords[cleanKeyword] || 0;
+            preferenceScore += keywordScore;
+
+            // Check if this service matches any of the top 5 keywords
+            if (topKeywords.includes(cleanKeyword)) {
+              topKeywordMatch = true;
+              // Bonus points for matching top keywords
+              preferenceScore += keywordScore * 2;
+            }
+          });
+
+          // Calculate newness score (more recent = higher score)
+          const newnessScore = new Date(service.created_at).getTime();
+
+          return {
+            ...service,
+            preferenceScore,
+            newnessScore,
+            topKeywordMatch // Flag for top keyword matches
+          };
+        });
+
+        // ALGORITHM: Prioritize services with top keywords first, then 50-30-20 distribution
+        const totalServices = allServices.length;
+
+        // 1. FIRST: Get services that match top 5 keywords (highest priority)
+        const topKeywordServices = servicesWithScores
+          .filter(service => service.topKeywordMatch)
+          .sort((a, b) => b.preferenceScore - a.preferenceScore);
+
+        // 2. Then apply 50-30-20 distribution to remaining services
+        const remainingServices = servicesWithScores
+          .filter(service => !service.topKeywordMatch);
+
+        const remainingCount = totalServices - topKeywordServices.length;
+        const preferredCount = Math.floor(remainingCount * 0.5);
+        const newCount = Math.floor(remainingCount * 0.3);
+        const mixedCount = Math.floor(remainingCount * 0.2);
+
+        // 2a. Get 50% based on user preferences from remaining
+        const preferredServices = remainingServices
+          .filter(service => service.preferenceScore > 0)
+          .sort((a, b) => b.preferenceScore - a.preferenceScore);
+
+        const selectedPreferred = preferredServices.slice(0, preferredCount);
+
+        // 2b. Get 30% based on newness from remaining
+        const newServices = remainingServices
+          .filter(service => !selectedPreferred.includes(service))
+          .sort((a, b) => b.newnessScore - a.newnessScore);
+
+        const selectedNew = newServices.slice(0, newCount);
+
+        // 2c. Get 20% based on mixed factors from remaining
+        const mixedServices = remainingServices
+          .filter(service => !selectedPreferred.includes(service) && !selectedNew.includes(service));
+
+        const selectedMixed = mixedServices.slice(0, mixedCount);
+
+        // Combine all selected services: TOP KEYWORD SERVICES FIRST, then others
+        finalServices = [
+          ...topKeywordServices, // Highest priority: services matching top keywords
+          ...selectedPreferred,  // Then preferred services
+          ...selectedNew,        // Then new services
+          ...selectedMixed       // Then mixed services
+        ];
+
+        // If we don't have enough services, fill with any remaining
+        if (finalServices.length < totalServices) {
+          const allRemaining = servicesWithScores.filter(
+            service => !finalServices.includes(service)
+          );
+          finalServices = [...finalServices, ...allRemaining.slice(0, totalServices - finalServices.length)];
+        }
+      }
+    }
+
+    // Now apply pagination to the final sorted services
+    const paginatedServices = finalServices.slice(offset, offset + limit);
+
+    // Get additional data for the paginated services
+    const sellerIds = paginatedServices.map(service => service.seller_id);
+    const serviceIds = paginatedServices.map(service => service.id);
 
     const { data: sellers, error: sellersError } = await supabase
       .from('profiles')
@@ -563,7 +755,7 @@ export const getAllServices = async (req: Request, res: Response): Promise<any> 
     const { data: servicePlans, error: plansError } = await supabase
       .from('services_plan')
       .select('*')
-      .in('service_id', services.map(s => s.id));
+      .in('service_id', serviceIds);
 
     if (plansError) throw plansError;
 
@@ -575,10 +767,24 @@ export const getAllServices = async (req: Request, res: Response): Promise<any> 
       plansMap.get(plan.service_id).push(plan);
     });
 
-    const formattedServices = services.map(service => ({
-      ...service,
+    // Format the final response
+    const formattedServices = paginatedServices.map(service => ({
+      id: service.id,
+      seller_id: service.seller_id,
+      service_title: service.service_title,
+      service_category: service.service_category,
+      description: service.description,
+      keywords: service.keywords,
+      thumbnails: service.thumbnails,
+      created_at: service.created_at,
+      updated_at: service.updated_at,
+      is_active: service.is_active,
+      bookingcall_array: service.bookingcall_array,
       seller: sellerMap.get(service.seller_id) || null,
-      services_plan: plansMap.get(service.id) || []
+      services_plan: plansMap.get(service.id) || [],
+      // Include scoring info for debugging (optional)
+      _score: service.preferenceScore,
+      _top_keyword_match: service.topKeywordMatch
     }));
 
     res.status(200).json({
@@ -586,9 +792,21 @@ export const getAllServices = async (req: Request, res: Response): Promise<any> 
       data: formattedServices,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil((count || 0) / limit),
-        totalItems: count,
+        totalPages: Math.ceil(finalServices.length / limit),
+        totalItems: finalServices.length,
         itemsPerPage: limit
+      },
+      metadata: {
+        personalized: !!userId && userHasPreferences,
+        user_has_preferences: userHasPreferences,
+        top_keywords: topKeywords,
+        algorithm_applied: userHasPreferences ? "top-keywords-first with 50-30-20 sorting" : "default sorting",
+        sorting_breakdown: userHasPreferences ? {
+          top_keyword_services: finalServices.filter(s => s.topKeywordMatch).length,
+          preferred_services: finalServices.filter(s => s.preferenceScore > 0 && !s.topKeywordMatch).length,
+          new_services: finalServices.filter(s => s.preferenceScore === 0 && !s.topKeywordMatch).length,
+          mixed_services: finalServices.length - finalServices.filter(s => s.preferenceScore >= 0 && !s.topKeywordMatch).length
+        } : null
       }
     });
 
@@ -763,3 +981,618 @@ export const getServiceById = async (req: Request, res: Response): Promise<any> 
     });
   }
 };
+
+export const generateSummary = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { niche, slogan, languages, country, city } = req.body;
+
+    if (!niche || !slogan || !languages) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: niche, slogan, and languages are required'
+      });
+      return;
+    }
+
+    if (!Array.isArray(languages) || languages.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Languages must be a non-empty array'
+      });
+      return;
+    }
+
+    for (const lang of languages) {
+      if (!lang.proficiency) {
+        res.status(400).json({
+          success: false,
+          message: 'Each language must have a proficiency level'
+        });
+        return;
+      }
+    }
+
+    const aiDescription = await generateAIDescription({
+      niche,
+      slogan,
+      languages,
+      country: country || undefined,
+      city: city || undefined
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        description: aiDescription
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in generateAIResponse controller:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while generating AI description'
+    });
+  }
+};
+
+
+// --------------- INTERFACES -----------------
+interface BackupCode {
+  code: string;
+  used: boolean;
+  used_at?: string | null;
+}
+
+interface Profile {
+  two_factor_enabled: boolean;
+  two_factor_setup_at: string | null;
+  backup_codes: BackupCode[] | null;
+  two_factor_temp_secret?: string;
+  two_factor_secret?: string;
+}
+
+interface DeviceInfo {
+  rememberDevice?: boolean;
+  deviceName?: string;
+  deviceType?: string;
+  userAgent?: string;
+}
+
+// --------------- 2FA STATUS -----------------
+export const get2FAStatusController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id!;
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('two_factor_enabled, two_factor_setup_at, backup_codes')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching 2FA status',
+        error: error.message
+      });
+    }
+
+    const profileData = profile as Profile;
+    const unusedBackupCodes = profileData.backup_codes
+      ? profileData.backup_codes.filter((code: BackupCode) => code.used === false).length
+      : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        enabled: profileData.two_factor_enabled || false,
+        setupAt: profileData.two_factor_setup_at,
+        backupCodesCount: unusedBackupCodes
+      }
+    });
+  } catch (error: any) {
+    console.error('2FA status error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// --------------- 2FA SETUP -----------------
+export const setup2FAController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id!;
+    const userEmail = req.user?.email!;
+    const appName = process.env.APP_NAME || 'NIRVANA';
+
+    const secret = speakeasy.generateSecret({
+      name: `${appName}:${userEmail}`,
+      issuer: appName,
+      length: 32
+    });
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        two_factor_temp_secret: secret.base32,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error storing 2FA secret',
+        error: error.message
+      });
+    }
+
+    const qrCodeDataURL = await QRCode.toDataURL(secret.otpauth_url!);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        secret: secret.base32,
+        qrCode: qrCodeDataURL,
+        manualEntryKey: secret.base32,
+        backupCodes: []
+      }
+    });
+  } catch (error: any) {
+    console.error('2FA setup error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error generating 2FA setup',
+      error: error.message
+    });
+  }
+};
+
+// --------------- VERIFY 2FA SETUP -----------------
+export const verify2FASetupController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { token } = req.body;
+    const userId = req.user?.id!;
+
+    if (!token || token.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid 6-digit code'
+      });
+    }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('two_factor_temp_secret')
+      .eq('id', userId)
+      .single();
+
+    if (error || !profile.two_factor_temp_secret) {
+      return res.status(400).json({
+        success: false,
+        message: 'No setup in progress. Please start 2FA setup again.'
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: profile.two_factor_temp_secret,
+      encoding: 'base32',
+      token: token,
+      window: 1
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid verification code'
+      });
+    }
+
+    const backupCodes = generateBackupCodes();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Code verified successfully',
+      data: {
+        backupCodes: backupCodes
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error verifying 2FA code',
+      error: error.message
+    });
+  }
+};
+
+// --------------- ENABLE 2FA -----------------
+export const enable2FAController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { backupCodes } = req.body;
+    const userId = req.user?.id!;
+
+    const { data: profile, error: fetchError } = await supabase
+      .from('profiles')
+      .select('two_factor_temp_secret')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !profile.two_factor_temp_secret) {
+      return res.status(400).json({
+        success: false,
+        message: 'No verified setup found. Please complete setup first.'
+      });
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        two_factor_enabled: true,
+        two_factor_secret: profile.two_factor_temp_secret,
+        two_factor_temp_secret: null,
+        two_factor_setup_at: new Date().toISOString(),
+        backup_codes: backupCodes.map((code: string) => ({ code, used: false })),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error enabling 2FA',
+        error: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Two-factor authentication enabled successfully'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error enabling 2FA',
+      error: error.message
+    });
+  }
+};
+
+// --------------- DISABLE 2FA -----------------
+export const disable2FAController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { password, twoFactorCode } = req.body;
+    const userId = req.user?.id!;
+
+    if (!password && !twoFactorCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide either password or 2FA code for verification'
+      });
+    }
+
+    if (twoFactorCode) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('two_factor_secret')
+        .eq('id', userId)
+        .single();
+
+      const verified = speakeasy.totp.verify({
+        secret: profile?.two_factor_secret,
+        encoding: 'base32',
+        token: twoFactorCode,
+        window: 1
+      });
+
+      if (!verified) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid 2FA code'
+        });
+      }
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        two_factor_enabled: false,
+        two_factor_secret: null,
+        two_factor_temp_secret: null,
+        backup_codes: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error disabling 2FA',
+        error: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Two-factor authentication disabled successfully'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error disabling 2FA',
+      error: error.message
+    });
+  }
+};
+
+// --------------- VERIFY 2FA LOGIN -----------------
+export const verify2FALoginController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { userId, token, deviceInfo } = req.body;
+
+    if (!token || token.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid 6-digit code'
+      });
+    }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('two_factor_secret, two_factor_enabled')
+      .eq('id', userId)
+      .single();
+
+    if (error || !profile.two_factor_enabled) {
+      return res.status(400).json({
+        success: false,
+        message: 'Two-factor authentication not enabled'
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: profile.two_factor_secret,
+      encoding: 'base32',
+      token: token,
+      window: 1
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid verification code'
+      });
+    }
+
+    if (deviceInfo?.rememberDevice) {
+      const deviceId = crypto.randomUUID();
+      await supabase
+        .from('trusted_devices')
+        .insert({
+          user_id: userId,
+          device_id: deviceId,
+          device_name: deviceInfo.deviceName || 'Unknown Device',
+          device_type: deviceInfo.deviceType || 'web',
+          user_agent: deviceInfo.userAgent,
+          ip_address: req.ip,
+          created_at: new Date().toISOString()
+        });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: '2FA verification successful'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error verifying 2FA',
+      error: error.message
+    });
+  }
+};
+
+// --------------- VERIFY BACKUP CODE -----------------
+export const verify2FABackupCodeController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { userId, backupCode } = req.body;
+
+    if (!backupCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a backup code'
+      });
+    }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('backup_codes')
+      .eq('id', userId)
+      .single();
+
+    if (error || !profile.backup_codes) {
+      return res.status(400).json({
+        success: false,
+        message: 'No backup codes found'
+      });
+    }
+
+    const codeIndex = profile.backup_codes.findIndex(
+      (bc: BackupCode) => bc.code === backupCode && !bc.used
+    );
+
+    if (codeIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or already used backup code'
+      });
+    }
+
+    const updatedCodes = [...profile.backup_codes];
+    updatedCodes[codeIndex].used = true;
+
+    await supabase
+      .from('profiles')
+      .update({
+        backup_codes: updatedCodes,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Backup code verified successfully'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error verifying backup code',
+      error: error.message
+    });
+  }
+};
+
+// --------------- REGENERATE BACKUP CODES -----------------
+export const regenerateBackupCodesController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { twoFactorCode } = req.body;
+    const userId = req.user?.id!;
+
+    if (!twoFactorCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide your 2FA code to regenerate backup codes'
+      });
+    }
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('two_factor_secret, two_factor_enabled')
+      .eq('id', userId)
+      .single();
+
+    if (error || !profile.two_factor_enabled) {
+      return res.status(400).json({
+        success: false,
+        message: 'Two-factor authentication not enabled'
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: profile.two_factor_secret,
+      encoding: 'base32',
+      token: twoFactorCode,
+      window: 1
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid 2FA code'
+      });
+    }
+
+    const newBackupCodes = generateBackupCodes();
+
+    await supabase
+      .from('profiles')
+      .update({
+        backup_codes: newBackupCodes.map((code: string) => ({ code, used: false })),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Backup codes regenerated successfully',
+      data: {
+        backupCodes: newBackupCodes
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error regenerating backup codes',
+      error: error.message
+    });
+  }
+};
+
+// --------------- GET TRUSTED DEVICES -----------------
+export const getTrustedDevicesController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id!;
+
+    const { data: devices, error } = await supabase
+      .from('trusted_devices')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching trusted devices',
+        error: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: devices
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching trusted devices',
+      error: error.message
+    });
+  }
+};
+
+// --------------- REMOVE TRUSTED DEVICE -----------------
+export const removeTrustedDeviceController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { deviceId } = req.params;
+    const userId = req.user?.id!;
+
+    const { error } = await supabase
+      .from('trusted_devices')
+      .delete()
+      .eq('device_id', deviceId)
+      .eq('user_id', userId);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error removing trusted device',
+        error: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Trusted device removed successfully'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error removing trusted device',
+      error: error.message
+    });
+  }
+};
+
+// --------------- HELPER FUNCTIONS -----------------
+function generateBackupCodes(): string[] {
+  const codes: string[] = [];
+  for (let i = 0; i < 8; i++) {
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    codes.push(code);
+  }
+  return codes;
+}
