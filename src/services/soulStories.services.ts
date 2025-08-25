@@ -340,7 +340,8 @@ export const soulStoriesServices = {
         total_insightfuls: reactionCounts[story.id]?.total_insightfuls || 0,
         total_hugs: reactionCounts[story.id]?.total_hugs || 0,
         user_reaction: userReactions[story.id] || null,
-        total_comments: commentCounts[story.id] || 0
+        total_comments: commentCounts[story.id] || 0,
+        total_views: story.total_views || 0  // ← This is already available from the story data
       }));
 
       return {
@@ -581,13 +582,19 @@ export const soulStoriesServices = {
       // Get story details
       const { data: story, error: storyError } = await supabase
         .from('soul_stories')
-        .select('id, title, category, story_type, asset_type, free_pages, free_episodes')
+        .select('*')
         .eq('id', storyId)
         .single();
   
       if (storyError || !story) {
-        throw new Error('Story not found');
+        return { success: false, message: 'Story not found' };
       }
+
+      // Increment view count for the story
+      await supabase
+        .from('soul_stories')
+        .update({ total_views: (story.total_views || 0) + 1 })
+        .eq('id', storyId);
   
       // Get user's access for this story from existing table
       const { data: userAccess } = await supabase
@@ -635,7 +642,7 @@ export const soulStoriesServices = {
   
     } catch (error) {
       console.error('Error getting story access:', error);
-      throw error;
+      return { success: false, message: 'Internal server error' };
     }
   },
   getUserRevenue: async (userId: string) => {
@@ -1482,6 +1489,244 @@ export const soulStoriesServices = {
 
     } catch (error) {
       console.error('Error in getStoryWithReactions service:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getCommentReactions: async (commentId: string, userId?: string) => {
+    try {
+      // Get all reactions for this comment
+      const { data: reactions, error: reactionsError } = await supabase
+        .from('soul_story_reactions')
+        .select('*')
+        .eq('target_id', commentId)
+        .eq('target_type', 'comment');
+
+      if (reactionsError) {
+        console.log('Error getting comment reactions:', reactionsError);
+        return { success: false, message: reactionsError.message };
+      }
+
+      // Get current user's reaction if logged in
+      let userReaction = null;
+      if (userId) {
+        const userReactionData = reactions?.find(r => r.user_id === userId);
+        userReaction = userReactionData?.type || null;
+      }
+
+      // Calculate reaction counts
+      const reaction_counts = {
+        total_likes: reactions?.filter(r => r.type === 'like').length || 0,
+        total_dislikes: reactions?.filter(r => r.type === 'dislike').length || 0,
+        total_insightfuls: reactions?.filter(r => r.type === 'insightful').length || 0,
+        total_hearts: reactions?.filter(r => r.type === 'heart').length || 0,
+        total_hugs: reactions?.filter(r => r.type === 'hug').length || 0,
+        total_souls: reactions?.filter(r => r.type === 'soul').length || 0,
+      };
+
+      // Get users who reacted (with profile data)
+      const userIds = reactions?.map(r => r.user_id) || [];
+      let usersWithReactions: any[] = [];
+
+      if (userIds.length > 0) {
+        const { data: userProfiles } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, avatar_url')
+          .in('id', userIds);
+
+        // Map reactions to user profiles
+        usersWithReactions = reactions?.map(reaction => {
+          const userProfile = userProfiles?.find(p => p.id === reaction.user_id);
+          return {
+            reaction_id: reaction.id,
+            reaction_type: reaction.type,
+            reacted_at: reaction.created_at,
+            user: userProfile ? {
+              id: userProfile.id,
+              name: `${userProfile.first_name} ${userProfile.last_name || ''}`.trim(),
+              avatar: userProfile.avatar_url
+            } : null
+          };
+        }) || [];
+      }
+
+      return {
+        success: true,
+        data: {
+          comment_id: commentId,
+          reaction_counts,
+          user_reaction: userReaction,
+          total_reactions: Object.values(reaction_counts).reduce((sum, count) => sum + count, 0),
+          users_who_reacted: usersWithReactions
+        }
+      };
+
+    } catch (error) {
+      console.error('Error in getCommentReactions service:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getTrendingStories: async (userId?: string, page: number = 1, limit: number = 200) => {
+    try {
+      const offset = (page - 1) * limit;
+
+      // Get all stories first
+      const { data: stories, error, count } = await supabase
+        .from('soul_stories')
+        .select(`
+          *,
+          soul_story_episodes(
+            id, episode_number, title, description, video_url, thumbnail_url
+          )
+        `, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) {
+        console.log('Error getting trending stories:', error);
+        return { success: false, message: error.message };
+      }
+
+      // Transform stories to match getStories structure
+      const transformedStories = stories?.map(story => ({
+        ...story,
+        episodes: story.soul_story_episodes || [],
+        total_episodes: story.soul_story_episodes?.length || 0
+      })) || [];
+
+      // Get reaction counts for all stories in ONE query
+      const storyIds = transformedStories.map(story => story.id);
+      let reactionCounts: Record<string, any> = {};
+      let userReactions: Record<string, string> = {};
+      let commentCounts: Record<string, number> = {};
+
+      if (storyIds.length > 0) {
+        // Get all reaction counts
+        const { data: reactions } = await supabase
+          .from('soul_story_reactions')
+          .select('target_id, type')
+          .eq('target_type', 'story')
+          .in('target_id', storyIds);
+        
+        // Get current user's reactions for all stories
+        if (userId) {
+          const { data: userReactionData } = await supabase
+            .from('soul_story_reactions')
+            .select('target_id, type')
+            .eq('target_type', 'story')
+            .eq('user_id', userId)
+            .in('target_id', storyIds);
+
+          userReactionData?.forEach(reaction => {
+            userReactions[reaction.target_id] = reaction.type;
+          });
+        }
+
+        // Get comment counts for all stories
+        const { data: commentData } = await supabase
+          .from('soul_story_comments')
+          .select('soul_story_id')
+          .eq('is_deleted', false)
+          .in('soul_story_id', storyIds);
+
+        // Calculate reaction counts and comment counts
+        storyIds.forEach(storyId => {
+          const storyReactions = reactions?.filter(r => r.target_id === storyId) || [];
+          const storyComments = commentData?.filter(c => c.soul_story_id === storyId) || [];
+          
+          reactionCounts[storyId] = {
+            total_likes: storyReactions.filter(r => r.type === 'like').length,
+            total_dislikes: storyReactions.filter(r => r.type === 'dislike').length,
+            total_insightfuls: storyReactions.filter(r => r.type === 'insightful').length,
+            total_hearts: storyReactions.filter(r => r.type === 'heart').length,
+            total_hugs: storyReactions.filter(r => r.type === 'hug').length,
+            total_souls: storyReactions.filter(r => r.type === 'soul').length
+          };
+          
+          commentCounts[storyId] = storyComments.length;
+        });
+      }
+
+      // Add reaction counts and comment counts to stories
+      const storiesWithEngagement = transformedStories.map(story => {
+        const reactions = reactionCounts[story.id] || {};
+        const commentCount = commentCounts[story.id] || 0;
+        
+        // Calculate total engagement score
+        const totalReactions = (reactions.total_likes || 0) + 
+                             (reactions.total_hearts || 0) + 
+                             (reactions.total_insightfuls || 0) + 
+                             (reactions.total_hugs || 0) + 
+                             (reactions.total_souls || 0);
+        
+        // Include views in engagement score
+        const totalEngagement = totalReactions + commentCount + (story.total_views || 0);
+        
+        return {
+          ...story,
+          total_likes: reactions.total_likes || 0,
+          total_dislikes: reactions.total_dislikes || 0,
+          total_insightfuls: reactions.total_insightfuls || 0,
+          total_hearts: reactions.total_hearts || 0,
+          total_hugs: reactions.total_hugs || 0,
+          total_souls: reactions.total_souls || 0,
+          user_reaction: userReactions[story.id] || null,
+          total_comments: commentCount,
+          total_views: story.total_views || 0,
+          total_engagement: totalEngagement,
+          total_reactions: totalReactions
+        };
+      });
+
+      // Sort by total engagement (reactions + comments) - HIGHEST FIRST
+      const sortedStories = storiesWithEngagement.sort((a, b) => {
+        return b.total_engagement - a.total_engagement;
+      });
+
+      const total = count || 0;
+
+      return {
+        success: true,
+        data: {
+          stories: sortedStories,
+          total,
+          page,
+          limit
+        }
+      };
+    } catch (error) {
+      console.log('Error in getTrendingStories:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getEpisodeAccess: async (userId: string, storyId: string, episodeId: string) => {
+    try {
+      // Get episode details
+      const { data: episode, error: episodeError } = await supabase
+        .from('soul_story_episodes')
+        .select('*')
+        .eq('id', episodeId)
+        .eq('soul_story_id', storyId)
+        .single();
+
+      if (episodeError || !episode) {
+        return { success: false, message: 'Episode not found' };
+      }
+
+      // Increment view count for the episode
+      await supabase
+        .from('soul_story_episodes')
+        .update({ total_views: (episode.total_views || 0) + 1 })
+        .eq('id', episodeId);
+
+      // Also increment story view count
+      await supabase
+        .from('soul_stories')
+        .update({ total_views: (episode.total_views || 0) + 1 })
+        .eq('id', storyId);
+
+      return { success: true, data: episode };
+    } catch (error) {
+      console.log('Error in getEpisodeAccess:', error);
       return { success: false, message: 'Internal server error' };
     }
   }

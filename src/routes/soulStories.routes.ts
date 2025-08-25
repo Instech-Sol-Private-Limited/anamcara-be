@@ -16,7 +16,9 @@ import {
     deleteComment,
     updateCommentReaction,
     updateStoryReaction,
-    getStoryWithReactions
+    getStoryWithReactions,
+    getCommentReactions,
+    getTrendingStories
 } from "../controllers/soulStories/soulStories.controlller"
 
 const router = express.Router();
@@ -29,6 +31,7 @@ router.post("/purchase-content", authMiddleware, purchaseContent);
 router.get("/story-access/:storyId", authMiddleware, getStoryAccess);
 router.get("/user-revenue", authMiddleware, getUserRevenue);
 router.post("/search", authMiddleware, searchAllContent);
+router.get("/trending", optionalAuthMiddleware, getTrendingStories);
 
 // ======================= Soul Story Comments & Replies ========================
 router.get("/get-comments", optionalAuthMiddleware, getComments);
@@ -37,6 +40,9 @@ router.post("/add-reply", authMiddleware, createReply);
 router.put("/update-comment/:comment_id", authMiddleware, updateComment);
 router.delete("/delete-comment/:comment_id", authMiddleware, deleteComment);
 router.patch("/apply-comment-react/:comment_id", authMiddleware, updateCommentReaction);
+
+// ======================= Comment Reactions ========================
+router.get("/comment-reactions/:comment_id", optionalAuthMiddleware, getCommentReactions);
 
 // ======================= Soul Story Reactions ========================
 router.patch("/apply-story-react/:story_id", authMiddleware, updateStoryReaction);

@@ -694,3 +694,57 @@ export const getStoryWithReactions = async (req: Request, res: Response): Promis
     });
   }
 };
+
+export const getCommentReactions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { comment_id } = req.params;
+    const userId = req.user?.id; // Optional - can work without authentication
+
+    if (!comment_id) {
+      res.status(400).json({ 
+        success: false, 
+        message: 'Comment ID is required' 
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.getCommentReactions(comment_id, userId);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in getCommentReactions controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to fetch comment reactions'
+    });
+  }
+};
+
+export const getTrendingStories = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { page = 1, limit = 200 } = req.query;
+
+    const result = await soulStoriesServices.getTrendingStories(
+      userId,
+      Number(page),
+      Number(limit)
+    );
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.log('Error in getTrendingStories controller:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
