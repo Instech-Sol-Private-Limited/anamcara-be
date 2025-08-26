@@ -165,7 +165,10 @@ export const soulStoriesServices = {
           price: story.price,
           free_pages: story.free_pages,
           free_episodes: story.free_episodes,
-          monetization_type: story.monetization_type
+          monetization_type: story.monetization_type,
+          is_boosted: story.is_boosted || false,
+          boost_type: story.boost_type || null,
+          boost_end_date: story.boost_end_date || null
         }))
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -344,8 +347,27 @@ export const soulStoriesServices = {
         total_views: story.total_views || 0  // ← This is already available from the story data
       }));
 
+      // Sort stories: boosted first, then by engagement (no limit on boosted stories)
+      const sortedStories = storiesWithReactions.sort((a, b) => {
+        // Boosted stories first (no limit - all boosted stories can appear)
+        if (a.is_boosted && !b.is_boosted) return -1;
+        if (!a.is_boosted && b.is_boosted) return 1;
+        
+        // If both boosted or both not boosted, sort by engagement
+        const aEngagement = (a.total_likes + a.total_hearts + a.total_insightfuls + a.total_hugs + a.total_souls) + a.total_comments;
+        const bEngagement = (b.total_likes + b.total_hearts + b.total_insightfuls + b.total_hugs + b.total_souls) + b.total_comments;
+        
+        return bEngagement - aEngagement;
+      });
+
+      // Limit boosted stories to top 3-4 positions
+      const boostedStories = sortedStories.filter(story => story.is_boosted).slice(0, 4);
+      const regularStories = sortedStories.filter(story => !story.is_boosted);
+
+      const finalStories = [...boostedStories, ...regularStories];
+
       return {
-        stories: storiesWithReactions,
+        stories: finalStories,
         pagination: {
           page: options.page,
           limit: limit, // Use actual limit
@@ -427,6 +449,21 @@ export const soulStoriesServices = {
   },
   purchaseContent: async (userId: string, storyId: string, contentData: Array<{type: 'page' | 'episode', identifier: string | number, coins: number}>) => {
     try {
+      // Check user level from profiles table
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_level')
+        .eq('id', userId)
+        .single();
+
+      if (profileError || !userProfile) {
+        throw new Error('User profile not found');
+      }
+
+      if (!userProfile.user_level || userProfile.user_level < 1) {
+        return 'Not allowed';
+      }
+
       // Get existing access for this user and story
       const { data: existingAccess, error: accessError } = await supabase
         .from('user_content_purchases')
@@ -1727,6 +1764,317 @@ export const soulStoriesServices = {
       return { success: true, data: episode };
     } catch (error) {
       console.log('Error in getEpisodeAccess:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  boostSoulStory: async (userId: string, storyId: string, boostType: 'weekly' | 'monthly') => {
+    try {
+      // Boost costs and durations
+      const boostConfig = {
+        weekly: { cost: 100, duration: 7 * 24 * 60 * 60 * 1000 }, // 7 days
+        monthly: { cost: 300, duration: 30 * 24 * 60 * 60 * 1000 } // 30 days
+      };
+
+      const config = boostConfig[boostType];
+      if (!config) {
+        return { success: false, message: 'Invalid boost type. Use weekly or monthly' };
+      }
+
+      // Check if user has enough coins
+      const { data: userCoins, error: coinsError } = await supabase
+        .from('anamcoins')  // ← Use anamcoins (where you have 139 coins)
+        .select('available_coins, spent_coins, total_coins')  // ← Use available_coins field
+        .eq('user_id', userId)
+        .single();
+
+      if (coinsError || !userCoins || userCoins.available_coins < config.cost) {
+        return { success: false, message: 'Insufficient coins' };
+      }
+
+      // Check if story exists and belongs to user
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select('*')
+        .eq('id', storyId)
+        .eq('author_id', userId)
+        .single();
+
+      if (storyError || !story) {
+        return { success: false, message: 'Story not found or not authorized' };
+      }
+
+      // Calculate boost end date
+      const boostEnd = new Date(Date.now() + config.duration);
+
+      // Create boost record
+      const { error: boostError } = await supabase
+        .from('soul_story_boosts')
+        .insert([{
+          story_id: storyId,
+          user_id: userId,
+          boost_type: boostType,
+          boost_cost: config.cost,
+          boost_end: boostEnd.toISOString()
+        }]);
+
+      if (boostError) {
+        return { success: false, message: boostError.message };
+      }
+
+      // Update story with boost status
+      const { error: storyUpdateError } = await supabase
+        .from('soul_stories')
+        .update({
+          is_boosted: true,
+          boost_end_date: boostEnd.toISOString(),
+          boost_type: boostType
+        })
+        .eq('id', storyId);
+
+      if (storyUpdateError) {
+        return { success: false, message: storyUpdateError.message };
+      }
+
+      // Deduct coins from user
+      const { error: deductError } = await supabase
+        .from('anamcoins')
+        .update({ 
+          available_coins: userCoins.available_coins - config.cost,
+          spent_coins: (userCoins.spent_coins || 0) + config.cost  // Add to spent_coins
+        })
+        .eq('user_id', userId);
+
+      if (deductError) {
+        console.log('Coin deduction error:', deductError);
+        return { success: false, message: 'Failed to deduct coins' };
+      }
+
+      return { 
+        success: true, 
+        message: `Story boosted for ${boostType} successfully`,
+        data: {
+          boost_type: boostType,
+          boost_cost: config.cost,
+          boost_end: boostEnd,
+          remaining_coins: userCoins.available_coins - config.cost  // ← Use available_coins
+        }
+      };
+    } catch (error) {
+      console.log('Error in boostSoulStory:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getUserSoulStoryBoosts: async (userId: string) => {
+    try {
+      const { data: boosts, error } = await supabase
+        .from('soul_story_boosts')
+        .select(`
+          *,
+          story:soul_stories(
+            id,
+            title,
+            thumbnail_url
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return { success: false, message: error.message };
+      }
+
+      return { success: true, data: boosts || [] };
+    } catch (error) {
+      console.log('Error in getUserSoulStoryBoosts:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getProductDetails: async (storyId: string) => {
+    try {
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select(`
+          *,
+          author:profiles!soul_stories_author_id_fkey(
+            id,
+            first_name,
+            last_name,
+            avatar_url
+          )
+        `)
+        .eq('id', storyId)
+        .single();
+
+      if (storyError || !story) {
+        return { success: false, message: 'Story not found' };
+      }
+
+      // Get earned coins for this story
+      const { data: earnedCoins, error: coinsError } = await supabase
+        .from('user_content_purchases')
+        .select('coins_paid')
+        .eq('story_id', storyId);
+
+      const totalEarnedCoins = earnedCoins?.reduce((sum, purchase) => sum + (purchase.coins_paid || 0), 0) || 0;
+
+      // Get boost status
+      const { data: boostData, error: boostError } = await supabase
+        .from('soul_story_boosts')
+        .select('*')
+        .eq('story_id', storyId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      const isBoosted = boostData && new Date(boostData.boost_end) > new Date();
+      const boostType = isBoosted ? boostData.boost_type : null;
+      const boostEndDate = isBoosted ? boostData.boost_end : null;
+
+      // Determine file type
+      let fileType = 'unknown';
+      if (story.asset_type === 'video') {
+        fileType = 'video';
+      } else if (story.asset_type === 'document') {
+        fileType = 'pdf';
+      } else if (story.story_type === 'episodes') {
+        fileType = 'video';
+      }
+
+      const productDetails = {
+        id: story.id,
+        title: story.title,
+        description: story.description,
+        creator_name: `${story.author?.first_name || ''} ${story.author?.last_name || ''}`.trim(),
+        creator_avatar: story.author?.avatar_url,
+        price: story.price || 0,
+        free_pages: story.free_pages || 0,
+        free_episodes: story.free_episodes || 0,
+        remix_status: story.remix || false,
+        earned_coins: totalEarnedCoins,
+        file_type: fileType,
+        boost_status: {
+          is_boosted: isBoosted,
+          boost_type: boostType,
+          boost_end_date: boostEndDate
+        },
+        category: story.category,
+        story_type: story.story_type,
+        monetization_type: story.monetization_type,
+        thumbnail_url: story.thumbnail_url,
+        created_at: story.created_at,
+        updated_at: story.updated_at
+      };
+
+      return {
+        success: true,
+        data: productDetails
+      };
+
+    } catch (error) {
+      console.error('Error in getProductDetails service:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+  getAllUsersStoriesData: async () => {
+    try {
+      // Get all users
+      const { data: users, error: usersError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          email,
+          created_at
+        `)
+        .order('created_at', { ascending: false });
+
+      if (usersError) {
+        return { success: false, message: 'Failed to fetch users' };
+      }
+
+      const usersData = [];
+
+      for (const user of users || []) {
+        // Get user's stories
+        const { data: stories, error: storiesError } = await supabase
+          .from('soul_stories')
+          .select('*')
+          .eq('author_id', user.id);
+
+        if (storiesError) continue;
+
+        const userStories = stories || [];
+        
+        // Calculate statistics for this user
+        const totalStories = userStories.length;
+        const publishedStories = userStories.filter(story => story.status === 'published').length;
+        const remixCount = userStories.filter(story => story.remix === true).length;
+        const freeEpisodesCount = userStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0);
+        const freePagesCount = userStories.reduce((sum, story) => sum + (story.free_pages || 0), 0);
+        
+        // Count video and PDF stories
+        const videoStories = userStories.filter(story => 
+          story.asset_type === 'video' || story.story_type === 'episodes'
+        ).length;
+        const pdfStories = userStories.filter(story => 
+          story.asset_type === 'document'
+        ).length;
+
+        // Get boost count for this user
+        const { data: boosts, error: boostsError } = await supabase
+          .from('soul_story_boosts')
+          .select('*')
+          .eq('user_id', user.id);
+
+        const boostCount = boosts?.length || 0;
+        const activeBoosts = boosts?.filter(boost => 
+          new Date(boost.boost_end) > new Date()
+        ).length || 0;
+
+        // Calculate total revenue from all stories
+        const { data: purchases, error: purchasesError } = await supabase
+          .from('user_content_purchases')
+          .select('coins_paid')
+          .in('story_id', userStories.map(story => story.id));
+
+        const totalRevenue = purchases?.reduce((sum, purchase) => 
+          sum + (purchase.coins_paid || 0), 0
+        ) || 0;
+
+        usersData.push({
+          user_id: user.id,
+          user_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Anonymous',
+          user_email: user.email,
+          user_avatar: user.avatar_url,
+          user_created_at: user.created_at,
+          totals: {
+            total_stories: totalStories,
+            published_stories: publishedStories,
+            draft_stories: totalStories - publishedStories,
+            remix_count: remixCount,
+            original_stories: totalStories - remixCount,
+            boost_count: boostCount,
+            active_boosts: activeBoosts,
+            free_episodes_count: freeEpisodesCount,
+            free_pages_count: freePagesCount,
+            video_stories: videoStories,
+            pdf_stories: pdfStories,
+            total_revenue: totalRevenue
+          }
+        });
+      }
+
+      return {
+        success: true,
+        data: {
+          users: usersData
+        }
+      };
+
+    } catch (error) {
+      console.error('Error in getAllUsersStoriesData service:', error);
       return { success: false, message: 'Internal server error' };
     }
   }
