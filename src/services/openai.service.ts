@@ -120,7 +120,92 @@ const getFallbackDescription = (data: any, languageList: string): string => {
     `.trim();
 };
 
+
+const generateCampaignDescription = async (data: {
+  soulWords: string;
+  category: { category: string; subCategory: string; value: string };
+  campaignType: string;
+  goalType?: string;
+  goalAmount?: number;
+  baseAmount?: number;
+}): Promise<string> => {
+  try {
+    const prompt = `
+Create a compelling campaign description based on the following details:
+- Campaign Story/Soul Words: "${data.soulWords}"
+- Category: ${data.category.category} - ${data.category.subCategory}
+- Campaign Type: ${data.campaignType === 'simple' ? 'Simple Donation Campaign' : 'Auction-style Donation Campaign'}
+- ${data.goalType === 'fixed' ? `Funding Goal: ${data.goalAmount} AC` : 'Open-ended fundraising'}
+${data.campaignType === 'auction' ? `- Base Amount: ${data.baseAmount} AC (minimum bid)` : ''}
+
+Generate a comprehensive campaign description that includes:
+• A compelling introduction that tells the story behind the campaign
+• Clear explanation of how donations will be used
+• The impact and benefits of supporting this campaign
+• Transparency about fund allocation and progress updates
+• A call to action encouraging community support
+
+Format with HTML using <p> tags for paragraphs and <ul> with <li> for bullet points where appropriate.
+Make it engaging, emotional, and persuasive while maintaining professionalism.
+Your response should be comprehensive but concise, approximately 150-200 words.
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional content writer specializing in creating compelling campaign descriptions for fundraising and community projects."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      max_tokens: 500,
+      temperature: 0.7
+    });
+
+    return completion.choices[0]?.message?.content?.trim() || getFallbackCampaignDescription(data);
+  } catch (error) {
+    console.error('OpenAI API Error:', error);
+    return getFallbackCampaignDescription(data);
+  }
+};
+
+const getFallbackCampaignDescription = (data: {
+  soulWords: string;
+  category: { category: string; subCategory: string };
+  campaignType: string;
+  goalType?: string;
+  goalAmount?: number;
+  baseAmount?: number;
+}): string => {
+  return `
+<p>Based on your heartfelt story and campaign vision, we've crafted this description to help you connect with potential supporters:</p>
+
+<p>This ${data.campaignType === 'simple' ? 'simple donation' : 'auction-style'} campaign in the ${data.category.category} - ${data.category.subCategory} category aims to ${data.soulWords.toLowerCase()}. We are reaching out to our compassionate community to help turn this vision into reality through the power of collective support.</p>
+
+<p><strong>Campaign Details:</strong></p>
+<ul>
+<li><strong>Category:</strong> ${data.category.category} - ${data.category.subCategory}</li>
+<li><strong>Type:</strong> ${data.campaignType === 'simple' ? 'Simple Donation Campaign' : 'Auction Donation Campaign'}</li>
+${data.goalType === 'fixed' ? `<li><strong>Funding Goal:</strong> ${data.goalAmount} AC</li>` : '<li><strong>Funding Type:</strong> Open-ended (no fixed goal)</li>'}
+${data.campaignType === 'auction' ? `<li><strong>Minimum Bid:</strong> ${data.baseAmount} AC</li>` : ''}
+</ul>
+
+<p><strong>How Your Support Makes a Difference:</strong></p>
+<p>Every contribution, regardless of size, directly impacts our ability to achieve our objectives. Your support not only provides financial assistance but also serves as a powerful vote of confidence in our mission.</p>
+
+<p><strong>Transparency & Updates:</strong></p>
+<p>We are committed to maintaining complete transparency throughout this journey. Regular updates will be provided to keep our supporters informed about progress, challenges, and the meaningful impact of their generosity.</p>
+
+<p>Join us in making a tangible difference and be part of a community that believes in turning compassion into action.</p>
+  `.trim();
+};
+
 export {
   generateAIResponse,
-  generateAIDescription
+  generateAIDescription,
+  generateCampaignDescription
 };
