@@ -854,3 +854,75 @@ export const getAllUsersStoriesData = async (req: Request, res: Response): Promi
     });
   }
 };
+
+export const createStoryReport = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { storyId, reportContent, reportReason } = req.body;
+
+    if (!storyId || !reportContent || !reportReason) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: storyId, reportContent, reportReason'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.createStoryReport(userId, storyId, reportContent, reportReason);
+    
+    if (result.success === false && result.already_reported) {
+      // Return 200 for already reported
+      res.status(200).json(result);
+      return;
+    }
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error in createStoryReport controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to create report'
+    });
+  }
+};
+
+export const getStoryReports = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { storyId } = req.params;
+    
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.getStoryReports(storyId);
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in getStoryReports controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to fetch reports'
+    });
+  }
+};

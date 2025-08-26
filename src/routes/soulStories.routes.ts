@@ -22,7 +22,9 @@ import {
     boostSoulStory,
     getUserSoulStoryBoosts,
     getProductDetails,
-    getAllUsersStoriesData
+    getAllUsersStoriesData,
+    createStoryReport,
+    getStoryReports
 } from "../controllers/soulStories/soulStories.controlller"
 
 const router = express.Router();
@@ -57,5 +59,9 @@ router.get("/comment-reactions/:comment_id", optionalAuthMiddleware, getCommentR
 // ======================= Soul Story Reactions ========================
 router.patch("/apply-story-react/:story_id", authMiddleware, updateStoryReaction);
 router.get("/get-story-with-reactions/:story_id", optionalAuthMiddleware, getStoryWithReactions);
+
+// ======================= Soul Story Reports ========================
+router.post("/report-story", authMiddleware, createStoryReport);
+router.get("/story-reports/:storyId", authMiddleware, getStoryReports);
 
 export default router;

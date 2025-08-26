@@ -2077,6 +2077,108 @@ export const soulStoriesServices = {
       console.error('Error in getAllUsersStoriesData service:', error);
       return { success: false, message: 'Internal server error' };
     }
+  },
+  createStoryReport: async (userId: string, storyId: string, reportContent: string, reportReason: string) => {
+    try {
+      // Check if story exists
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select('id, title')
+        .eq('id', storyId)
+        .single();
+
+      if (storyError || !story) {
+        return { success: false, message: 'Story not found' };
+      }
+
+      // Check if user already reported this story
+      const { data: existingReport, error: checkError } = await supabase
+        .from('soul_story_reports')
+        .select('id')
+        .eq('story_id', storyId)
+        .eq('reporter_id', userId)
+        .single();
+
+      if (existingReport) {
+        return { 
+          success: false, 
+          message: 'Already reported',
+          already_reported: true
+        };
+      }
+
+      // Create the report
+      const { data: report, error: reportError } = await supabase
+        .from('soul_story_reports')
+        .insert([{
+          story_id: storyId,
+          reporter_id: userId,
+          report_content: reportContent,
+          report_reason: reportReason,
+          report_status: 'pending'
+        }])
+        .select()
+        .single();
+
+      if (reportError) {
+        return { success: false, message: reportError.message };
+      }
+
+      return {
+        success: true,
+        message: 'Report submitted successfully',
+        data: report
+      };
+
+    } catch (error) {
+      console.error('Error in createStoryReport service:', error);
+      return { success: false, message: 'Internal server error' };
+    }
+  },
+
+  getStoryReports: async (storyId: string) => {
+    try {
+      const { data: reports, error: reportsError } = await supabase
+        .from('soul_story_reports')
+        .select(`
+          *,
+          reporter:profiles!soul_story_reports_reporter_id_fkey(
+            id,
+            first_name,
+            last_name,
+            email
+          )
+        `)
+        .eq('story_id', storyId)
+        .order('created_at', { ascending: false });
+
+      if (reportsError) {
+        return { success: false, message: reportsError.message };
+      }
+
+      // Group reports by reason and count
+      const reportCounts = reports?.reduce((acc, report) => {
+        const reason = report.report_reason;
+        acc[reason] = (acc[reason] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>) || {};
+
+      return {
+        success: true,
+        data: {
+          reports: reports || [],
+          report_summary: {
+            total_reports: reports?.length || 0,
+            report_counts: reportCounts,
+            story_id: storyId
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('Error in getStoryReports service:', error);
+      return { success: false, message: 'Internal server error' };
+    }
   }
 };
 
