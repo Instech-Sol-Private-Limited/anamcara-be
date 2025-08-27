@@ -18,7 +18,13 @@ import {
     updateStoryReaction,
     getStoryWithReactions,
     getCommentReactions,
-    getTrendingStories
+    getTrendingStories,
+    boostSoulStory,
+    getUserSoulStoryBoosts,
+    getProductDetails,
+    getAllUsersStoriesData,
+    createStoryReport,
+    getStoryReports
 } from "../controllers/soulStories/soulStories.controlller"
 
 const router = express.Router();
@@ -32,6 +38,12 @@ router.get("/story-access/:storyId", authMiddleware, getStoryAccess);
 router.get("/user-revenue", authMiddleware, getUserRevenue);
 router.post("/search", authMiddleware, searchAllContent);
 router.get("/trending", optionalAuthMiddleware, getTrendingStories);
+router.get("/soul-stories-products", authMiddleware, getProductDetails);
+router.get("/all-users-stories-data", authMiddleware, getAllUsersStoriesData);
+
+// ======================= Soul Story Boosting ========================
+router.post("/boost-story", authMiddleware, boostSoulStory);
+router.get("/user-boosts", authMiddleware, getUserSoulStoryBoosts);
 
 // ======================= Soul Story Comments & Replies ========================
 router.get("/get-comments", optionalAuthMiddleware, getComments);
@@ -47,5 +59,9 @@ router.get("/comment-reactions/:comment_id", optionalAuthMiddleware, getCommentR
 // ======================= Soul Story Reactions ========================
 router.patch("/apply-story-react/:story_id", authMiddleware, updateStoryReaction);
 router.get("/get-story-with-reactions/:story_id", optionalAuthMiddleware, getStoryWithReactions);
+
+// ======================= Soul Story Reports ========================
+router.post("/report-story", authMiddleware, createStoryReport);
+router.get("/story-reports/:storyId", authMiddleware, getStoryReports);
 
 export default router;

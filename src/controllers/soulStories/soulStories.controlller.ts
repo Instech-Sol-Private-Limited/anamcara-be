@@ -37,7 +37,8 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       monetization_type = 'free',
       price = 0,
       free_pages = 0,
-      free_episodes = 0
+      free_episodes = 0,
+      remix = false
     } = req.body;
 
     // Basic validation
@@ -127,7 +128,8 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       free_pages,
       free_episodes,
       status: 'draft',
-      content_type: content_structure
+      content_type: content_structure,
+      remix
     };
 
     console.log(storyData, "storyData");
@@ -746,5 +748,181 @@ export const getTrendingStories = async (req: Request, res: Response): Promise<v
   } catch (error) {
     console.log('Error in getTrendingStories controller:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const boostSoulStory = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { story_id, boost_type } = req.body;
+
+    if (!story_id || !boost_type || !['weekly', 'monthly'].includes(boost_type)) {
+      res.status(400).json({ 
+        success: false, 
+        message: 'Missing required fields: story_id, boost_type (weekly/monthly)' 
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.boostSoulStory(userId, story_id, boost_type);
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.log('Error in boostSoulStory controller:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const getUserSoulStoryBoosts = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const result = await soulStoriesServices.getUserSoulStoryBoosts(userId);
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.log('Error in getUserSoulStoryBoosts controller:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const getProductDetails = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { storyId } = req.params;
+    
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.getProductDetails(storyId);
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in getProductDetails controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to fetch product details'
+    });
+  }
+};
+
+export const getAllUsersStoriesData = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await soulStoriesServices.getAllUsersStoriesData();
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in getAllUsersStoriesData controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to fetch users stories data'
+    });
+  }
+};
+
+export const createStoryReport = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { storyId, reportContent, reportReason } = req.body;
+
+    if (!storyId || !reportContent || !reportReason) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: storyId, reportContent, reportReason'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.createStoryReport(userId, storyId, reportContent, reportReason);
+    
+    if (result.success === false && result.already_reported) {
+      // Return 200 for already reported
+      res.status(200).json(result);
+      return;
+    }
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error in createStoryReport controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to create report'
+    });
+  }
+};
+
+export const getStoryReports = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { storyId } = req.params;
+    
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.getStoryReports(storyId);
+    
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in getStoryReports controller:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: 'Failed to fetch reports'
+    });
   }
 };
