@@ -17,7 +17,11 @@ import {
     createReview,
     updateReview,
     deleteReview,
-    voteOnReview
+    voteOnReview,
+    createBoost,
+    getActiveBoosts,
+    getUserBoosts,
+    getActiveFeaturedProducts
   } from '../controllers/products.controller';
 import { rateLimitMiddleware } from '../middleware/ratelimit.middleware';
 const router = express.Router();
@@ -58,12 +62,12 @@ router.get('/get-user-reviews', getUserReviews);
 
 router.post(
   '/create-review/:productId/review',
-  // rateLimitMiddleware({
-  //   windowMs: 15 * 60 * 1000,
-  //   max: 5,
-  //   message: 'Too many review submissions, please try again later',
-  //   keyGenerator: (req) => `review_create:${req.user?.id || req.ip}`
-  // }),
+  rateLimitMiddleware({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: 'Too many review submissions, please try again later',
+    keyGenerator: (req) => `review_create:${req.user?.id || req.ip}`
+  }),
   createReview
 );
 
@@ -99,6 +103,17 @@ router.post(
   }),
   voteOnReview
 );
+
+
+// -------------- Product boost and promotion Route --------------
+router.post('/boost/create', createBoost);
+
+router.get('/get-featured-products', getActiveFeaturedProducts);
+
+// admin route
+router.get('/boost/active/:productId', getActiveBoosts);
+
+router.get('/boost/user-boosts', getUserBoosts);
 
 export default router;
 
