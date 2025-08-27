@@ -32,6 +32,7 @@ import availableSlotsRoutes from './routes/availability.routes';
 import productsRoutes from './routes/products.routes';
 import vaultRoutes from './routes/vault.routes';
 import analyticsRoutes from './routes/analytics.routes';
+import campaignRoutes from './routes/campaign.routes';
 import { handleZoomWebhook } from './controllers/zoomwebhook.controller';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 import { setupPaymentCron } from './services/paymentcron.service';
@@ -113,6 +114,8 @@ app.use('/api/products', authMiddleware, productsRoutes);
 app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
+app.use('/api/campaigns', authMiddleware, campaignRoutes);
+
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron();
