@@ -13,6 +13,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@ngrok/ngrok": "^1.5.1",
     "@sendgrid/mail": "^8.1.5",
     "@supabase/auth-helpers-react": "^0.5.0",

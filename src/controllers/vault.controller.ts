@@ -39,7 +39,7 @@ export const getUserVaultStats = async (req: Request, res: Response): Promise<an
         const ab = Math.floor(soulpoints.points / 100);
 
         return res.json({
-            anamcoins: anamcoins.total_coins,
+            anamcoins: anamcoins.available_coins,  // ✅ FIX: Use available_coins instead of total_coins
             soulpoints: soulpoints.points,
             level: soulpoints.level,
             title: soulpoints.soul_title,

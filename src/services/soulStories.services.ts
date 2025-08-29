@@ -1,5 +1,153 @@
 import { supabase } from '../app';
 import { searchAllContent } from '../controllers/soulStories/soulStories.controlller';
+import 'dotenv/config';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// Gemini AI Service Class
+class GeminiService {
+  private keys: string[];
+  private currentKeyIndex: number;
+
+  constructor() {
+    const keysString = process.env.GEMINI_KEYS;
+    if (!keysString) {
+      throw new Error('GEMINI_KEYS environment variable is required');
+    }
+
+    // Remove semicolon and split by comma, then trim each key
+    this.keys = keysString.replace(/;$/, '').split(",").map(key => key.trim());
+    this.currentKeyIndex = 0;
+
+    if (this.keys.length === 0) {
+      throw new Error('At least one Gemini API key is required');
+    }
+  }
+
+  // Get model with round-robin rotation
+  private getModel() {
+    const apiKey = this.keys[this.currentKeyIndex];
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Move to the next key for the next request
+    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.keys.length;
+
+    return genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+  }
+
+  async generateThumbnailSuggestions(content: string): Promise<{
+    title: string;
+    description: string;
+    rawResponse: string;
+  }> {
+    let lastError: Error | null = null;
+
+    // Try all keys in case of failures
+    for (let i = 0; i < this.keys.length; i++) {
+      try {
+        const model = this.getModel();
+
+        // Create the prompt with the actual content parameter
+        const prompt = `You are a creative AI assistant specializing in generating compelling story titles and descriptions for video and PDF content and also tags. Based on the provided content, create EXCELLENT and CAPTIVATING content that will grab viewers' attention.
+
+Generate:
+
+1. **An EXCELLENT, catchy title** (maximum 50 characters)
+   - Make it mysterious, intriguing, or emotionally compelling
+   - Use powerful words that evoke curiosity or emotion
+   - Consider using: "Secret", "Hidden", "Lost", "Forbidden", "Ultimate", "Beyond", etc.
+   - Perfect for video titles or PDF story titles
+
+2. **An EXCELLENT, compelling description** (4 words, maximum 200 characters)
+   - Hook the reader/viewer with intrigue, conflict, or mystery
+   - Explain what makes this story unique and worth watching/reading
+   - End with something that makes them want to continue
+   - Focus on the most exciting or emotional aspect of the story
+   - Suitable for video descriptions or PDF summaries
+2. **An EXCELLENT, tags for video and pdf** (2 to4 words sentences, maximum 200 characters)
+   - Hook the reader/viewer with intrigue, conflict, or mystery
+   - Explain what makes this story unique and worth watching/reading
+   - End with something that makes them want to continue
+   - Focus on the most exciting or emotional aspect of the story
+   - Suitable for video descriptions or PDF summaries
+**GUIDELINES:**
+- Use powerful, emotional language
+- Create curiosity and mystery
+- Make every word count
+- Think viral content quality
+- Avoid boring or generic phrases
+- Focus on story content, not visual elements
+
+Format your response exactly as:
+**Title:** [Your excellent title here]
+**Description:** [Your excellent description here]
+
+Content to analyze:
+${content}`;
+
+        const result = await model.generateContent(prompt);
+        const rawResponse = result.response.text();
+
+        // Parse the response
+        const parsed = this.parseGeminiResponse(rawResponse);
+        
+        return {
+          ...parsed,
+          rawResponse
+        };
+      } catch (err) {
+        console.error(`Gemini API Key ${this.currentKeyIndex} failed:`, (err as Error).message);
+        lastError = err as Error;
+        // If current key fails, try next key immediately
+        this.currentKeyIndex = (this.currentKeyIndex + 1) % this.keys.length;
+      }
+    }
+
+    throw new Error(`All Gemini API keys failed. Last error: ${lastError?.message}`);
+  }
+
+  private parseGeminiResponse(response: string): {
+    title: string;
+    description: string;
+  } {
+    const titleMatch = response.match(/\*\*Title:\*\*\s*(.+?)(?=\n|\*\*|$)/i);
+    const descriptionMatch = response.match(/\*\*Description:\*\*\s*([\s\S]+?)(?=\n\*\*|$)/i);
+
+    return {
+      title: titleMatch?.[1]?.trim() || 'Untitled Story',
+      description: descriptionMatch?.[1]?.trim() || 'An engaging story'
+    };
+  }
+
+  async generateMultipleSuggestions(content: string, count: number = 3): Promise<Array<{
+    title: string;
+    description: string;
+  }>> {
+    const suggestions = [];
+    
+    for (let i = 0; i < count; i++) {
+      try {
+        const suggestion = await this.generateThumbnailSuggestions(content);
+        suggestions.push({
+          title: suggestion.title,
+          description: suggestion.description
+        });
+        
+        // Small delay between requests to avoid rate limiting
+        if (i < count - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        console.error(`Failed to generate suggestion ${i + 1}:`, error);
+        // Continue with other suggestions even if one fails
+      }
+    }
+
+    return suggestions;
+  }
+}
+
+// Initialize Gemini service
+const geminiService = new GeminiService();
 
 // Helper function to get reaction counts from reactions table
 const getReactionCounts = async (targetId: string, targetType: 'story' | 'comment') => {
@@ -56,38 +204,285 @@ const getReactionCounts = async (targetId: string, targetType: 'story' | 'commen
   }
 };
 
+class GrammarCorrector {
+  private language: string;
+
+  constructor(language: string = 'en-US') {
+    this.language = language;
+    console.log(`GrammarCorrector initialized for ${language}`);
+  }
+
+  async processParagraph(paragraph: string, maxChunkSize: number = 500): Promise<any> {
+    if (!paragraph.trim()) {
+      return {
+        originalText: paragraph,
+        correctedText: paragraph,
+        wasSplit: false,
+        chunksProcessed: 0,
+        totalCorrections: 0,
+        corrections: []
+      };
+    }
+
+    const cleanParagraph = paragraph.trim();
+    console.log(`Processing text: "${cleanParagraph}"`);
+    
+    try {
+      // Direct API call to LanguageTool
+      const response = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          text: cleanParagraph,
+          language: this.language,
+        }),
+      });
+
+      if (!response.ok) {
+        console.log('LanguageTool API error:', response.status);
+        return {
+          originalText: cleanParagraph,
+          correctedText: cleanParagraph,
+          wasSplit: false,
+          chunksProcessed: 1,
+          totalCorrections: 0,
+          corrections: []
+        };
+      }
+
+      const data = await response.json();
+      const matches = data.matches || [];
+      
+      console.log(`Found ${matches.length} corrections`);
+      console.log('Raw matches:', JSON.stringify(matches, null, 2));
+      
+      if (matches.length === 0) {
+        return {
+          originalText: cleanParagraph,
+          correctedText: cleanParagraph,
+          wasSplit: false,
+          chunksProcessed: 1,
+          totalCorrections: 0,
+          corrections: []
+        };
+      }
+
+      // Filter and sort matches
+      const filteredMatches = this.filterCorrections(matches);
+      console.log(`Filtered matches: ${filteredMatches.length}`);
+      
+      // Sort by offset in descending order (right to left)
+      const sortedMatches = filteredMatches.sort((a: any, b: any) => b.offset - a.offset);
+      
+      let correctedText = cleanParagraph;
+      const corrections: any[] = [];
+
+      // Apply corrections from RIGHT TO LEFT to avoid offset issues
+      for (const match of sortedMatches) {
+        console.log(`Processing match:`, {
+          offset: match.offset,
+          errorLength: match.errorLength || match.length,
+          original: cleanParagraph.substring(match.offset, match.offset + (match.errorLength || match.length)),
+          replacements: match.replacements
+        });
+        
+        // Use match.length if errorLength is undefined
+        const errorLength = match.errorLength || match.length || 0;
+        
+        if (match.replacements && match.replacements.length > 0) {
+          const replacement = match.replacements[0];
+          const suggestionText = typeof replacement === 'object' ? replacement.value : replacement;
+          
+          console.log(`Applying correction: "${cleanParagraph.substring(match.offset, match.offset + errorLength)}" -> "${suggestionText}"`);
+          
+          // Apply the correction
+          correctedText = correctedText.substring(0, match.offset) + 
+                         suggestionText + 
+                         correctedText.substring(match.offset + errorLength);
+          
+          corrections.push({
+            original: cleanParagraph.substring(match.offset, match.offset + errorLength),
+            suggestion: suggestionText,
+            message: match.message,
+            ruleId: match.rule?.id || match.ruleId,
+            offset: match.offset,
+            pass: 1
+          });
+          
+          console.log(`Text after correction: "${correctedText}"`);
+        } else {
+          // Handle cases where no replacements are provided
+          console.log(`No replacements provided for: "${cleanParagraph.substring(match.offset, match.offset + errorLength)}"`);
+          
+          // Try to generate a basic correction based on the rule type
+          if (match.rule?.issueType === 'misspelling') {
+            // For spelling mistakes, try to suggest a corrected version
+            const originalWord = cleanParagraph.substring(match.offset, match.offset + errorLength);
+            const correctedWord = this.suggestSpellingCorrection(originalWord);
+            
+            if (correctedWord !== originalWord) {
+              console.log(`Generated suggestion: "${originalWord}" -> "${correctedWord}"`);
+              
+              // Apply the correction
+              correctedText = correctedText.substring(0, match.offset) + 
+                             correctedWord + 
+                             correctedText.substring(match.offset + errorLength);
+              
+              corrections.push({
+                original: originalWord,
+                suggestion: correctedWord,
+                message: match.message || "Spelling correction",
+                ruleId: match.rule?.id || "SPELLING_RULE",
+                offset: match.offset,
+                pass: 1
+              });
+            }
+          }
+        }
+      }
+
+      console.log(`Applied ${corrections.length} corrections`);
+      console.log(`Original: "${cleanParagraph}"`);
+      console.log(`Corrected: "${correctedText}"`);
+
+      return {
+        originalText: cleanParagraph,
+        correctedText: correctedText,
+        wasSplit: false,
+        chunksProcessed: 1,
+        totalCorrections: corrections.length,
+        corrections: corrections
+      };
+
+    } catch (error) {
+      console.error('Error in processParagraph:', error);
+      return {
+        originalText: cleanParagraph,
+        correctedText: cleanParagraph,
+        wasSplit: false,
+        chunksProcessed: 1,
+        totalCorrections: 0,
+        corrections: []
+      };
+    }
+  }
+
+  // Add this helper method for basic spelling suggestions
+  private suggestSpellingCorrection(word: string): string {
+    // Basic spelling corrections for common mistakes
+    const commonCorrections: Record<string, string> = {
+      'continu': 'continue',
+      'surprized': 'surprised',
+      'spraed': 'spread',
+      'ok': 'okay',
+      'not': 'not'
+    };
+    
+    return commonCorrections[word.toLowerCase()] || word;
+  }
+
+  private filterCorrections(matches: any[]): any[] {
+    if (!matches.length) return [];
+
+    // Sort by offset to process from left to right
+    const sortedMatches = matches.sort((a: any, b: any) => a.offset - b.offset);
+    
+    // Remove overlapping matches, keeping the first (leftmost) one
+    const filteredMatches: any[] = [];
+    let lastEnd = -1;
+    
+    for (const match of sortedMatches) {
+      if (match.offset >= lastEnd) {
+        // Skip matches that are likely false positives or low confidence
+        if (this.isReliableCorrection(match)) {
+          filteredMatches.push(match);
+          lastEnd = match.offset + match.errorLength;
+        }
+      }
+    }
+    
+    return filteredMatches;
+  }
+
+  private isReliableCorrection(match: any): boolean {
+    // Skip corrections that are often incorrect
+    const unreliableRules = [
+      'CONFUSION_RULE',  // Sometimes makes wrong suggestions
+      'EN_QUOTES',       // Quote style preferences
+    ];
+
+    // Prioritize certain types of corrections
+    const highPriorityRules = [
+      'MORFOLOGIK_RULE_EN_US',  // Spelling errors
+      'UPPERCASE_SENTENCE_START',  // Capitalization
+      'ENGLISH_WORD_REPEAT_RULE',  // Word repetition
+    ];
+
+    // Skip if it's in unreliable rules
+    if (unreliableRules.some(rule => match.ruleId && match.ruleId.includes(rule))) {
+      return false;
+    }
+
+    // Always include high priority corrections
+    if (highPriorityRules.some(rule => match.ruleId && match.ruleId.includes(rule))) {
+      return true;
+    }
+
+    // Include if it has good suggestions
+    if (match.replacements && match.replacements.length > 0) {
+      return true;
+    }
+
+    return true; // Default to including the correction
+  }
+}
+
 export const soulStoriesServices = {
-  createStory: async (storyData: any,episodes:any[]=[], userId: string) => {
+  createStory: async (storyData: any, episodes: any[] = [], userId: string) => {
     try {
       console.log('Attempting to insert:', storyData);
       
+      // Create a clean copy without co_authors first (for backward compatibility)
+      const { co_authors, ...baseStoryData } = storyData;
+      
+      // Only add co_authors if it's a valid non-empty array
+      const finalStoryData = {
+        ...baseStoryData,
+        ...(co_authors && Array.isArray(co_authors) && co_authors.length > 0 && { co_authors })
+      };
+      
       const { data, error } = await supabase
         .from('soul_stories')
-        .insert([storyData])
+        .insert([finalStoryData])
         .select()
         .single();
-       // If episodes exist, create them
-       if (episodes.length > 0) {
+
+      if (error) throw error;
+
+      // Episodes logic stays exactly the same
+      if (episodes.length > 0) {
         const episodesData = episodes.map((ep, index) => ({
-          story_id: data.id, // Use data.id instead of story.id
+          story_id: data.id,
           episode_number: index + 1,
           title: ep.title || "",
           description: ep.description || "",
           video_url: ep.video_url,
           thumbnail_url: ep.thumbnail_url || ""
         }));
-  
+
         await supabase
           .from('soul_story_episodes')
           .insert(episodesData);
       }
-  
+
       return { 
         success: true,
         message: 'Story created successfully',
         story: data 
       };
-  
+
     } catch (error) {
       console.error('Error creating story:', error);
       throw new Error(error instanceof Error ? error.message : 'Failed to create story');
@@ -96,11 +491,27 @@ export const soulStoriesServices = {
 
   getAnalytics: async (userId: string) => {
     try {
-  
+      // EXISTING: Get stories where user is main author (unchanged)
       const { data: analyticsData, error: analyticsError } = await supabase
         .from('soul_stories')
-        .select('*').eq('author_id', userId)
+        .select('*')
+        .eq('author_id', userId);
 
+      // NEW: Additionally get stories where user is co-author (only if co_authors column exists)
+      let coAuthorStories: any[] = [];
+      try {
+        const { data: coAuthorData, error: coAuthorError } = await supabase
+          .from('soul_stories')
+          .select('*')
+          .contains('co_authors', [userId]);
+        
+        if (!coAuthorError && coAuthorData) {
+          coAuthorStories = coAuthorData;
+        }
+      } catch (coAuthorQueryError) {
+        // If co_authors column doesn't exist yet, silently continue with existing logic
+        console.log('Co-authors column not available yet, using existing logic');
+      }
 
       if (analyticsError) {
         console.log('Table not available or error:', analyticsError.message);
@@ -108,7 +519,6 @@ export const soulStoriesServices = {
           analytics: {
             total_stories: 0,
             published_stories: 0,
-           
             total_revenue: 0,
             category_breakdown: {
               books: 0,
@@ -124,14 +534,21 @@ export const soulStoriesServices = {
         };
       }
 
-      const stories: any[] = analyticsData || [];
+      // EXISTING: Main author stories
+      const mainAuthorStories: any[] = analyticsData || [];
+      
+      // NEW: Combine with co-authored stories (avoiding duplicates)
+      const existingStoryIds = new Set(mainAuthorStories.map(story => story.id));
+      const uniqueCoAuthorStories = coAuthorStories.filter(story => !existingStoryIds.has(story.id));
+      
+      // Combined stories (main author + unique co-authored)
+      const allStories = [...mainAuthorStories, ...uniqueCoAuthorStories];
 
-      // If no data, return 0 analytics
-      if (!stories || stories.length === 0) {
+      // EXISTING: Use original logic with combined stories
+      if (!allStories || allStories.length === 0) {
         return {
           analytics: {
             total_stories: 0,
-        
             total_revenue: 0,
             category_breakdown: {
               books: 0,
@@ -147,14 +564,16 @@ export const soulStoriesServices = {
         };
       }
 
+      // EXISTING: Analytics calculation (unchanged)
       const analytics = {
-        total_stories: stories.length,
-        published_stories: stories.filter(story => story.status === 'published').length,
-        total_free_pages: stories.reduce((sum, story) => sum + (story.free_pages || 0), 0),
-        total_free_episodes: stories.reduce((sum, story) => sum + (story.free_episodes || 0), 0)
+        total_stories: allStories.length,
+        published_stories: allStories.filter(story => story.status === 'published').length,
+        total_free_pages: allStories.reduce((sum, story) => sum + (story.free_pages || 0), 0),
+        total_free_episodes: allStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0)
       };
 
-      const storiesTable = stories
+      // EXISTING: Stories table format (unchanged)
+      const storiesTable = allStories
         .map(story => ({
           id: story.id,
           title: story.title,
@@ -223,15 +642,18 @@ export const soulStoriesServices = {
       query = query.eq('category', type);
     }
 
-      // Always sort by newest first (descending)
-      query = query.order('created_at', { ascending: false });
+    // Add active_status filter - only fetch active stories
+    query = query.eq('active_status', true);
 
-      // Use the actual limit from options instead of hardcoded 5
-      const limit = options.limit; // Remove hardcoded 5
-      const offset = (options.page - 1) * limit;
-      query = query.range(offset, offset + limit - 1);
+    // Always sort by newest first (descending)
+    query = query.order('created_at', { ascending: false });
 
-      const { data: stories, error, count } = await query;
+    // Use the actual limit from options instead of hardcoded 5
+    const limit = options.limit;
+    const offset = (options.page - 1) * limit;
+    query = query.range(offset, offset + limit - 1);
+
+    const { data: stories, error, count } = await query;
 
       if (error) {
         console.log('Table not available or error:', error.message);
@@ -557,7 +979,7 @@ export const soulStoriesServices = {
         .update({
           available_coins: userCoins.available_coins - totalCoins,
           spent_coins: (userCoins.spent_coins || 0) + totalCoins,
-          total_coins: userCoins.total_coins  // Keep total_coins unchanged (available + spent)
+          total_coins: userCoins.total_coins
         })
         .eq('user_id', userId);
 
@@ -565,10 +987,10 @@ export const soulStoriesServices = {
         throw new Error('Failed to update user coins');
       }
 
-      // Get story author's current coins
+      // Get story with co-authors
       const { data: story, error: storyError } = await supabase
         .from('soul_stories')
-        .select('author_id')
+        .select('author_id, co_authors')
         .eq('id', storyId)
         .single();
 
@@ -576,27 +998,68 @@ export const soulStoriesServices = {
         throw new Error('Story not found');
       }
 
-      const { data: authorCoins, error: authorError } = await supabase
-        .from('anamcoins')
-        .select('available_coins, total_coins')
-        .eq('user_id', story.author_id)
-        .single();
+      // Check if co-authors exist and are valid
+      const hasCoAuthors = story.co_authors && 
+                         Array.isArray(story.co_authors) && 
+                         story.co_authors.length > 0;
 
-      if (authorError || !authorCoins) {
-        throw new Error('Author coins account not found');
-      }
+      if (hasCoAuthors) {
+        // NEW: Revenue sharing logic for stories with co-authors
+        const allAuthors = [story.author_id, ...story.co_authors];
+        const revenuePerAuthor = Math.floor(totalCoins / allAuthors.length);
+        const remainder = totalCoins % allAuthors.length;
 
-      // Update author coins (add)
-      const { error: authorUpdateError } = await supabase
-        .from('anamcoins')
-        .update({
-          available_coins: authorCoins.available_coins + totalCoins,
-          total_coins: authorCoins.total_coins + totalCoins  // Increase total_coins
-        })
-        .eq('user_id', story.author_id);
+        // Distribute coins among all authors
+        for (let i = 0; i < allAuthors.length; i++) {
+          const authorId = allAuthors[i];
+          const coinAmount = revenuePerAuthor + (i === 0 ? remainder : 0);
 
-      if (authorUpdateError) {
-        throw new Error('Failed to update author coins');
+          const { data: authorCoins, error: authorError } = await supabase
+            .from('anamcoins')
+            .select('available_coins, total_coins')
+            .eq('user_id', authorId)
+            .single();
+
+          if (authorError || !authorCoins) {
+            console.error(`Author ${authorId} coins account not found`);
+            continue;
+          }
+
+          const { error: authorUpdateError } = await supabase
+            .from('anamcoins')
+            .update({
+              available_coins: authorCoins.available_coins + coinAmount,
+              total_coins: authorCoins.total_coins + coinAmount
+            })
+            .eq('user_id', authorId);
+
+          if (authorUpdateError) {
+            console.error(`Failed to update coins for author ${authorId}`);
+          }
+        }
+      } else {
+        // EXISTING: Original logic for stories without co-authors
+        const { data: authorCoins, error: authorError } = await supabase
+          .from('anamcoins')
+          .select('available_coins, total_coins')
+          .eq('user_id', story.author_id)
+          .single();
+
+        if (authorError || !authorCoins) {
+          throw new Error('Author coins account not found');
+        }
+
+        const { error: authorUpdateError } = await supabase
+          .from('anamcoins')
+          .update({
+            available_coins: authorCoins.available_coins + totalCoins,
+            total_coins: authorCoins.total_coins + totalCoins
+          })
+          .eq('user_id', story.author_id);
+
+        if (authorUpdateError) {
+          throw new Error('Failed to update author coins');
+        }
       }
 
       return {
@@ -754,9 +1217,9 @@ export const soulStoriesServices = {
       throw error;
     }
   }, 
-  searchAllContent: async (query: string, category: string, userId: string) => {
+  searchAllContent: async (query: string, category: string, userId: string, storyId?: string) => {
     try {
-      console.log('Search params:', { query, category, userId });
+      console.log('Search params:', { query, category, userId, storyId });
       
       let supabaseQuery = supabase
         .from('soul_stories')
@@ -772,20 +1235,26 @@ export const soulStoriesServices = {
           )
         `, { count: 'exact' });
 
-      // Apply category filter if specified
-      if (category && category !== 'all') {
-        supabaseQuery = supabaseQuery.eq('category', category);
-        console.log('Filtering by category:', category);
-      }
+      // ✅ PRIORITY: Search by story ID if provided
+      if (storyId) {
+        console.log('Searching by story ID:', storyId);
+        supabaseQuery = supabaseQuery.eq('id', storyId);
+      } else {
+        // Apply category filter if specified
+        if (category && category !== 'all') {
+          supabaseQuery = supabaseQuery.eq('category', category);
+          console.log('Filtering by category:', category);
+        }
 
-      // Add comprehensive text search if query is not 'all'
-      if (query && query.toLowerCase() !== 'all') {
-        console.log('Adding comprehensive text search for:', query);
-        
-        // Search across multiple fields - if ANY field contains the query, return the story
-        supabaseQuery = supabaseQuery.or(
-          `title.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`
-        );
+        // Add comprehensive text search if query is not 'all'
+        if (query && query.toLowerCase() !== 'all') {
+          console.log('Adding comprehensive text search for:', query);
+          
+          // Search across multiple fields - if ANY field contains the query, return the story
+          supabaseQuery = supabaseQuery.or(
+            `title.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`
+          );
+        }
       }
 
       supabaseQuery = supabaseQuery.order('created_at', { ascending: false });
@@ -1602,11 +2071,170 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+  // getTrendingStories: async (userId?: string, page: number = 1, limit: number = 200) => {
+  //   try {
+  //     const offset = (page - 1) * limit;
+
+  //     // Get all stories first with active_status filter
+  //     const { data: stories, error, count } = await supabase
+  //       .from('soul_stories')
+  //       .select(`
+  //         *,
+  //         soul_story_episodes(
+  //           id, episode_number, title, description, video_url, thumbnail_url
+  //         )
+  //       `, { count: 'exact' })
+  //       .eq('active_status', true) // Add active_status filter
+  //       .order('created_at', { ascending: false })
+  //       .range(offset, offset + limit - 1);
+
+  //     if (error) {
+  //       console.log('Error getting trending stories:', error);
+  //       return { success: false, message: error.message };
+  //     }
+
+  //     // Transform stories to EXACTLY match getStories structure
+  //     const transformedStories = (stories || []).map(story => {
+  //       if (story.content_type === 'episodes' && story.soul_story_episodes) {
+  //         // For episode-based stories, return main URL + episode URLs (EXACTLY like getStories)
+  //         return {
+  //           ...story,
+  //           main_url: story.asset_url, // Main story URL (can be series trailer/cover)
+  //           episode_urls: story.soul_story_episodes.map((ep: any) => ({
+  //             episode_number: ep.episode_number,
+  //             title: ep.title,
+  //             description: ep.description,
+  //             video_url: ep.video_url, // Individual episode video URL
+  //             thumbnail_url: ep.thumbnail_url
+  //           }))
+  //         };
+  //       } else {
+  //         // For single asset stories, return main URL (EXACTLY like getStories)
+  //         return {
+  //           ...story,
+  //           main_url: story.asset_url, // Main story URL
+  //           episode_urls: null // No episodes
+  //         };
+  //       }
+  //     });
+
+  //     // Get reaction counts for all stories in ONE query (EXACTLY like getStories)
+  //     const storyIds = transformedStories.map(story => story.id);
+  //     let reactionCounts: Record<string, any> = {};
+  //     let userReactions: Record<string, string> = {};
+  //     let commentCounts: Record<string, number> = {};
+
+  //     if (storyIds.length > 0) {
+  //       // Get all reaction counts
+  //       const { data: reactions } = await supabase
+  //         .from('soul_story_reactions')
+  //         .select('target_id, type')
+  //         .eq('target_type', 'story')
+  //         .in('target_id', storyIds);
+        
+  //       // Get current user's reactions for all stories
+  //       if (userId) {
+  //         const { data: userReactionData } = await supabase
+  //           .from('soul_story_reactions')
+  //           .select('target_id, type')
+  //           .eq('target_type', 'story')
+  //           .eq('user_id', userId)
+  //           .in('target_id', storyIds);
+
+  //         userReactionData?.forEach(reaction => {
+  //           userReactions[reaction.target_id] = reaction.type;
+  //         });
+  //       }
+
+  //       // Get comment counts for all stories
+  //       const { data: commentData } = await supabase
+  //         .from('soul_story_comments')
+  //         .select('soul_story_id')
+  //         .eq('is_deleted', false)
+  //         .in('soul_story_id', storyIds);
+
+  //       // Calculate reaction counts and comment counts (EXACTLY like getStories)
+  //       storyIds.forEach(storyId => {
+  //         const storyReactions = reactions?.filter(r => r.target_id === storyId) || [];
+  //         const storyComments = commentData?.filter(c => c.soul_story_id === storyId) || [];
+          
+  //         reactionCounts[storyId] = {
+  //           total_likes: storyReactions.filter(r => r.type === 'like').length,
+  //           total_dislikes: storyReactions.filter(r => r.type === 'dislike').length,
+  //           total_hearts: storyReactions.filter(r => r.type === 'heart').length,
+  //           total_souls: storyReactions.filter(r => r.type === 'soul').length,
+  //           total_insightfuls: storyReactions.filter(r => r.type === 'insightful').length,
+  //           total_hugs: storyReactions.filter(r => r.type === 'hug').length
+  //         };
+          
+  //         commentCounts[storyId] = storyComments.length;
+  //       });
+  //     }
+
+  //     // Add reaction counts, user reaction, and comment count to each story (EXACTLY like getStories)
+  //     const storiesWithReactions = transformedStories.map(story => ({
+  //       ...story,
+  //       total_likes: reactionCounts[story.id]?.total_likes || 0,
+  //       total_dislikes: reactionCounts[story.id]?.total_dislikes || 0,
+  //       total_hearts: reactionCounts[story.id]?.total_hearts || 0,
+  //       total_souls: reactionCounts[story.id]?.total_souls || 0,
+  //       total_insightfuls: reactionCounts[story.id]?.total_insightfuls || 0,
+  //       total_hugs: reactionCounts[story.id]?.total_hugs || 0,
+  //       user_reaction: userReactions[story.id] || null,
+  //       total_comments: commentCounts[story.id] || 0,
+  //       total_views: story.total_views || 0
+  //     }));
+
+  //     // TRENDING LOGIC INTACT: Sort by total engagement (reactions + comments + views) - HIGHEST FIRST
+  //     const sortedStories = storiesWithReactions.sort((a, b) => {
+  //       // Calculate engagement score (same as trending logic)
+  //       const aEngagement = (a.total_likes + a.total_hearts + a.total_insightfuls + a.total_hugs + a.total_souls) + a.total_comments + a.total_views;
+  //       const bEngagement = (b.total_likes + b.total_hearts + b.total_insightfuls + b.total_hugs + b.total_souls) + b.total_comments + b.total_views;
+        
+  //       return bEngagement - aEngagement;
+  //     });
+
+  //     const total = count || 0;
+  //     const totalPages = Math.ceil(total / limit);
+
+  //     // Return EXACTLY the same structure as getStories
+  //     return {
+  //       stories: sortedStories,
+  //       pagination: {
+  //         page: page,
+  //         limit: limit,
+  //         total,
+  //         totalPages,
+  //         hasMore: (page * limit) < total,
+  //         currentPage: page,
+  //         nextPage: page < totalPages ? page + 1 : null,
+  //         prevPage: page > 1 ? page - 1 : null
+  //       }
+  //     };
+
+  //   } catch (error) {
+  //     console.log('Error in getTrendingStories:', error);
+  //     // Return empty data on any error (EXACTLY like getStories)
+  //     return {
+  //       stories: [],
+  //       pagination: {
+  //         page: page,
+  //         limit: limit,
+  //         total: 0,
+  //         totalPages: 0,
+  //         hasMore: false,
+  //         currentPage: page,
+  //         nextPage: null,
+  //         prevPage: null
+  //       }
+  //     };
+  //   }
+  // },
   getTrendingStories: async (userId?: string, page: number = 1, limit: number = 200) => {
     try {
       const offset = (page - 1) * limit;
 
-      // Get all stories first
+      // Get all stories first with active_status filter
       const { data: stories, error, count } = await supabase
         .from('soul_stories')
         .select(`
@@ -1615,6 +2243,7 @@ export const soulStoriesServices = {
             id, episode_number, title, description, video_url, thumbnail_url
           )
         `, { count: 'exact' })
+        .eq('active_status', true) // Add active_status filter
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
@@ -1624,11 +2253,29 @@ export const soulStoriesServices = {
       }
 
       // Transform stories to match getStories structure
-      const transformedStories = stories?.map(story => ({
-        ...story,
-        episodes: story.soul_story_episodes || [],
-        total_episodes: story.soul_story_episodes?.length || 0
-      })) || [];
+      const transformedStories = stories?.map(story => {
+        if (story.content_type === 'episodes' && story.soul_story_episodes) {
+          // For episode-based stories, return main URL + episode URLs (EXACTLY like getStories)
+          return {
+            ...story,
+            main_url: story.asset_url, // Main story URL (can be series trailer/cover)
+            episode_urls: story.soul_story_episodes.map((ep: any) => ({
+              episode_number: ep.episode_number,
+              title: ep.title,
+              description: ep.description,
+              video_url: ep.video_url, // Individual episode video URL
+              thumbnail_url: ep.thumbnail_url
+            }))
+          };
+        } else {
+          // For single asset stories, return main URL (EXACTLY like getStories)
+          return {
+            ...story,
+            main_url: story.asset_url, // Main story URL
+            episode_urls: null // No episodes
+          };
+        }
+      }) || [];
 
       // Get reaction counts for all stories in ONE query
       const storyIds = transformedStories.map(story => story.id);
@@ -2179,6 +2826,405 @@ export const soulStoriesServices = {
       console.error('Error in getStoryReports service:', error);
       return { success: false, message: 'Internal server error' };
     }
-  }
+  },
+
+  getUserFriends: async (userId: string) => {
+    try {
+      // Get user's friendships (like in chat messages)
+      const { data: friendships, error } = await supabase
+        .from('friendships')
+        .select('id, sender_id, receiver_id, status')
+        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+        .eq('status', 'accepted');
+
+      if (error) throw error;
+
+      const friendIds = friendships.map((entry: any) =>
+        entry.sender_id === userId ? entry.receiver_id : entry.sender_id
+      );
+
+      if (friendIds.length === 0) {
+        return { success: true, data: [] };
+      }
+
+      const friendsWithChats: { friendId: string; chatId: string; }[] = [];
+
+      for (const friendId of friendIds) {
+        const { data: existingChat, error: chatCheckError } = await supabase
+          .from('chats')
+          .select('id')
+          .or(`and(user_1.eq.${userId},user_2.eq.${friendId}),and(user_1.eq.${friendId},user_2.eq.${userId})`)
+          .maybeSingle();
+
+        let chatId = existingChat?.id;
+
+        if (!existingChat && !chatCheckError) {
+          const { data: newChat, error: insertError } = await supabase
+            .from('chats')
+            .insert([{ user_1: userId, user_2: friendId }])
+            .select('id')
+            .single();
+
+          if (insertError) continue;
+          chatId = newChat.id;
+        }
+
+        if (chatId) {
+          friendsWithChats.push({ friendId, chatId });
+        }
+      }
+
+      const { data: friendsData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, avatar_url, email')
+        .in('id', friendIds);
+
+      if (profileError) throw profileError;
+
+      const formatted = friendsData
+        .filter((profile: any) => profile.id !== userId) // EXCLUDE current user
+        .map((profile: any) => {
+          const chatInfo = friendsWithChats.find(f => f.friendId === profile.id);
+          return {
+            id: profile.id,
+            user_name: `${profile.first_name} ${profile.last_name}`,
+            avatar_img: profile.avatar_url,
+            email: profile.email,
+            chat_id: chatInfo?.chatId || null
+          };
+        });
+
+      return { success: true, data: formatted };
+    } catch (error) {
+      console.error('Error in getUserFriends service:', error);
+      return { success: false, error: 'Something went wrong.' };
+    }
+  },
+
+  generateThumbnailSuggestions: async (content: string) => {
+    try {
+      return await geminiService.generateThumbnailSuggestions(content);
+    } catch (error) {
+      console.error('Error in generateThumbnailSuggestions service:', error);
+      throw error;
+    }
+  },
+
+  generateMultipleSuggestions: async (content: string, count: number = 3) => {
+    try {
+      return await geminiService.generateMultipleSuggestions(content, count);
+    } catch (error) {
+      console.error('Error in generateMultipleSuggestions service:', error);
+      throw error;
+    }
+  },
+
+  updateStory: async (storyId: string, updateData: any, episodes: any[] = [], userId: string) => {
+    try {
+      // First, check if story exists and user has permission to update
+      const { data: existingStory, error: checkError } = await supabase
+        .from('soul_stories')
+        .select('author_id, co_authors')
+        .eq('id', storyId)
+        .single();
+
+      if (checkError || !existingStory) {
+        throw new Error('Story not found');
+      }
+
+      // Check if user is author or co-author
+      const isAuthor = existingStory.author_id === userId;
+      const isCoAuthor = existingStory.co_authors && 
+                        Array.isArray(existingStory.co_authors) && 
+                        existingStory.co_authors.includes(userId);
+
+      if (!isAuthor && !isCoAuthor) {
+        throw new Error('Unauthorized to update this story');
+      }
+
+      // PROTECTION: Never allow updating story_type
+      if (updateData.story_type !== undefined) {
+        delete updateData.story_type;
+        console.log('⚠️ story_type update blocked - story type cannot be changed');
+      }
+
+      // Create a clean copy without co_authors first (for backward compatibility)
+      const { co_authors, ...baseUpdateData } = updateData;
+      
+      let finalUpdateData = {
+        ...baseUpdateData,
+        ...(co_authors && Array.isArray(co_authors) && co_authors.length > 0 && { co_authors }),
+        updated_at: new Date().toISOString()
+      };
+
+      // Handle episodes update - preserve existing episodes and update only provided ones
+      if (episodes && episodes.length > 0) {
+        // Get existing episodes first
+        const { data: existingEpisodes, error: existingEpisodesError } = await supabase
+          .from('soul_story_episodes')
+          .select('id, episode_number')
+          .eq('story_id', storyId)
+          .order('episode_number', { ascending: true });
+
+        if (existingEpisodesError) {
+          console.error('Error fetching existing episodes:', existingEpisodesError);
+          throw new Error('Failed to fetch existing episodes');
+        }
+
+        // Create a map of existing episodes by episode_number for easy lookup
+        const existingEpisodesMap = new Map(
+          existingEpisodes.map(ep => [ep.episode_number, ep.id])
+        );
+
+        // Process each episode in the update request
+        for (const episode of episodes) {
+          if (episode.id && existingEpisodesMap.has(episode.episode_number)) {
+            // Update existing episode by ID
+            const { error: updateError } = await supabase
+              .from('soul_story_episodes')
+              .update({
+                title: episode.title || "",
+                description: episode.description || "",
+                video_url: episode.video_url,
+                thumbnail_url: episode.thumbnail_url || ""
+              })
+              .eq('id', episode.id);
+
+            if (updateError) {
+              console.error(`Error updating episode ${episode.id}:`, updateError);
+              throw new Error(`Failed to update episode ${episode.id}`);
+            }
+
+            console.log(`✅ Updated episode ${episode.id}`);
+          } else if (!episode.id && episode.episode_number) {
+            // Insert new episode if no ID provided but episode_number exists
+            const { error: insertError } = await supabase
+              .from('soul_story_episodes')
+              .insert({
+                story_id: storyId,
+                title: episode.title || "",
+                description: episode.description || "",
+                video_url: episode.video_url,
+                thumbnail_url: episode.thumbnail_url || "",
+                episode_number: episode.episode_number
+              });
+
+            if (insertError) {
+              console.error('Error inserting new episode:', insertError);
+              throw new Error('Failed to insert new episode');
+            }
+
+            console.log('✅ Inserted new episode');
+          } else {
+            console.warn('Skipping episode update - missing ID or episode_number:', episode);
+          }
+        }
+
+        // IMPORTANT: Do NOT delete episodes that weren't in the update request
+        // This preserves existing episodes that weren't modified
+        console.log(`✅ Preserved ${existingEpisodes.length} existing episodes, updated ${episodes.length} episodes`);
+      }
+
+      // ✅ Handle asset_url update separately (if provided)
+      if (updateData.asset_url) {
+        // asset_url will be updated in the main story update
+        // asset_type should also be set to 'video' if not already set
+        if (!updateData.asset_type) {
+          finalUpdateData.asset_type = 'video';
+        }
+        console.log('✅ Will update main asset_url in soul_stories table');
+      }
+
+      // Update the main story
+      const { data: updatedStory, error: updateError } = await supabase
+        .from('soul_stories')
+        .update(finalUpdateData)
+        .eq('id', storyId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      return { 
+        success: true,
+        message: 'Story updated successfully',
+        story: updatedStory 
+      };
+
+    } catch (error) {
+      console.error('Error updating story:', error);
+      throw error;
+    }
+  },
+  correctGrammar: async (text: string, maxChunkSize: number = 500) => {
+    try {
+      const cleanText = text.trim();
+      const words = cleanText.split(/\s+/).filter(word => word.length > 0);
+      
+      if (words.length === 1) {
+        // Single word - check spelling only (keep using LanguageTool)
+        const result = await soulStoriesServices.checkSingleWordSpelling(cleanText);
+        return {
+          success: true,
+          data: {
+            originalText: cleanText,
+            correctedText: result.correctedText,
+            wasSplit: false,
+            chunksProcessed: 1,
+            totalCorrections: result.corrections.length,
+            corrections: result.corrections
+          }
+        };
+      }
+      
+      // Multiple words - use Gemini AI for grammar correction
+      try {
+        const prompt = `You are a professional English language editor. Correct the following text for grammar, spelling, and punctuation errors.
+
+IMPORTANT: Return ONLY the corrected text, nothing else. Do not add explanations, comments, or any other text.
+
+Text to correct:
+"${cleanText}"
+
+Corrected text:`;
+
+        // Use the public method from GeminiService
+        const result = await geminiService.generateThumbnailSuggestions(cleanText);
+        const correctedText = result.rawResponse.trim();
+
+        console.log(`Original: "${cleanText}"`);
+        console.log(`Corrected: "${correctedText}"`);
+
+        // Generate corrections array based on differences
+        const corrections = soulStoriesServices.generateCorrections(cleanText, correctedText);
+
+        return {
+          success: true,
+          data: {
+            originalText: cleanText,
+            correctedText: correctedText,
+            wasSplit: false,
+            chunksProcessed: 1,
+            totalCorrections: corrections.length,
+            corrections: corrections
+          }
+        };
+      } catch (geminiError) {
+        console.error('Gemini AI error, falling back to LanguageTool:', geminiError);
+        
+        // Fallback to LanguageTool if Gemini fails
+        const corrector = new GrammarCorrector();
+        const result = await corrector.processParagraph(cleanText, maxChunkSize);
+        
+        return {
+          success: true,
+          data: {
+            originalText: result.originalText,
+            correctedText: result.correctedText,
+            wasSplit: result.wasSplit,
+            chunksProcessed: result.chunksProcessed,
+            totalCorrections: result.totalCorrections,
+            corrections: result.corrections
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Error in correctGrammar service:', error);
+      return {
+        success: false,
+        message: 'Failed to correct grammar'
+      };
+    }
+  },
+  checkSingleWordSpelling: async (word: string): Promise<{ correctedText: string; corrections: any[] }> => {
+    try {
+      const response = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          text: word,
+          language: 'en-US',
+        }),
+      });
+
+      if (!response.ok) {
+        return { correctedText: word, corrections: [] };
+      }
+
+      const data = await response.json();
+      const matches = data.matches || [];
+      
+      if (matches.length > 0 && matches[0].replacements && matches[0].replacements.length > 0) {
+        const correction = matches[0];
+        
+        // Handle both object and string formats consistently
+        let suggestionText = word; // Default to original
+        
+        if (correction.replacements[0]) {
+          if (typeof correction.replacements[0] === 'object' && correction.replacements[0].value) {
+            suggestionText = correction.replacements[0].value;
+          } else if (typeof correction.replacements[0] === 'string') {
+            suggestionText = correction.replacements[0];
+          }
+        }
+        
+        // Only return correction if it's actually different
+        if (suggestionText !== word) {
+          return {
+            correctedText: suggestionText,
+            corrections: [{
+              original: word,
+              suggestion: suggestionText,
+              message: correction.message || "Spelling correction",
+              ruleId: correction.ruleId || "SPELLING_RULE",
+              offset: 0,
+              pass: 1
+            }]
+          };
+        }
+      }
+
+      // Always return original text when no valid corrections
+      return { correctedText: word, corrections: [] };
+    } catch (error) {
+      console.error('Single word spelling check error:', error);
+      return { correctedText: word, corrections: [] };
+    }
+  },
+  // Add this helper method for Gemini corrections
+  generateCorrections: (original: string, corrected: string): any[] => {
+    const corrections: any[] = [];
+    
+    if (original === corrected) {
+      return corrections;
+    }
+
+    // Simple word-by-word comparison to identify corrections
+    const originalWords = original.split(/\s+/);
+    const correctedWords = corrected.split(/\s+/);
+    
+    let offset = 0;
+    for (let i = 0; i < Math.max(originalWords.length, correctedWords.length); i++) {
+      const originalWord = originalWords[i] || '';
+      const correctedWord = correctedWords[i] || '';
+      
+      if (originalWord !== correctedWord && correctedWord) {
+        corrections.push({
+          original: originalWord,
+          suggestion: correctedWord,
+          message: "Grammar or spelling correction",
+          ruleId: "GEMINI_AI_CORRECTION",
+          offset: offset,
+          pass: 1
+        });
+      }
+      
+      offset += originalWord.length + 1; // +1 for space
+    }
+
+    return corrections;
+  },
 };
 
