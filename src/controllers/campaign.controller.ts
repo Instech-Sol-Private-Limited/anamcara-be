@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabase } from '../app';
 import { generateCampaignDescription } from '../services/openai.service';
+import { transferProductToWinner } from '../services/campaign.service';
 
 interface CampaignFormValues {
     title: string;
@@ -18,6 +19,7 @@ interface CampaignFormValues {
     campaignType: 'simple' | 'auction';
     matchChallenges: boolean;
     offeredProduct: { id: string; title: string } | null;
+    acceptedCurrencies: string[];
 }
 
 interface CreateCampaignRequest {
@@ -37,6 +39,7 @@ interface CreateCampaignRequest {
     match_challenges: boolean;
     boost_campaign?: boolean;
     offer_product_id?: string | null;
+    accepted_currencies: string[];
 }
 
 const createCampaign = async (req: Request, res: Response): Promise<any> => {
@@ -54,7 +57,8 @@ const createCampaign = async (req: Request, res: Response): Promise<any> => {
             description,
             campaignType,
             matchChallenges,
-            offeredProduct
+            offeredProduct,
+            acceptedCurrencies
         } = req.body as CampaignFormValues;
 
         const userId = (req as any).user?.id;
@@ -88,6 +92,14 @@ const createCampaign = async (req: Request, res: Response): Promise<any> => {
             });
         }
 
+        // Validate accepted currencies
+        if (!acceptedCurrencies || !Array.isArray(acceptedCurrencies) || acceptedCurrencies.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one currency must be accepted'
+            });
+        }
+
         const campaignData: CreateCampaignRequest = {
             user_id: userId,
             title,
@@ -103,13 +115,13 @@ const createCampaign = async (req: Request, res: Response): Promise<any> => {
             campaign_type: campaignType === 'simple' ? 'simple_donation' : 'auction_donation',
             match_challenges: matchChallenges,
             boost_campaign: false,
-            offer_product_id: offeredProduct?.id || null
+            offer_product_id: offeredProduct?.id || null,
+            accepted_currencies: acceptedCurrencies
         };
 
         if (campaignType === 'simple') {
             campaignData.donation_info = description;
         }
-
 
         const { data: campaign, error: dbError } = await supabase
             .from('hope_campaigns')
@@ -259,16 +271,61 @@ const getAllCampaigns = async (req: Request, res: Response): Promise<any> => {
         const offset = (Number(page) - 1) * Number(limit);
 
         const { data: campaigns, error, count } = await supabase
-            .from('hope_campaigns')
-            .select('*, creator:user_id(first_name, last_name, email, avatar_url)', { count: 'exact' })
-            .order('created_at', { ascending: false })
+            .from("hope_campaigns")
+            .select("*, creator:user_id(first_name, last_name, email, avatar_url)", { count: "exact" })
+            .order("created_at", { ascending: false })
             .range(offset, offset + Number(limit) - 1);
 
         if (error) {
-            console.error('Database error:', error);
+            console.error("Database error:", error);
             throw new Error(`Database error: ${error.message}`);
         }
 
+        if (!campaigns) {
+            return res.status(200).json({
+                success: true,
+                data: [],
+                pagination: {
+                    page: Number(page),
+                    limit: Number(limit),
+                    total: 0,
+                    pages: 0
+                }
+            });
+        }
+
+        const now = new Date();
+        const expiredCampaigns = campaigns.filter(
+            (c: any) => c.deadline && new Date(c.deadline) <= now && c.status !== "closed"
+        );
+
+        if (expiredCampaigns.length > 0) {
+            const expiredIds = expiredCampaigns.map((c: any) => c.id);
+
+            const { error: updateError } = await supabase
+                .from("hope_campaigns")
+                .update({ status: "closed", updated_at: new Date().toISOString() })
+                .in("id", expiredIds);
+
+            if (updateError) {
+                console.error("Failed to update expired campaigns:", updateError);
+            }
+
+            // Reflect status change in the response data
+            campaigns.forEach((c: any) => {
+                if (expiredIds.includes(c.id)) {
+                    c.status = "closed";
+                }
+            });
+
+            for (const c of expiredCampaigns) {
+                if (c.campaign_type === 'auction_donation') {
+                    await transferProductToWinner(c.id);
+                }
+            }
+        }
+
+        // Step 3: Send response
         res.status(200).json({
             success: true,
             data: campaigns,
@@ -279,12 +336,11 @@ const getAllCampaigns = async (req: Request, res: Response): Promise<any> => {
                 pages: Math.ceil((count || 0) / Number(limit))
             }
         });
-
     } catch (error: any) {
-        console.error('Error fetching pending campaigns:', error);
+        console.error("Error fetching campaigns:", error);
         res.status(500).json({
             success: false,
-            message: error.message || 'Failed to fetch pending campaigns'
+            message: error.message || "Failed to fetch campaigns"
         });
     }
 };
@@ -321,9 +377,39 @@ const getApprovedCampaigns = async (req: Request, res: Response): Promise<any> =
             throw new Error(`Database error: ${error.message}`);
         }
 
+        const now = new Date();
+        const expiredCampaigns = campaigns?.filter(c => c.deadline && new Date(c.deadline) < now);
+
+        if (expiredCampaigns?.length) {
+            const expiredIds = expiredCampaigns.map(c => c.id);
+
+            const { error: updateError } = await supabase
+                .from('hope_campaigns')
+                .update({ status: 'closed', updated_at: new Date().toISOString() })
+                .in('id', expiredIds);
+
+            if (updateError) {
+                console.error("Failed to update expired campaigns:", updateError);
+            }
+
+            campaigns.forEach(c => {
+                if (expiredIds.includes(c.id)) {
+                    c.status = 'closed';
+                }
+            });
+
+            for (const c of expiredCampaigns) {
+                if (c.campaign_type === 'auction_donation') {
+                    await transferProductToWinner(c.id);
+                }
+            }
+        }
+
+        const filteredCampaigns = campaigns?.filter(c => c.status !== 'closed') || [];
+
         res.status(200).json({
             success: true,
-            data: campaigns,
+            data: filteredCampaigns,
             pagination: {
                 page: Number(page),
                 limit: Number(limit),
@@ -341,6 +427,156 @@ const getApprovedCampaigns = async (req: Request, res: Response): Promise<any> =
     }
 };
 
+// const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
+//     try {
+//         const userId = (req as any).user?.id;
+//         const { page = 1, limit = 10, status, approvalStatus } = req.query;
+//         const offset = (Number(page) - 1) * Number(limit);
+
+//         if (!userId) {
+//             return res.status(401).json({
+//                 success: false,
+//                 message: 'User authentication required'
+//             });
+//         }
+
+//         let query = supabase
+//             .from('hope_campaigns')
+//             .select('*, creator:user_id(first_name, last_name, email, avatar_url), offered_product:offer_product_id(*)', { count: 'exact' })
+//             .eq('user_id', userId)
+//             .order('created_at', { ascending: false });
+
+//         // Filter by status if provided
+//         if (status && status !== 'all') {
+//             query = query.eq('status', status);
+//         }
+
+//         // Filter by approval status if provided
+//         if (approvalStatus === 'approved') {
+//             query = query.eq('is_approved', true);
+//         } else if (approvalStatus === 'pending') {
+//             query = query.eq('is_approved', false);
+//         }
+
+//         const { data: campaigns, error, count } = await query
+//             .range(offset, offset + Number(limit) - 1);
+
+//         if (error) {
+//             console.error('Database error:', error);
+//             throw new Error(`Database error: ${error.message}`);
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             data: campaigns,
+//             pagination: {
+//                 page: Number(page),
+//                 limit: Number(limit),
+//                 total: count || 0,
+//                 pages: Math.ceil((count || 0) / Number(limit))
+//             }
+//         });
+
+//     } catch (error: any) {
+//         console.error('Error fetching user campaigns:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Failed to fetch user campaigns'
+//         });
+//     }
+// };
+
+// const getCampaignDetails = async (req: Request, res: Response): Promise<any> => {
+//     try {
+//         const { id } = req.params;
+
+//         const { data: campaign, error: campaignError } = await supabase
+//             .from('hope_campaigns')
+//             .select('*, creator:user_id(first_name, last_name, email, avatar_url)')
+//             .eq('id', id)
+//             .single();
+
+//         if (campaignError) {
+//             console.error('Database error:', campaignError);
+//             if (campaignError.code === 'PGRST116') {
+//                 return res.status(404).json({
+//                     success: false,
+//                     message: 'Campaign not found'
+//                 });
+//             }
+//             throw new Error(`Database error: ${campaignError.message}`);
+//         }
+
+//         if (!campaign) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Campaign not found'
+//             });
+//         }
+
+//         let offeredProduct = null;
+//         if (campaign.campaign_type === 'auction_donation' && campaign.offer_product_id) {
+//             const { data: product, error: productError } = await supabase
+//                 .from('products')
+//                 .select(`
+//                     *,
+//                     creator:creator_id(first_name, last_name, email, avatar_url)
+//                 `)
+//                 .eq('id', campaign.offer_product_id)
+//                 .single();
+
+//             if (productError) {
+//                 console.error('Error fetching product details:', productError);
+//             } else {
+//                 offeredProduct = product;
+//             }
+//         }
+
+//         let totalBids = 0;
+//         let highestBid = 0;
+
+//         if (campaign.campaign_type === 'auction_donation') {
+//             const { data: bids, error: bidsError } = await supabase
+//                 .from('campaign_bids')
+//                 .select('amount, currency')
+//                 .eq('campaign_id', id)
+//                 .order('created_at', { ascending: false });
+
+//             if (!bidsError && bids && bids.length > 0) {
+//                 totalBids = bids.length;
+
+//                 const bidsInAB = bids.map(bid => {
+//                     if (bid.currency === 'AC') {
+//                         return bid.amount / 2;
+//                     }
+//                     return bid.amount;
+//                 });
+
+//                 highestBid = Math.max(...bidsInAB);
+//             }
+//         }
+
+//         const responseData = {
+//             ...campaign,
+//             offered_product: offeredProduct,
+//             total_bids: totalBids,
+//             highest_bid: highestBid
+//         };
+
+//         res.status(200).json({
+//             success: true,
+//             data: responseData
+//         });
+
+//     } catch (error: any) {
+//         console.error('Error fetching campaign details:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Failed to fetch campaign details'
+//         });
+//     }
+// };
+
 const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
     try {
         const userId = (req as any).user?.id;
@@ -356,16 +592,14 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
 
         let query = supabase
             .from('hope_campaigns')
-            .select('*, offered_product:offer_product_id(*)', { count: 'exact' })
+            .select('*, creator:user_id(first_name, last_name, email, avatar_url), offered_product:offer_product_id(*)', { count: 'exact' })
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
-        // Filter by status if provided
         if (status && status !== 'all') {
             query = query.eq('status', status);
         }
 
-        // Filter by approval status if provided
         if (approvalStatus === 'approved') {
             query = query.eq('is_approved', true);
         } else if (approvalStatus === 'pending') {
@@ -378,6 +612,21 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
         if (error) {
             console.error('Database error:', error);
             throw new Error(`Database error: ${error.message}`);
+        }
+
+        const now = new Date();
+        for (const campaign of campaigns || []) {
+            if (campaign.deadline && new Date(campaign.deadline) <= now && campaign.status !== 'closed') {
+                await supabase
+                    .from('hope_campaigns')
+                    .update({ status: 'closed' })
+                    .eq('id', campaign.id);
+
+                campaign.status = 'closed';
+                if (campaign.campaign_type === 'auction_donation') {
+                    await transferProductToWinner(campaign.id);
+                }
+            }
         }
 
         res.status(200).json({
@@ -404,7 +653,6 @@ const getCampaignDetails = async (req: Request, res: Response): Promise<any> => 
     try {
         const { id } = req.params;
 
-        // First, get the campaign details
         const { data: campaign, error: campaignError } = await supabase
             .from('hope_campaigns')
             .select('*, creator:user_id(first_name, last_name, email, avatar_url)')
@@ -413,7 +661,7 @@ const getCampaignDetails = async (req: Request, res: Response): Promise<any> => 
 
         if (campaignError) {
             console.error('Database error:', campaignError);
-            if (campaignError.code === 'PGRST116') { // Not found
+            if (campaignError.code === 'PGRST116') {
                 return res.status(404).json({
                     success: false,
                     message: 'Campaign not found'
@@ -429,19 +677,20 @@ const getCampaignDetails = async (req: Request, res: Response): Promise<any> => 
             });
         }
 
-        // Only return approved campaigns to non-owners, unless user is admin or owner
-        const userId = (req as any).user?.id;
-        const isOwner = campaign.user_id === userId;
-        const isAdmin = (req as any).user?.role === 'admin';
+        // 🔥 Check deadline
+        const now = new Date();
+        if (campaign.deadline && new Date(campaign.deadline) <= now && campaign.status !== 'closed') {
+            await supabase
+                .from('hope_campaigns')
+                .update({ status: 'closed' })
+                .eq('id', campaign.id);
 
-        if (!campaign.is_approved && !isOwner && !isAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: 'Campaign not available'
-            });
+            campaign.status = 'closed';
+            if (campaign.campaign_type === 'auction_donation') {
+                await transferProductToWinner(campaign.id);
+            }
         }
 
-        // If this is an auction campaign with an offer_product_id, get the full product details
         let offeredProduct = null;
         if (campaign.campaign_type === 'auction_donation' && campaign.offer_product_id) {
             const { data: product, error: productError } = await supabase
@@ -453,49 +702,31 @@ const getCampaignDetails = async (req: Request, res: Response): Promise<any> => 
                 .eq('id', campaign.offer_product_id)
                 .single();
 
-            if (productError) {
-                console.error('Error fetching product details:', productError);
-                // Don't fail the whole request if product fetch fails, just log it
-            } else {
+            if (!productError) {
                 offeredProduct = product;
             }
         }
 
-        // Get donation and bid statistics
-        let totalDonations = 0;
         let totalBids = 0;
         let highestBid = 0;
 
-        if (campaign.campaign_type === 'simple_donation') {
-            // Get total donations for simple donation campaigns
-            const { data: donations, error: donationsError } = await supabase
-                .from('campaign_donations')
-                .select('amount')
-                .eq('campaign_id', id)
-                .eq('payment_status', 'completed');
-
-            if (!donationsError && donations) {
-                totalDonations = donations.reduce((sum, donation) => sum + (donation.amount || 0), 0);
-            }
-        } else if (campaign.campaign_type === 'auction_donation') {
-            // Get bid statistics for auction campaigns
+        if (campaign.campaign_type === 'auction_donation') {
             const { data: bids, error: bidsError } = await supabase
                 .from('campaign_bids')
-                .select('amount')
+                .select('amount, currency')
                 .eq('campaign_id', id)
-                .order('amount', { ascending: false });
+                .order('created_at', { ascending: false });
 
-            if (!bidsError && bids && bids.length > 0) {
+            if (!bidsError && bids?.length > 0) {
                 totalBids = bids.length;
-                highestBid = bids[0].amount;
+                const bidsInAB = bids.map(bid => bid.currency === 'AC' ? bid.amount / 2 : bid.amount);
+                highestBid = Math.max(...bidsInAB);
             }
         }
 
-        // Prepare the response with all the additional data
         const responseData = {
             ...campaign,
             offered_product: offeredProduct,
-            total_donations: totalDonations,
             total_bids: totalBids,
             highest_bid: highestBid
         };
@@ -574,7 +805,8 @@ const updateCampaign = async (req: Request, res: Response): Promise<any> => {
             verification,
             description,
             matchChallenges,
-            offeredProduct
+            offeredProduct,
+            acceptedCurrencies
         } = req.body as CampaignFormValues;
 
         if (!userId) {
@@ -618,8 +850,8 @@ const updateCampaign = async (req: Request, res: Response): Promise<any> => {
             });
         }
 
-        if ((existingCampaign.campaign_type === 'auction_donation' || 
-             (existingCampaign.campaign_type === 'simple_donation' && existingCampaign.goal_type === 'open-ended')) &&
+        if ((existingCampaign.campaign_type === 'auction_donation' ||
+            (existingCampaign.campaign_type === 'simple_donation' && existingCampaign.goal_type === 'open-ended')) &&
             endDate && new Date(endDate) <= new Date()) {
             return res.status(400).json({
                 success: false,
@@ -631,6 +863,14 @@ const updateCampaign = async (req: Request, res: Response): Promise<any> => {
             return res.status(400).json({
                 success: false,
                 message: 'Please select a product to offer for auction'
+            });
+        }
+
+        // Validate accepted currencies
+        if (acceptedCurrencies && (!Array.isArray(acceptedCurrencies) || acceptedCurrencies.length === 0)) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one currency must be accepted'
             });
         }
 
@@ -647,12 +887,13 @@ const updateCampaign = async (req: Request, res: Response): Promise<any> => {
             description,
             match_challenges: matchChallenges,
             offer_product_id: offeredProduct?.id || null,
+            accepted_currencies: acceptedCurrencies // Add this line
         };
 
         if (existingCampaign.is_approved) {
-            const restrictedFields = ['goal_type', 'goal_amount', 'base_amount', 'campaign_type', 'offer_product_id'];
+            const restrictedFields = ['goal_type', 'goal_amount', 'base_amount', 'campaign_type', 'offer_product_id', 'accepted_currencies']; // Add accepted_currencies to restricted fields
             restrictedFields.forEach(field => delete (updateData as any)[field]);
-            
+
             if (goalType && goalType !== existingCampaign.goal_type) {
                 return res.status(400).json({
                     success: false,
@@ -679,8 +920,8 @@ const updateCampaign = async (req: Request, res: Response): Promise<any> => {
 
         res.status(200).json({
             success: true,
-            message: existingCampaign.is_approved 
-                ? 'Campaign updated successfully (limited changes allowed for approved campaigns)' 
+            message: existingCampaign.is_approved
+                ? 'Campaign updated successfully (limited changes allowed for approved campaigns)'
                 : 'Campaign updated successfully',
             data: campaign
         });
@@ -964,6 +1205,913 @@ const adminCloseCampaign = async (req: Request, res: Response): Promise<any> => 
     }
 };
 
+const getCampaignBids = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { campaign_id } = req.params;
+        const { limit = 50, offset = 0, sort_by = 'created_at', sort_order = 'desc' } = req.query;
+
+        const { data: campaign, error: campaignError } = await supabase
+            .from('hope_campaigns')
+            .select('id, campaign_type')
+            .eq('id', campaign_id)
+            .single();
+
+        if (campaignError || !campaign) {
+            return res.status(404).json({
+                success: false,
+                message: 'Campaign not found'
+            });
+        }
+
+        if (campaign.campaign_type !== 'auction_donation') {
+            return res.status(400).json({
+                success: false,
+                message: 'This campaign is not an auction'
+            });
+        }
+
+        const { data: bids, error, count } = await supabase
+            .from('campaign_bids')
+            .select(`
+                *,
+                bidder:bidder_id (
+                    id,
+                    first_name,
+                    last_name,
+                    avatar_url
+                )
+            `, { count: 'exact' })
+            .eq('campaign_id', campaign_id)
+            .order(sort_by as string, { ascending: sort_order === 'asc' })
+            .range(offset as number, (offset as number) + (limit as number) - 1);
+
+        if (error) {
+            console.error('Database error:', error);
+            throw new Error(`Database error: ${error.message}`);
+        }
+
+        res.status(200).json({
+            success: true,
+            data: bids,
+            pagination: {
+                total: count,
+                limit: parseInt(limit as string),
+                offset: parseInt(offset as string)
+            }
+        });
+
+    } catch (error: any) {
+        console.error('Error fetching bids:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to fetch bids'
+        });
+    }
+};
+
+const getCampaignDonations = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { campaign_id } = req.params;
+        const { limit = 50, offset = 0, sort_by = 'created_at', sort_order = 'desc' } = req.query;
+
+        const { data: campaign, error: campaignError } = await supabase
+            .from('hope_campaigns')
+            .select('id')
+            .eq('id', campaign_id)
+            .single();
+
+        if (campaignError || !campaign) {
+            return res.status(404).json({
+                success: false,
+                message: 'Campaign not found'
+            });
+        }
+
+        const { data: donations, error, count } = await supabase
+            .from('campaign_donations')
+            .select(`
+                *,
+                donor:donor_id (
+                    id,
+                    first_name,
+                    last_name,
+                    avatar_url
+                )
+            `, { count: 'exact' })
+            .eq('campaign_id', campaign_id)
+            .order(sort_by as string, { ascending: sort_order === 'asc' })
+            .range(offset as number, (offset as number) + (limit as number) - 1);
+
+        if (error) {
+            console.error('Database error:', error);
+            throw new Error(`Database error: ${error.message}`);
+        }
+
+        res.status(200).json({
+            success: true,
+            data: donations,
+            pagination: {
+                total: count,
+                limit: parseInt(limit as string),
+                offset: parseInt(offset as string)
+            }
+        });
+
+    } catch (error: any) {
+        console.error('Error fetching donations:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to fetch donations'
+        });
+    }
+};
+
+const checkAndDeductAnamCoins = async (userId: string, amount: string, currency: string) => {
+    try {
+        const { data: anamCoins, error: coinsError } = await supabase
+            .from('anamcoins')
+            .select('available_coins,spent_coins')
+            .eq('user_id', userId)
+            .single();
+
+        if (coinsError || !anamCoins) {
+            throw new Error('Failed to fetch user coin balance');
+        }
+
+        let coinsRequired;
+        let coinsToDeduct;
+
+        if (currency === 'AC') {
+            coinsRequired = amount;
+            coinsToDeduct = amount;
+        } else if (currency === 'AB') {
+            coinsRequired = Math.ceil(Number(amount) / 2);
+            coinsToDeduct = Number(amount) / 2;
+        } else {
+            throw new Error('Invalid currency');
+        }
+
+        // Check if user has sufficient coins
+        if (anamCoins.available_coins < coinsRequired) {
+            return {
+                success: false,
+                message: `Insufficient anamcoins balance. Required: ${coinsRequired} AC, Available: ${anamCoins.available_coins} AC`
+            };
+        }
+
+        // Deduct coins from user's balance
+        const { error: updateError } = await supabase
+            .from('anamcoins')
+            .update({
+                available_coins: Number(anamCoins.available_coins) - Number(coinsToDeduct),
+                spent_coins: Number(anamCoins.spent_coins || 0) + Number(coinsToDeduct),
+                updated_at: new Date().toISOString()
+            })
+            .eq('user_id', userId);
+
+        if (updateError) {
+            throw new Error(`Failed to deduct coins: ${updateError.message}`);
+        }
+
+        return {
+            success: true,
+            deductedAmount: coinsToDeduct
+        };
+
+    } catch (error) {
+        console.error('Error in checkAndDeductAnamCoins:', error);
+        throw error;
+    }
+};
+
+const refundAnamCoins = async (userId: string, amount: string,) => {
+    try {
+        const { error: refundError } = await supabase
+            .rpc('refund_anam_coins', {
+                p_user_id: userId,
+                p_amount: amount
+            });
+
+        if (refundError) {
+            console.error('Failed to refund coins:', refundError);
+        }
+    } catch (error) {
+        console.error('Error in refundAnamCoins:', error);
+    }
+};
+
+// const createBid = async (req: Request, res: Response): Promise<any> => {
+//     try {
+//         const userId = (req as any).user?.id!;
+//         const { campaign_id, amount, currency } = req.body;
+
+//         if (!campaign_id || !amount || !currency) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Campaign ID, amount, and currency are required'
+//             });
+//         }
+
+//         if (!['AC', 'AB'].includes(currency)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Invalid currency. Only AC and AB are allowed'
+//             });
+//         }
+
+//         const { data: campaign, error: campaignError } = await supabase
+//             .from('hope_campaigns')
+//             .select('id, campaign_type, status, deadline, base_amount, highest_bid, accepted_currencies')
+//             .eq('id', campaign_id)
+//             .single();
+
+//         if (campaignError || !campaign) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Campaign not found'
+//             });
+//         }
+
+//         if (
+//             Array.isArray(campaign.accepted_currencies) &&
+//             !campaign.accepted_currencies.includes(currency)
+//         ) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `This campaign only accepts: ${campaign.accepted_currencies.join(', ')}`
+//             });
+//         }
+
+//         if (campaign.campaign_type !== 'auction_donation') {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'This campaign is not an auction'
+//             });
+//         }
+
+//         if (campaign.status !== 'active') {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Campaign is not active for bidding'
+//             });
+//         }
+
+//         if (campaign.deadline && new Date(campaign.deadline) < new Date()) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Auction has ended'
+//             });
+//         }
+
+//         const { data: currentBids, error: bidsError } = await supabase
+//             .from('campaign_bids')
+//             .select('amount, currency')
+//             .eq('campaign_id', campaign_id)
+//             .order('amount', { ascending: false })
+//             .limit(1);
+
+//         if (bidsError) {
+//             console.error('Error fetching current bids:', bidsError);
+//             throw new Error('Failed to validate bid amount');
+//         }
+
+//         const minBid = campaign.base_amount || 0;
+//         const currentHighestBid = currentBids?.[0];
+//         const currentHighestAmount = currentHighestBid?.amount || 0;
+//         const currentHighestCurrency = currentHighestBid?.currency || 'AC';
+//         let currentHighestAC;
+//         if (currentHighestCurrency === 'AC') {
+//             currentHighestAC = currentHighestAmount;
+//         } else {
+//             currentHighestAC = currentHighestAmount / 2;
+//         }
+
+//         if (amount < minBid) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Bid amount must be at least ${minBid} ${currency}`
+//             });
+//         }
+
+//         if (currentHighestBid) {
+//             let equivalentAmount;
+//             if (currency === 'AC') {
+//                 equivalentAmount = Number(amount);
+//             } else {
+//                 equivalentAmount = Number(amount) / 2;
+//             }
+
+//             if (equivalentAmount <= currentHighestAC) {
+//                 let minRequiredBid;
+//                 if (currency === 'AC') {
+//                     minRequiredBid = currentHighestAC + 0.01;
+//                 } else {
+//                     minRequiredBid = (currentHighestAC * 2) + 0.01;
+//                 }
+
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: `Bid amount must be higher than current highest bid. Minimum required: ${minRequiredBid.toFixed(2)} ${currency}`
+//                 });
+//             }
+//         } else {
+//             if (amount <= minBid) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: `Bid amount must be higher than minimum bid of ${minBid} ${currency}`
+//                 });
+//             }
+//         }
+
+//         const coinCheck = await checkAndDeductAnamCoins(userId, amount, currency);
+//         if (!coinCheck.success) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: coinCheck.message
+//             });
+//         }
+
+//         // Create bid with currency
+//         const { data: bid, error: bidError } = await supabase
+//             .rpc('create_campaign_bid', {
+//                 p_campaign_id: campaign_id,
+//                 p_bidder_id: userId,
+//                 p_amount: amount,
+//                 p_currency: currency
+//             });
+
+//         if (bidError) {
+//             console.error('Database error:', bidError);
+//             await refundAnamCoins(userId, String(coinCheck.deductedAmount));
+
+//             throw new Error(`Database error: ${bidError.message}`);
+//         }
+
+//         res.status(201).json({
+//             success: true,
+//             message: 'Bid placed successfully',
+//             data: bid
+//         });
+
+//     } catch (error: any) {
+//         console.error('Error creating bid:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Failed to place bid'
+//         });
+//     }
+// };
+
+const createBid = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const userId = (req as any).user?.id!;
+        const { campaign_id, amount, currency } = req.body;
+
+        if (!campaign_id || !amount || !currency) {
+            return res.status(400).json({
+                success: false,
+                message: 'Campaign ID, amount, and currency are required'
+            });
+        }
+
+        if (!['AC', 'AB'].includes(currency)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid currency. Only AC and AB are allowed'
+            });
+        }
+
+        const { data: campaign, error: campaignError } = await supabase
+            .from('hope_campaigns')
+            .select('id, campaign_type, status, deadline, base_amount, highest_bid, accepted_currencies')
+            .eq('id', campaign_id)
+            .single();
+
+        if (campaignError || !campaign) {
+            return res.status(404).json({
+                success: false,
+                message: 'Campaign not found'
+            });
+        }
+
+        if (campaign.deadline && new Date(campaign.deadline) < new Date()) {
+            if (campaign.status === 'active') {
+                await supabase
+                    .from('hope_campaigns')
+                    .update({ status: 'closed', updated_at: new Date().toISOString() })
+                    .eq('id', campaign.id);
+
+
+                await transferProductToWinner(campaign.id);
+            }
+            return res.status(400).json({
+                success: false,
+                message: 'Auction has ended'
+            });
+        }
+
+        if (
+            Array.isArray(campaign.accepted_currencies) &&
+            !campaign.accepted_currencies.includes(currency)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: `This campaign only accepts: ${campaign.accepted_currencies.join(', ')}`
+            });
+        }
+
+        if (campaign.campaign_type !== 'auction_donation') {
+            return res.status(400).json({
+                success: false,
+                message: 'This campaign is not an auction'
+            });
+        }
+
+        if (campaign.status !== 'active') {
+            return res.status(400).json({
+                success: false,
+                message: 'Campaign is not active for bidding'
+            });
+        }
+
+        // fetch current highest bid
+        const { data: currentBids, error: bidsError } = await supabase
+            .from('campaign_bids')
+            .select('amount, currency')
+            .eq('campaign_id', campaign_id)
+            .order('amount', { ascending: false })
+            .limit(1);
+
+        if (bidsError) {
+            console.error('Error fetching current bids:', bidsError);
+            throw new Error('Failed to validate bid amount');
+        }
+
+        const minBid = campaign.base_amount || 0;
+        const currentHighestBid = currentBids?.[0];
+        const currentHighestAmount = currentHighestBid?.amount || 0;
+        const currentHighestCurrency = currentHighestBid?.currency || 'AC';
+
+        let currentHighestAC;
+        if (currentHighestCurrency === 'AC') {
+            currentHighestAC = currentHighestAmount;
+        } else {
+            currentHighestAC = currentHighestAmount / 2;
+        }
+
+        // ✅ validate minimum bid
+        if (amount < minBid) {
+            return res.status(400).json({
+                success: false,
+                message: `Bid amount must be at least ${minBid} ${currency}`
+            });
+        }
+
+        if (currentHighestBid) {
+            let equivalentAmount = currency === 'AC' ? Number(amount) : Number(amount) / 2;
+
+            if (equivalentAmount <= currentHighestAC) {
+                let minRequiredBid;
+                if (currency === 'AC') {
+                    minRequiredBid = currentHighestAC + 0.01;
+                } else {
+                    minRequiredBid = (currentHighestAC * 2) + 0.01;
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    message: `Bid amount must be higher than current highest bid. Minimum required: ${minRequiredBid.toFixed(2)} ${currency}`
+                });
+            }
+        } else {
+            if (amount <= minBid) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Bid amount must be higher than minimum bid of ${minBid} ${currency}`
+                });
+            }
+        }
+
+        const coinCheck = await checkAndDeductAnamCoins(userId, amount, currency);
+        if (!coinCheck.success) {
+            return res.status(400).json({
+                success: false,
+                message: coinCheck.message
+            });
+        }
+
+        // Create bid
+        const { data: bid, error: bidError } = await supabase
+            .rpc('create_campaign_bid', {
+                p_campaign_id: campaign_id,
+                p_bidder_id: userId,
+                p_amount: amount,
+                p_currency: currency
+            });
+
+        if (bidError) {
+            console.error('Database error:', bidError);
+            await refundAnamCoins(userId, String(coinCheck.deductedAmount));
+            throw new Error(`Database error: ${bidError.message}`);
+        }
+
+        res.status(201).json({
+            success: true,
+            message: 'Bid placed successfully',
+            data: bid
+        });
+
+    } catch (error: any) {
+        console.error('Error creating bid:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to place bid'
+        });
+    }
+};
+
+const createDonation = async (req: Request, res: Response): Promise<any> => {
+    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    try {
+        const userId = (req as any).user?.id;
+        const { campaign_id, amount, currency, anonymously_donated = false } = req.body;
+
+        if (!campaign_id || !amount || !currency) {
+            return res.status(400).json({
+                success: false,
+                message: 'Campaign ID, amount, and currency are required'
+            });
+        }
+
+        if (!['AC', 'AB'].includes(currency)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid currency. Only AC and AB are allowed'
+            });
+        }
+
+        if (amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Donation amount must be positive'
+            });
+        }
+
+        const { data: campaign, error: campaignError } = await supabase
+            .from('hope_campaigns')
+            .select('id, campaign_type, goal_type, goal_amount, total_donations, status, deadline, accepted_currencies, title, user_id')
+            .eq('id', campaign_id)
+            .single();
+
+        if (campaignError || !campaign) {
+            console.error(`[${transactionId}] Campaign fetch error:`, campaignError);
+            return res.status(404).json({
+                success: false,
+                message: 'Campaign not found'
+            });
+        }
+
+        if (campaign.deadline && new Date(campaign.deadline) < new Date()) {
+            console.log(`[${transactionId}] Campaign deadline passed, closing campaign: ${campaign_id}`);
+
+            const { error: updateError } = await supabase
+                .from('hope_campaigns')
+                .update({
+                    status: 'closed',
+                    closed_reason: 'Campaign deadline has passed',
+                    closed_at: new Date().toISOString()
+                })
+                .eq('id', campaign_id);
+
+            if (updateError) {
+                console.error(`[${transactionId}] Failed to close campaign after deadline:`, updateError);
+            }
+
+            return res.status(400).json({
+                success: false,
+                message: 'Donation declined. Campaign deadline has passed and it is now closed.'
+            });
+        }
+
+        if (campaign.campaign_type !== 'simple_donation') {
+            return res.status(400).json({
+                success: false,
+                message: 'This campaign is not a simple donation campaign'
+            });
+        }
+
+        if (
+            Array.isArray(campaign.accepted_currencies) &&
+            !campaign.accepted_currencies.includes(currency)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: `This campaign only accepts: ${campaign.accepted_currencies.join(', ')}`
+            });
+        }
+
+        if (campaign.status !== 'active') {
+            return res.status(400).json({
+                success: false,
+                message: `Campaign is not active for donations. Current status: ${campaign.status}`
+            });
+        }
+
+        const { data: existingDonation } = await supabase
+            .from('campaign_donations')
+            .select('id')
+            .eq('campaign_id', campaign_id)
+            .eq('donor_id', userId)
+            .single();
+
+        if (existingDonation) {
+            return res.status(400).json({
+                success: false,
+                message: 'You have already donated to this campaign'
+            });
+        }
+
+        const newTotalDonations = campaign.total_donations + amount;
+        const willReachGoal = campaign.goal_type === 'fixed' &&
+            campaign.goal_amount &&
+            newTotalDonations >= campaign.goal_amount;
+
+        const { data: donation, error: donationError } = await supabase.rpc('create_campaign_donation', {
+            p_campaign_id: campaign_id,
+            p_donor_id: userId,
+            p_amount: amount,
+            p_currency: currency,
+            p_anonymously_donated: anonymously_donated
+        });
+
+        if (donationError) {
+            console.error(`[${transactionId}] Donation creation error:`, donationError);
+            throw new Error(`Database error: ${donationError.message}`);
+        }
+
+        const { error: updateDonationError } = await supabase
+            .from('hope_campaigns')
+            .update({ total_donations: newTotalDonations })
+            .eq('id', campaign_id);
+
+        if (updateDonationError) {
+            console.error(`[${transactionId}] Failed to update campaign donations:`, updateDonationError);
+            throw new Error(`Failed to update campaign donations: ${updateDonationError.message}`);
+        }
+
+        if (willReachGoal) {
+            console.log(`[${transactionId}] Campaign goal reached, closing campaign: ${campaign_id}`);
+
+            const { error: closeError } = await supabase
+                .from('hope_campaigns')
+                .update({
+                    status: 'closed',
+                    closed_reason: 'Campaign goal has been reached',
+                    closed_at: new Date().toISOString()
+                })
+                .eq('id', campaign_id);
+
+            if (closeError) {
+                console.error(`[${transactionId}] Failed to close campaign after goal reached:`, closeError);
+            } else {
+                console.log(`[${transactionId}] Campaign ${campaign_id} closed successfully after reaching goal`);
+                try {
+                    await supabase
+                        .from('notifications')
+                        .insert({
+                            user_id: campaign.user_id,
+                            title: 'Campaign Goal Reached!',
+                            message: `Your campaign "${campaign.title}" has reached its funding goal and has been closed.`,
+                            type: 'campaign_success',
+                            related_id: campaign_id
+                        });
+                } catch (notificationError) {
+                    console.error(`[${transactionId}] Failed to send notification:`, notificationError);
+                }
+            }
+        }
+
+        res.status(201).json({
+            success: true,
+            message: willReachGoal
+                ? 'Donation created successfully and campaign goal reached! Campaign is now closed.'
+                : 'Donation created successfully',
+            data: {
+                ...donation,
+                campaign_closed: willReachGoal,
+                goal_reached: willReachGoal
+            }
+        });
+
+    } catch (error: any) {
+        console.error(`[${transactionId}] Error creating donation:`, error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to create donation',
+            transactionId
+        });
+    }
+};
+
+const getOverallTotals = async (req: Request, res: Response): Promise<any> => {
+    try {
+        // Get all donations
+        const { data: allDonations, error: donationsError } = await supabase
+            .from('campaign_donations')
+            .select('amount, currency, payment_status');
+
+        if (donationsError) {
+            console.error('Error fetching donations:', donationsError);
+            throw new Error('Failed to fetch donations data');
+        }
+
+        // Get all bids
+        const { data: allBids, error: bidsError } = await supabase
+            .from('campaign_bids')
+            .select('amount, currency');
+
+        if (bidsError) {
+            console.error('Error fetching bids:', bidsError);
+            throw new Error('Failed to fetch bids data');
+        }
+
+        // Calculate overall donation totals
+        let totalDonationsAC = 0;
+        let totalSuccessfulDonationsAC = 0;
+
+        if (allDonations) {
+            allDonations.forEach(donation => {
+                const amountInAC = donation.currency === 'AC'
+                    ? Number(donation.amount)
+                    : Number(donation.amount) / 2;
+
+                totalDonationsAC += amountInAC;
+
+                if (donation.payment_status === 'success' || donation.payment_status === 'completed') {
+                    totalSuccessfulDonationsAC += amountInAC;
+                }
+            });
+        }
+
+        // Calculate overall bid totals
+        let totalBidsAC = 0;
+
+        if (allBids) {
+            allBids.forEach(bid => {
+                const amountInAC = bid.currency === 'AC'
+                    ? Number(bid.amount)
+                    : Number(bid.amount) / 2;
+
+                totalBidsAC += amountInAC;
+            });
+        }
+
+        // Overall totals (donations + bids)
+        const overallTotalAC = totalDonationsAC + totalBidsAC;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                donations: {
+                    total_ac: parseFloat(totalDonationsAC.toFixed(2)),
+                    successful_total_ac: parseFloat(totalSuccessfulDonationsAC.toFixed(2)),
+                    currency: 'AC',
+                    count: allDonations?.length || 0
+                },
+                bids: {
+                    total_ac: parseFloat(totalBidsAC.toFixed(2)),
+                    currency: 'AC',
+                    count: allBids?.length || 0
+                },
+                overall: {
+                    total_ac: parseFloat(overallTotalAC.toFixed(2)),
+                    currency: 'AC',
+                    total_transactions: (allDonations?.length || 0) + (allBids?.length || 0)
+                }
+            }
+        });
+
+    } catch (error: any) {
+        console.error('Error getting overall totals:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to get overall totals'
+        });
+    }
+};
+
+
+const claimDonations = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const campaignId = req.params.id;
+        const userId = req.user?.id!;
+
+        if (!campaignId) {
+            return res.status(400).json({ success: false, message: 'Campaign ID is required' });
+        }
+
+        const { data: campaign, error: campaignError } = await supabase
+            .from('hope_campaigns')
+            .select('*')
+            .eq('id', campaignId)
+            .single();
+
+        if (campaignError || !campaign) {
+            return res.status(404).json({ success: false, message: 'Campaign not found' });
+        }
+
+        if (campaign.status !== 'closed') {
+            return res.status(400).json({ success: false, message: 'Campaign is not closed' });
+        }
+
+        if (campaign.user_id !== userId) {
+            return res.status(403).json({ success: false, message: 'Only campaign creator can claim funds' });
+        }
+
+        if (campaign.is_claimed || campaign.claimed_at) {
+            return res.status(400).json({ success: false, message: 'Funds already claimed' });
+        }
+
+        let finalAcAmount = 0;
+
+        if (campaign.campaign_type === 'auction_donation') {
+            finalAcAmount = campaign.highest_bid || 0;
+        } else {
+            const totalAcAmount = campaign.total_donations_ac || 0;
+            const totalAbAmount = campaign.total_donations_ab || 0;
+            finalAcAmount = totalAcAmount + (totalAbAmount / 2);
+        }
+
+        if (finalAcAmount <= 0) {
+            return res.status(400).json({ success: false, message: 'No funds to claim' });
+        }
+
+        const { data: coins, error: coinsError } = await supabase
+            .from('anamcoins')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+
+        if (coins) {
+            const { error: updateError } = await supabase
+                .from('anamcoins')
+                .update({
+                    total_coins: coins.total_coins + finalAcAmount,
+                    available_coins: coins.available_coins + finalAcAmount,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+
+            if (updateError) {
+                throw updateError;
+            }
+        } else {
+            const { error: insertError } = await supabase
+                .from('anamcoins')
+                .insert({
+                    user_id: userId,
+                    total_coins: finalAcAmount,
+                    available_coins: finalAcAmount,
+                    spent_coins: 0,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                });
+
+            if (insertError) {
+                throw insertError;
+            }
+        }
+
+        const { error: updateCampaignError } = await supabase
+            .from('hope_campaigns')
+            .update({
+                claimed_at: new Date().toISOString(),
+                is_claimed: true,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', campaignId);
+
+        if (updateCampaignError) {
+            throw updateCampaignError;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Funds claimed successfully',
+            amount: finalAcAmount,
+            currency: 'AC'
+        });
+
+    } catch (error) {
+        console.error('Error claiming funds:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+}
+
 export {
     createCampaign,
     generateCampaignDesc,
@@ -977,5 +2125,13 @@ export {
     activateCampaign,
     closeCampaign,
     adminCloseCampaign,
-    getAllCampaigns
+    getAllCampaigns,
+
+    // donations and bidding
+    getCampaignBids,
+    getCampaignDonations,
+    createBid,
+    createDonation,
+    getOverallTotals,
+    claimDonations
 };
