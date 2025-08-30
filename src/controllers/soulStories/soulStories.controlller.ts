@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { soulStoriesServices } from '../../services/soulStories.services';
-
+import 'dotenv/config';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Add type for story data
 interface StoryData {
@@ -15,6 +16,8 @@ interface StoryData {
   created_at: string;
   monetization_type: string;
 }
+
+// Remove the GeminiService class and geminiService initialization
 
 export const createStory = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -38,7 +41,8 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       price = 0,
       free_pages = 0,
       free_episodes = 0,
-      remix = false
+      remix = false,
+      co_authors // OPTIONAL: Can be undefined, null, or empty array
     } = req.body;
 
     // Basic validation
@@ -129,7 +133,9 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       free_episodes,
       status: 'draft',
       content_type: content_structure,
-      remix
+      remix,
+      // ONLY add co_authors if it exists and has values
+      ...(co_authors && co_authors.length > 0 && { co_authors })
     };
 
     console.log(storyData, "storyData");
@@ -366,17 +372,24 @@ export const searchAllContent = async (req: Request, res: Response) => {
       return;
     }
 
-    if (!query || !category) {
+    if (!query) {
       res.status(400).json({ 
         success: false,
-        message: 'Search query and category are required' 
+        message: 'Query is required' 
       });
       return;
     }
 
-    const searchResults = await soulStoriesServices.searchAllContent(query as string, category as string, userId as string);
+    // ✅ Check if query is a UUID (story ID)
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
+
+    const searchResults = await soulStoriesServices.searchAllContent(
+      query as string, 
+      category as string, 
+      userId as string,
+      isUUID ? query : undefined // ✅ Pass as storyId if it's a UUID
+    );
     
-    // Just return the searchResults directly since it already has success: true
     res.status(200).json(searchResults);
     
   } catch (error) {
@@ -923,6 +936,445 @@ export const getStoryReports = async (req: Request, res: Response): Promise<void
       success: false, 
       error: 'Internal server error',
       message: 'Failed to fetch reports'
+    });
+  }
+};
+
+export const getUserFriends = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized - User ID not found in token' });
+      return;
+    }
+
+    const result = await soulStoriesServices.getUserFriends(userId);
+    res.status(200).json(result);
+
+  } catch (err) {
+    console.error('Error in getUserFriends controller:', err);
+    res.status(500).json({ success: false, error: 'Something went wrong.' });
+  }
+};
+
+// Add this new endpoint for AI thumbnail suggestions
+export const generateThumbnailSuggestions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    const { content, suggestionCount = 3 } = req.body;
+
+    if (!content?.trim()) {
+      res.status(400).json({
+        success: false,
+        message: 'Content is required for generating suggestions'
+      });
+      return;
+    }
+
+    const words = content.trim().split(/\s+/).filter((word: string) => word.length > 0);
+    if (words.length < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Content should be at least 1 word long for meaningful suggestions'
+      });
+      return;
+    }
+
+    if (suggestionCount > 5 || suggestionCount < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Suggestion count should be between 1 and 5'
+      });
+      return;
+    }
+
+    const suggestions = await soulStoriesServices.generateMultipleSuggestions(
+      content, 
+      Math.min(suggestionCount, 3)
+    );
+
+    if (suggestions.length === 0) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate any suggestions. Please try again.'
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Thumbnail suggestions generated successfully',
+      data: {
+        suggestions,
+        generatedAt: new Date().toISOString(),
+        userId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating thumbnail suggestions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while generating suggestions',
+      error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
+    });
+  }
+};
+
+// Add quick single suggestion endpoint for faster responses
+export const generateQuickSuggestion = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    const { content } = req.body;
+
+    if (!content?.trim() || content.length < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Content should be at least 1 character for quick suggestion'
+      });
+      return;
+    }
+
+    const suggestion = await soulStoriesServices.generateThumbnailSuggestions(content);
+
+    res.status(200).json({
+      success: true,
+      message: 'Quick suggestion generated successfully',
+      data: {
+        title: suggestion.title,
+        description: suggestion.description,  // Changed from coverIdea and summary
+        generatedAt: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating quick suggestion:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate quick suggestion',
+      error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
+    });
+  }
+};
+export const updateStory = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { story_id } = req.params;
+    const {
+      title,
+      description,
+      tags,
+      category,
+      story_type,
+      thumbnail_url,
+      asset_type,
+      asset_url,
+      episodes,
+      monetization_type,
+      price,
+      free_pages,
+      free_episodes,
+      remix,
+      co_authors,
+      status
+    } = req.body;
+
+    if (!story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    // ✅ Only validate fields that are provided
+    const updateData: any = {};
+
+    // Title validation (if provided)
+    if (title !== undefined) {
+      if (!title?.trim()) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Title cannot be empty if provided' 
+        });
+        return;
+      }
+      updateData.title = title.trim();
+    }
+
+    // Description validation (if provided)
+    if (description !== undefined) {
+      if (!description?.trim()) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Description cannot be empty if provided' 
+        });
+        return;
+      }
+      updateData.description = description.trim();
+    }
+
+    // Tags (if provided)
+    if (tags !== undefined) {
+      updateData.tags = tags;
+    }
+
+    // Category validation (if provided)
+    if (category !== undefined) {
+      if (!category?.trim()) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Category cannot be empty if provided' 
+        });
+        return;
+      }
+      updateData.category = category.trim();
+    }
+
+    // Story type validation (if provided)
+    if (story_type !== undefined) {
+      if (!story_type?.trim()) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Story type cannot be empty if provided' 
+        });
+        return;
+      }
+      updateData.story_type = story_type.trim();
+    }
+
+    // Thumbnail URL (if provided)
+    if (thumbnail_url !== undefined) {
+      updateData.thumbnail_url = thumbnail_url?.trim() || null;
+    }
+
+    // Asset validation (only if both asset_url and asset_type are provided)
+    if (asset_url !== undefined || asset_type !== undefined) {
+      if (asset_url !== undefined) {
+        updateData.asset_url = asset_url?.trim() || null;
+      }
+      if (asset_type !== undefined) {
+        updateData.asset_type = asset_type;
+      }
+      
+      // Validate asset type if provided
+      if (asset_type && !['video', 'document'].includes(asset_type)) {
+        res.status(400).json({
+          success: false,
+          message: 'asset_type must be either "video" or "document"'
+        });
+        return;
+      }
+    }
+
+    // Monetization validation (if provided)
+    if (monetization_type !== undefined) {
+      if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
+        res.status(400).json({
+          success: false,
+          message: 'monetization_type must be one of: free, premium, subscription'
+        });
+        return;
+      }
+      updateData.monetization_type = monetization_type;
+    }
+
+    // Price validation (if provided)
+    if (price !== undefined) {
+      if (monetization_type && monetization_type !== 'free' && price <= 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Price must be greater than 0 for premium content'
+        });
+        return;
+      }
+      updateData.price = price;
+    }
+
+    // Free pages/episodes (if provided)
+    if (free_pages !== undefined) {
+      if (free_pages < 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Free pages cannot be negative'
+        });
+        return;
+      }
+      updateData.free_pages = free_pages;
+    }
+
+    if (free_episodes !== undefined) {
+      if (free_episodes < 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Free episodes cannot be negative'
+        });
+        return;
+      }
+      updateData.free_episodes = free_episodes;
+    }
+
+    // Remix (if provided)
+    if (remix !== undefined) {
+      updateData.remix = remix;
+    }
+
+    // Co-authors (if provided)
+    if (co_authors !== undefined) {
+      if (co_authors && co_authors.length > 0) {
+        updateData.co_authors = co_authors;
+      } else {
+        updateData.co_authors = [];
+      }
+    }
+
+    // Status (if provided)
+    if (status !== undefined) {
+      updateData.status = status;
+    }
+
+    // Content type (if story_type changed)
+    if (updateData.story_type) {
+      updateData.content_type = updateData.story_type === 'episodes' ? 'episodes' : 'single_asset';
+    }
+
+    // Add updated timestamp
+    updateData.updated_at = new Date().toISOString();
+
+    console.log(updateData, "updateData (partial update)");
+    const result = await soulStoriesServices.updateStory(story_id, updateData, episodes, userId);
+    
+    res.status(200).json({ 
+      success: true,
+      message: 'Story updated successfully',
+      story: result.story 
+    });
+
+  } catch (error) {
+    console.error('Error updating story:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to update story'
+    });
+  }
+};
+
+export const getKeywordSuggestions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { query } = req.query;
+    
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      res.status(400).json({ suggestions: [] });
+      return;
+    }
+
+    const cleanQuery = query.trim();
+    
+    if (cleanQuery.length < 1 || cleanQuery.length > 100) {
+      res.status(400).json({
+        success: false,
+        message: 'Query length must be between 1 and 100 characters'
+      });
+      return;
+    }
+
+    const googleSuggestUrl = `http://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(cleanQuery)}`;
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    };
+
+    const response = await fetch(googleSuggestUrl, { headers });
+    
+    if (!response.ok) {
+      res.status(503).json({
+        success: false,
+        message: 'External service unavailable'
+      });
+      return;
+    }
+
+    const data = await response.json();
+    
+    let suggestions: string[] = [];
+    if (data && Array.isArray(data) && data.length >= 2 && Array.isArray(data[1])) {
+      suggestions = data[1].slice(0, 10);
+    }
+
+    res.status(200).json({ 
+      success: true,
+      suggestions, 
+      query: cleanQuery 
+    });
+
+  } catch (error) {
+    console.error('Keyword suggestion error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get keyword suggestions'
+    });
+  }
+};
+
+export const correctGrammar = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { text, maxChunkSize = 500 } = req.body;
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      res.status(400).json({
+        success: false,
+        message: 'Text is required for grammar correction'
+      });
+      return;
+    }
+
+    // Check minimum word requirement (at least 1 word)
+    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    if (words.length < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Text must contain at least 1 word for grammar correction'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.correctGrammar(text, maxChunkSize);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in correctGrammar controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to correct grammar'
     });
   }
 };

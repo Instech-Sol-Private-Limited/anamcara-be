@@ -2,6 +2,7 @@ import express from 'express';
 import { authMiddleware, optionalAuthMiddleware } from "../middleware/auth.middleware";
 import { 
     createStory, 
+    updateStory, 
     getAnalytics, 
     getStories,
     deleteeStory, 
@@ -24,7 +25,10 @@ import {
     getProductDetails,
     getAllUsersStoriesData,
     createStoryReport,
-    getStoryReports
+    getStoryReports,
+    getUserFriends,
+    generateThumbnailSuggestions,
+    generateQuickSuggestion,getKeywordSuggestions,correctGrammar
 } from "../controllers/soulStories/soulStories.controlller"
 
 const router = express.Router();
@@ -40,6 +44,7 @@ router.post("/search", authMiddleware, searchAllContent);
 router.get("/trending", optionalAuthMiddleware, getTrendingStories);
 router.get("/soul-stories-products", authMiddleware, getProductDetails);
 router.get("/all-users-stories-data", authMiddleware, getAllUsersStoriesData);
+router.put("/update-story/:story_id", authMiddleware, updateStory);
 
 // ======================= Soul Story Boosting ========================
 router.post("/boost-story", authMiddleware, boostSoulStory);
@@ -63,5 +68,25 @@ router.get("/get-story-with-reactions/:story_id", optionalAuthMiddleware, getSto
 // ======================= Soul Story Reports ========================
 router.post("/report-story", authMiddleware, createStoryReport);
 router.get("/story-reports/:storyId", authMiddleware, getStoryReports);
+
+// ======================= User Friends ========================
+router.get("/friends", authMiddleware, getUserFriends);
+
+// AI Thumbnail Suggestion Routes
+router.post('/suggestions/thumbnail', 
+  authMiddleware, 
+  generateThumbnailSuggestions
+);
+
+router.post('/suggestions/thumbnail/quick', 
+  authMiddleware, 
+  generateQuickSuggestion
+);
+// ... existing routes ...
+
+router.get('/keyword-suggestions',authMiddleware, getKeywordSuggestions);
+router.post('/correct-grammar',authMiddleware, correctGrammar);
+
+// ... existing routes ...
 
 export default router;
