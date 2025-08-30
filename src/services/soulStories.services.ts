@@ -2,6 +2,9 @@ import { supabase } from '../app';
 import { searchAllContent } from '../controllers/soulStories/soulStories.controlller';
 import 'dotenv/config';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import fs from 'fs';
+import path from 'path';
+import pdf from 'pdf-parse';
 
 // Gemini AI Service Class
 class GeminiService {
@@ -766,6 +769,7 @@ export const soulStoriesServices = {
         total_hugs: reactionCounts[story.id]?.total_hugs || 0,
         user_reaction: userReactions[story.id] || null,
         total_comments: commentCounts[story.id] || 0,
+        total_shares:story.total_shares || 0,
         total_views: story.total_views || 0  // ← This is already available from the story data
       }));
 
@@ -2356,6 +2360,7 @@ export const soulStoriesServices = {
           user_reaction: userReactions[story.id] || null,
           total_comments: commentCount,
           total_views: story.total_views || 0,
+          total_shares: story.total_shares || 0 ,
           total_engagement: totalEngagement,
           total_reactions: totalReactions
         };
@@ -3226,5 +3231,334 @@ Corrected text:`;
 
     return corrections;
   },
+  checkPdfQualityFromBucket: async (pdfUrl: string) => {
+    try {
+      console.log(`Checking PDF quality: ${pdfUrl}`);
+      
+      if (pdfUrl.startsWith('/uploads/pdfs/')) {
+        try {
+          const fullPath = path.join(__dirname, '../../', pdfUrl);
+          
+          if (!fs.existsSync(fullPath)) {
+            return { 
+              success: false, 
+              message: 'Local PDF file not found',
+              data: { 
+                url: pdfUrl,
+                storageType: 'local',
+                isValid: false,
+                fileType: 'pdf'
+              }
+            };
+          }
+          
+          const pdfBuffer = fs.readFileSync(fullPath);
+          const pdfData = await pdf(pdfBuffer);
+          const pdfText = pdfData.text;
+          
+          if (!pdfText || pdfText.trim().length === 0) {
+            return { 
+              success: false, 
+              message: 'PDF contains no readable text',
+              data: { 
+                url: pdfUrl,
+                storageType: 'local',
+                isValid: false,
+                fileType: 'pdf'
+              }
+            };
+          }
+          
+          const readabilityAnalysis = soulStoriesServices.analyzeReadability(pdfText);
+          const qualityScore = soulStoriesServices.calculateQualityScore(readabilityAnalysis);
+          const isHighQuality = qualityScore >= 70;
+          
+          // In checkPdfQualityFromBucket function, add this before returning:
+          console.log('PDF Analysis Results:', {
+            wordCount: readabilityAnalysis.wordCount,
+            sentenceCount: readabilityAnalysis.sentenceCount,
+            avgSentenceLength: readabilityAnalysis.avgSentenceLength,
+            avgWordLength: readabilityAnalysis.avgWordLength,
+            complexWords: readabilityAnalysis.complexWords,
+            readabilityScore: readabilityAnalysis.readabilityScore,
+            qualityIssues: readabilityAnalysis.qualityIssues,
+            finalScore: qualityScore
+          });
+          
+          return { 
+            success: true, 
+            message: isHighQuality ? 'PDF quality check passed' : 'PDF quality check failed - readability issues detected',
+            data: { 
+              url: pdfUrl,
+              storageType: 'local',
+              isValid: isHighQuality,
+              fileType: 'pdf',
+              contentAnalysis: readabilityAnalysis,
+              qualityScore: qualityScore,
+              isHighQuality: isHighQuality,
+              recommendations: readabilityAnalysis.suggestions
+            }
+          };
+          
+        } catch (fileError) {
+          console.error('Local file analysis error:', fileError);
+          return { 
+            success: false, 
+            message: 'Failed to analyze local PDF content',
+            data: { 
+              url: pdfUrl,
+              storageType: 'local',
+              isValid: false,
+              fileType: 'pdf'
+            }
+          };
+        }
+      }
+      
+      // Check if it's a valid HTTP URL (existing code)
+      if (pdfUrl.includes('http')) {
+        if (!pdfUrl.toLowerCase().endsWith('.pdf')) {
+          return { success: false, message: 'URL must point to a PDF file' };
+        }
+        
+        try {
+          // Download and analyze PDF content
+          const response = await fetch(pdfUrl);
+          if (!response.ok) {
+            return { success: false, message: 'Failed to download PDF from URL' };
+          }
+          
+          const pdfBuffer = await response.arrayBuffer();
+          const pdfText = new TextDecoder().decode(pdfBuffer);
+          
+          // Basic PDF validation
+          if (!pdfText.includes('/Page') && !pdfText.includes('PDF')) {
+            return { success: false, message: 'Invalid PDF content - file may be corrupted' };
+          }
+          
+          // Perform readability analysis
+          const readabilityAnalysis = soulStoriesServices.analyzeReadability(pdfText);
+          
+          // Quality assessment based on readability
+          const qualityScore = soulStoriesServices.calculateQualityScore(readabilityAnalysis);
+          const isHighQuality = qualityScore >= 70;
+          
+          return { 
+            success: true, 
+            message: isHighQuality ? 'PDF quality check passed' : 'PDF quality check failed - readability issues detected',
+            data: { 
+              url: pdfUrl,
+              storageType: 'external',
+              isValid: true,
+              fileType: 'pdf',
+              contentAnalysis: readabilityAnalysis,
+              qualityScore: qualityScore,
+              isHighQuality: isHighQuality,
+              recommendations: readabilityAnalysis.suggestions
+            }
+          };
+          
+        } catch (downloadError) {
+          console.error('PDF download error:', downloadError);
+          return { success: false, message: 'Failed to analyze PDF content' };
+        }
+      }
+
+      return { success: false, message: 'Invalid file path or URL format' };
+
+    } catch (error) {
+      console.error('PDF quality check error:', error);
+      return { success: false, message: 'Quality check failed' };
+    }
+  },
+  shareStory: async (userId: string, storyId: string, shareType: string = 'general') => {
+    try {
+      // Check if story exists
+      const { data: story, error: storyError } = await supabase
+        .from('soul_stories')
+        .select('id, title, total_shares')
+        .eq('id', storyId)
+        .single();
+
+      if (storyError || !story) {
+        return {
+          success: false,
+          message: 'Story not found'
+        };
+      }
+
+      // Increment share count
+      const newShareCount = (story.total_shares || 0) + 1;
+      
+      const { error: updateError } = await supabase
+        .from('soul_stories')
+        .update({ total_shares: newShareCount })
+        .eq('id', storyId);
+
+      if (updateError) {
+        return {
+          success: false,
+          message: 'Failed to update share count'
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Story shared successfully',
+        data: {
+          storyId: storyId,
+          storyTitle: story.title,
+          totalShares: newShareCount,
+          shareType: shareType,
+          sharedBy: userId
+        }
+      };
+
+    } catch (error) {
+      console.error('Error sharing story:', error);
+      return {
+        success: false,
+        message: 'Internal server error'
+      };
+    }
+  },
+  // Add readability analysis methods
+  analyzeReadability: (text: string) => {
+    try {
+      // Clean and prepare text
+      const cleanText = text.replace(/\s+/g, ' ').trim();
+      
+      if (!cleanText || cleanText.length < 50) {
+        return {
+          wordCount: 0,
+          sentenceCount: 0,
+          avgSentenceLength: 0,
+          avgWordLength: 0,
+          complexWords: 0,
+          readabilityScore: 0,
+          suggestions: ['Text too short for meaningful analysis'],
+          qualityIssues: ['Insufficient content for analysis']
+        };
+      }
+      
+      // Basic text analysis
+      const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      const words = cleanText.split(/\s+/).filter(w => w.length > 0);
+      
+      const wordCount = words.length;
+      const sentenceCount = sentences.length;
+      const avgSentenceLength = wordCount / sentenceCount;
+      const avgWordLength = words.reduce((sum, word) => sum + word.length, 0) / wordCount;
+      
+      // Count complex words (3+ syllables approximation)
+      const complexWords = words.filter(word => {
+        const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
+        if (cleanWord.length <= 3) return false;
+        
+        // Simple syllable counting heuristic
+        const vowels = cleanWord.match(/[aeiouy]+/g);
+        if (!vowels) return false;
+        
+        let syllableCount = vowels.length;
+        
+        // Adjust for silent 'e' at end
+        if (cleanWord.endsWith('e') && syllableCount > 1) syllableCount--;
+        
+        // Adjust for common suffixes
+        if (cleanWord.endsWith('tion') || cleanWord.endsWith('sion')) syllableCount++;
+        
+        return syllableCount >= 3;
+      }).length;
+      
+      // Calculate readability score (Flesch Reading Ease approximation)
+      const readabilityScore = Math.max(0, Math.min(100, 
+        206.835 - (1.015 * avgSentenceLength) - (84.6 * (complexWords / wordCount * 100))
+      ));
+      
+      // Generate suggestions
+      const suggestions = [];
+      if (avgSentenceLength > 20) {
+        suggestions.push('Consider breaking long sentences into shorter ones for better readability');
+      }
+      if (complexWords / wordCount > 0.15) {
+        suggestions.push('Reduce complex words to improve accessibility');
+      }
+      if (readabilityScore < 50) {
+        suggestions.push('Text may be difficult to read - consider simplifying vocabulary and sentence structure');
+      }
+      if (suggestions.length === 0) {
+        suggestions.push('Good readability overall!');
+      }
+      
+      // Detect quality issues
+      const qualityIssues = [];
+      if (cleanText.length < 200) {
+        qualityIssues.push('Content may be too brief for comprehensive analysis');
+      }
+      if (sentenceCount < 3) {
+        qualityIssues.push('Very few sentences detected - may indicate incomplete content');
+      }
+      if (avgWordLength > 6) {
+        qualityIssues.push('Average word length is high - may affect readability');
+      }
+      
+      return {
+        wordCount,
+        sentenceCount,
+        avgSentenceLength: Math.round(avgSentenceLength * 100) / 100,
+        avgWordLength: Math.round(avgWordLength * 100) / 100,
+        complexWords,
+        readabilityScore: Math.round(readabilityScore * 100) / 100,
+        suggestions,
+        qualityIssues
+      };
+      
+    } catch (error) {
+      console.error('Readability analysis error:', error);
+      return {
+        wordCount: 0,
+        sentenceCount: 0,
+        avgSentenceLength: 0,
+        avgWordLength: 0,
+        complexWords: 0,
+        readabilityScore: 0,
+        suggestions: ['Analysis failed'],
+        qualityIssues: ['Unable to analyze content']
+      };
+    }
+  },
+  calculateQualityScore: (analysis: any) => {
+    try {
+      let score = 100;
+      
+      // Deduct points for readability issues
+      if (analysis.readabilityScore < 30) score -= 15;
+      else if (analysis.readabilityScore < 50) score -= 10;
+      else if (analysis.readabilityScore < 70) score -= 5;
+      
+      // Deduct points for sentence length issues
+      if (analysis.avgSentenceLength > 25) score -= 10;
+      else if (analysis.avgSentenceLength > 20) score -= 5;
+      
+      // Deduct points for complex word usage
+      const complexWordPercentage = (analysis.complexWords / analysis.wordCount) * 100;
+      if (complexWordPercentage > 20) score -= 10;
+      else if (analysis.complexWords / analysis.wordCount > 0.15) score -= 5;
+      
+      // Deduct points for content length issues (more lenient)
+      if (analysis.wordCount < 50) score -= 15;
+      else if (analysis.wordCount < 100) score -= 10;
+      else if (analysis.wordCount < 200) score -= 5;
+      
+      // Deduct points for quality issues (reduced penalty)
+      score -= analysis.qualityIssues.length * 3;
+      
+      return Math.max(0, Math.min(100, score));
+      
+    } catch (error) {
+      console.error('Quality score calculation error:', error);
+      return 50;
+    }
+  }
 };
 
