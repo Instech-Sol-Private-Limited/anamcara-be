@@ -575,7 +575,7 @@ export const soulStoriesServices = {
         total_free_episodes: allStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0)
       };
 
-      // EXISTING: Stories table format (unchanged)
+      // EXISTING: Stories table format (updated to include thumbnail_url)
       const storiesTable = allStories
         .map(story => ({
           id: story.id,
@@ -590,7 +590,8 @@ export const soulStoriesServices = {
           monetization_type: story.monetization_type,
           is_boosted: story.is_boosted || false,
           boost_type: story.boost_type || null,
-          boost_end_date: story.boost_end_date || null
+          boost_end_date: story.boost_end_date || null,
+          thumbnail_url: story.thumbnail_url || null
         }))
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -3559,6 +3560,149 @@ Corrected text:`;
       console.error('Quality score calculation error:', error);
       return 50;
     }
-  }
+  },
+  purchaseAIToolAccess: async (userId: string, toolType: string, coinsRequired: number) => {
+    try {
+      const { data: userCoins, error: userError } = await supabase
+        .from('anamcoins')
+        .select('available_coins, spent_coins, total_coins')
+        .eq('user_id', userId)
+        .single();
+
+      if (userError || !userCoins) {
+        return { success: false, message: 'User coins account not found' };
+      }
+
+      if (userCoins.available_coins < coinsRequired) {
+        return { 
+          success: false, 
+          message: `Insufficient coins. Need ${coinsRequired}, have ${userCoins.available_coins}` 
+        };
+      }
+
+      const paidUntil = new Date();
+      paidUntil.setDate(paidUntil.getDate() + 7);
+
+      const { error: upsertError } = await supabase
+        .from('ai_tools_usage')
+        .upsert({
+          user_id: userId,
+          tool_type: toolType,
+          is_paid: true,
+          paid_until: paidUntil.toISOString(),
+          is_trial_active: false,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,tool_type'
+        });
+
+      if (upsertError) {
+        return { success: false, message: 'Failed to update tool access' };
+      }
+
+      const { error: coinUpdateError } = await supabase
+        .from('anamcoins')
+        .update({
+          available_coins: userCoins.available_coins - coinsRequired,
+          spent_coins: (userCoins.spent_coins || 0) + coinsRequired,
+          total_coins: userCoins.total_coins
+        })
+        .eq('user_id', userId);
+
+      if (coinUpdateError) {
+        return { success: false, message: 'Failed to update user coins' };
+      }
+
+      return { 
+        success: true, 
+        message: `Successfully purchased 7 days of access for ${toolType} for ${coinsRequired} coins` 
+      };
+    } catch (error) {
+      console.error('Error purchasing AI tool access:', error);
+      return { success: false, message: 'Error purchasing access' };
+    }
+  },
+
+  checkAIToolAccess: async (userId: string, toolType: string) => {
+    try {
+      const { data: usageData, error } = await supabase
+        .from('ai_tools_usage')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('tool_type', toolType)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      if (!usageData) {
+        return { 
+          canUse: false, 
+          message: 'Paid access required - no free trial available',
+          needsPurchase: true
+        };
+      }
+
+      const now = new Date();
+      const paidUntil = usageData.paid_until ? new Date(usageData.paid_until) : null;
+
+      if (usageData.is_paid && paidUntil && paidUntil > now) {
+        return {
+          canUse: true,
+          message: 'Paid access active',
+          paidUntil: usageData.paid_until,
+          usageCount: usageData.usage_count
+        };
+      }
+
+      return {
+        canUse: false,
+        message: 'Paid access required - no free trial available',
+        needsPurchase: true,
+        usageCount: usageData.usage_count
+      };
+    } catch (error) {
+      console.error('Error checking tool access:', error);
+      return { canUse: false, message: 'Error checking access' };
+    }
+  },
+
+  recordAIToolUsage: async (userId: string, toolType: string) => {
+    try {
+      // First get current usage count
+      const { data: currentUsage, error: fetchError } = await supabase
+        .from('ai_tools_usage')
+        .select('usage_count')
+        .eq('user_id', userId)
+        .eq('tool_type', toolType)
+        .single();
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      const newUsageCount = (currentUsage?.usage_count || 0) + 1;
+
+      const { error } = await supabase
+        .from('ai_tools_usage')
+        .update({
+          usage_count: newUsageCount,
+          last_used_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId)
+        .eq('tool_type', toolType);
+
+      if (error) {
+        throw error;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error recording tool usage:', error);
+      return false;
+    }
+  },
 };
 

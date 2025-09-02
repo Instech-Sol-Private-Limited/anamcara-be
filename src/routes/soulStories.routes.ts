@@ -30,7 +30,8 @@ import {
     generateThumbnailSuggestions,
     generateQuickSuggestion,getKeywordSuggestions,correctGrammar,
     uploadPdf,
-    shareStory
+    shareStory,
+    purchaseAIToolAccess
 } from "../controllers/soulStories/soulStories.controlller"
 
 
@@ -93,6 +94,7 @@ router.get('/keyword-suggestions',authMiddleware, getKeywordSuggestions);
 router.post('/correct-grammar',authMiddleware, correctGrammar);
 
 router.post('/share-story', authMiddleware, shareStory);
+router.post('/ai-tools/purchase', authMiddleware, purchaseAIToolAccess);
 
 // ... existing routes ...
 

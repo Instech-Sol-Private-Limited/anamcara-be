@@ -973,6 +973,17 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
       return;
     }
 
+    const accessStatus = await soulStoriesServices.checkAIToolAccess(userId, 'title_suggestion');
+
+    if (!accessStatus.canUse) {
+      res.status(403).json({
+        success: false,
+        message: accessStatus.message,
+        needsPurchase: true
+      });
+      return;
+    }
+
     const { content, suggestionCount = 3 } = req.body;
 
     if (!content?.trim()) {
@@ -1013,13 +1024,16 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
       return;
     }
 
+    await soulStoriesServices.recordAIToolUsage(userId, 'title_suggestion');
+
     res.status(200).json({
       success: true,
       message: 'Thumbnail suggestions generated successfully',
       data: {
         suggestions,
         generatedAt: new Date().toISOString(),
-        userId
+        userId,
+        usageCount: accessStatus.usageCount // Use usageCount from the service result
       }
     });
 
@@ -1344,9 +1358,19 @@ export const getKeywordSuggestions = async (req: Request, res: Response): Promis
 
 export const correctGrammar = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    // No access check - always free
     const { text, maxChunkSize = 500 } = req.body;
 
-    if (!text || typeof text !== 'string' || !text.trim()) {
+    if (!text?.trim()) {
       res.status(400).json({
         success: false,
         message: 'Text is required for grammar correction'
@@ -1354,30 +1378,26 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Check minimum word requirement (at least 1 word)
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-    if (words.length < 1) {
-      res.status(400).json({
-        success: false,
-        message: 'Text must contain at least 1 word for grammar correction'
-      });
-      return;
-    }
-
     const result = await soulStoriesServices.correctGrammar(text, maxChunkSize);
-    
+
     if (result.success) {
-      res.status(200).json(result);
+      res.status(200).json({
+        success: true,
+        message: 'Grammar correction completed successfully',
+        data: result.data
+      });
     } else {
-      res.status(400).json(result);
+      res.status(500).json({
+        success: false,
+        message: result.message || 'Failed to correct grammar'
+      });
     }
 
   } catch (error) {
     console.error('Error in correctGrammar controller:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error',
-      message: 'Failed to correct grammar'
+      message: 'Internal server error while correcting grammar'
     });
   }
 };
@@ -1553,6 +1573,50 @@ export const shareStory = async (req: any, res: any): Promise<void> => {
 
   } catch (error) {
     console.error('Error sharing story:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const purchaseAIToolAccess = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    const { coinsRequired } = req.body;
+    const toolType = req.body.toolType || req.body.type;
+
+    if (!toolType || !['title_suggestion','description_suggestion','tags_suggestion','grammar_correction'].includes(toolType)) {
+      res.status(400).json({ success: false, message: 'Invalid tool type' });
+      return;
+    }
+
+    if (typeof coinsRequired !== 'number' || coinsRequired <= 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid coins amount'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.purchaseAIToolAccess(userId, toolType, coinsRequired);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error purchasing AI tool access:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
