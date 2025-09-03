@@ -28,10 +28,15 @@ import {
     getStoryReports,
     getUserFriends,
     generateThumbnailSuggestions,
-    generateQuickSuggestion,getKeywordSuggestions,correctGrammar
+    generateQuickSuggestion,getKeywordSuggestions,correctGrammar,
+    uploadPdf,
+    shareStory,
+    purchaseAIToolAccess
 } from "../controllers/soulStories/soulStories.controlller"
 
+
 const router = express.Router();
+
 
 router.post("/create-story", authMiddleware, createStory);
 router.get("/analytics", authMiddleware, getAnalytics);
@@ -82,10 +87,14 @@ router.post('/suggestions/thumbnail/quick',
   authMiddleware, 
   generateQuickSuggestion
 );
-// ... existing routes ...
+
+router.post('/upload-pdf', authMiddleware, uploadPdf);
 
 router.get('/keyword-suggestions',authMiddleware, getKeywordSuggestions);
 router.post('/correct-grammar',authMiddleware, correctGrammar);
+
+router.post('/share-story', authMiddleware, shareStory);
+router.post('/ai-tools/purchase', authMiddleware, purchaseAIToolAccess);
 
 // ... existing routes ...
 

@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import { soulStoriesServices } from '../../services/soulStories.services';
 import 'dotenv/config';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 // Add type for story data
 interface StoryData {
@@ -970,6 +973,17 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
       return;
     }
 
+    const accessStatus = await soulStoriesServices.checkAIToolAccess(userId, 'title_suggestion');
+
+    if (!accessStatus.canUse) {
+      res.status(403).json({
+        success: false,
+        message: accessStatus.message,
+        needsPurchase: true
+      });
+      return;
+    }
+
     const { content, suggestionCount = 3 } = req.body;
 
     if (!content?.trim()) {
@@ -1010,13 +1024,16 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
       return;
     }
 
+    await soulStoriesServices.recordAIToolUsage(userId, 'title_suggestion');
+
     res.status(200).json({
       success: true,
       message: 'Thumbnail suggestions generated successfully',
       data: {
         suggestions,
         generatedAt: new Date().toISOString(),
-        userId
+        userId,
+        usageCount: accessStatus.usageCount // Use usageCount from the service result
       }
     });
 
@@ -1341,9 +1358,19 @@ export const getKeywordSuggestions = async (req: Request, res: Response): Promis
 
 export const correctGrammar = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    // No access check - always free
     const { text, maxChunkSize = 500 } = req.body;
 
-    if (!text || typeof text !== 'string' || !text.trim()) {
+    if (!text?.trim()) {
       res.status(400).json({
         success: false,
         message: 'Text is required for grammar correction'
@@ -1351,17 +1378,236 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Check minimum word requirement (at least 1 word)
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-    if (words.length < 1) {
+    const result = await soulStoriesServices.correctGrammar(text, maxChunkSize);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: 'Grammar correction completed successfully',
+        data: result.data
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: result.message || 'Failed to correct grammar'
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in correctGrammar controller:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while correcting grammar'
+    });
+  }
+};
+
+export const checkPdfQuality = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { pdfUrl } = req.body;
+    
+    if (!pdfUrl) {
       res.status(400).json({
         success: false,
-        message: 'Text must contain at least 1 word for grammar correction'
+        message: 'PDF URL is required'
       });
       return;
     }
 
-    const result = await soulStoriesServices.correctGrammar(text, maxChunkSize);
+    const qualityCheck = await soulStoriesServices.checkPdfQualityFromBucket(pdfUrl);
+    
+    if (qualityCheck.success) {
+      res.json({
+        success: true,
+        message: qualityCheck.message,
+        data: qualityCheck.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: qualityCheck.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Error checking PDF quality:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check PDF quality'
+    });
+  }
+};
+
+// Configure multer
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../../uploads/pdfs');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'pdf-' + uniqueSuffix + '.pdf');
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024
+  }
+});
+
+export const uploadPdfMiddleware = upload.single('pdf');
+
+// Single function that handles both multer and business logic
+export const uploadPdf = async (req: any, res: any): Promise<void> => {
+  console.log('🔍 Upload PDF function called');
+  
+  // Use multer middleware directly in the function
+  upload.single('pdf')(req, res, async (err) => {
+    console.log('🔍 Multer callback executed');
+    
+    if (err) {
+      console.log('❌ Multer error:', err);
+      res.status(400).json({
+        success: false,
+        message: err.message
+      });
+      return;
+    }
+
+    try {
+      if (!req.file) {
+        console.log('❌ No file found in req.file');
+        res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
+        return;
+      }
+
+      console.log('✅ File found:', req.file);
+      const filePath = `/uploads/pdfs/${req.file.filename}`;
+      const fullFilePath = path.join(__dirname, '../../../uploads/pdfs', req.file.filename);
+      
+      // Add quality check here
+      const qualityCheck = await soulStoriesServices.checkPdfQualityFromBucket(filePath);
+      
+      // Clean up file BEFORE sending response
+      try {
+        if (fs.existsSync(fullFilePath)) {
+          fs.unlinkSync(fullFilePath);
+          console.log('🗑️ File cleaned up:', req.file.filename);
+        }
+      } catch (cleanupError) {
+        console.error('❌ Error cleaning up file:', cleanupError);
+      }
+
+      // Send response
+      res.json({
+        success: true,
+        message: 'File uploaded successfully',
+        data: {
+          filename: req.file.filename,
+          filePath: filePath,
+          fileSize: req.file.size,
+          qualityCheck: qualityCheck
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error in upload logic:', error);
+      
+      // Clean up file even on error
+      if (req.file) {
+        const fullFilePath = path.join(__dirname, '../../../uploads/pdfs', req.file.filename);
+        try {
+          if (fs.existsSync(fullFilePath)) {
+            fs.unlinkSync(fullFilePath);
+            console.log('🗑️ File cleaned up after error:', req.file.filename);
+          }
+        } catch (cleanupError) {
+          console.error('❌ Error cleaning up file after error:', cleanupError);
+        }
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'Failed to upload file'
+      });
+    }
+  });
+};
+
+export const shareStory = async (req: any, res: any): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
+      return;
+    }
+
+    const { storyId, shareType = 'general' } = req.body;
+
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.shareStory(userId, storyId, shareType);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error sharing story:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const purchaseAIToolAccess = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+      return;
+    }
+
+    const { coinsRequired } = req.body;
+    const toolType = req.body.toolType || req.body.type;
+
+    if (!toolType || !['title_suggestion','description_suggestion','tags_suggestion','grammar_correction'].includes(toolType)) {
+      res.status(400).json({ success: false, message: 'Invalid tool type' });
+      return;
+    }
+
+    if (typeof coinsRequired !== 'number' || coinsRequired <= 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid coins amount'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.purchaseAIToolAccess(userId, toolType, coinsRequired);
     
     if (result.success) {
       res.status(200).json(result);
@@ -1370,11 +1616,10 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
     }
 
   } catch (error) {
-    console.error('Error in correctGrammar controller:', error);
+    console.error('Error purchasing AI tool access:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error',
-      message: 'Failed to correct grammar'
+      message: 'Internal server error'
     });
   }
 };
