@@ -1,5 +1,5 @@
 import { supabase } from '../app';
-import { searchAllContent } from '../controllers/soulStories/soulStories.controlller';
+import { searchAllContent } from '../controllers/soulStories/soulStories.controller';
 import 'dotenv/config';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from 'fs';
