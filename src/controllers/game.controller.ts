@@ -13,22 +13,128 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const { friend_id, chat_id, game_settings } = req.body;
+    const { friend_id, invitee_id, chat_id, game_settings, message } = req.body;
 
-    if (!friend_id || !chat_id || !game_settings) {
+    // Determine the invitee - prioritize friend_id for backward compatibility
+    const targetUserId = friend_id || invitee_id;
+    
+    if (!targetUserId || !game_settings) {
       res.status(400).json({ 
         success: false, 
-        message: 'Missing required fields: friend_id, chat_id, game_settings' 
+        message: 'Missing required fields: friend_id/invitee_id, game_settings' 
       });
       return;
     }
 
-    const invitation = await gameService.createChessInvitation({
-      inviter_id: userId,
-      invitee_id: friend_id,
+    console.log('🎮 Chess invitation request:', {
+      friend_id,
+      invitee_id,
+      targetUserId,
       chat_id,
       game_settings
     });
+
+    // Check if target user exists
+    const { data: targetProfile, error: targetError } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, email, role')
+      .eq('id', targetUserId)
+      .single();
+
+    if (targetError || !targetProfile) {
+      console.error('❌ Error fetching target user:', targetError);
+      res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+      return;
+    }
+
+    console.log('✅ Target user found:', {
+      id: targetProfile.id,
+      name: `${targetProfile.first_name} ${targetProfile.last_name}`,
+      email: targetProfile.email
+    });
+
+    // Check if user is trying to invite themselves
+    if (targetUserId === userId) {
+      res.status(400).json({
+        success: false,
+        message: 'Cannot invite yourself'
+      });
+      return;
+    }
+
+    // Check if target user is not an admin (optional check)
+    if (targetProfile.role === 'admin') {
+      res.status(403).json({
+        success: false,
+        message: 'Cannot invite admin users'
+      });
+      return;
+    }
+
+    let finalChatId = chat_id;
+
+    // If no chat_id provided, check if chat exists or create one
+    if (!finalChatId) {
+      console.log('🔍 No chat_id provided, checking for existing chat...');
+      
+      const { data: existingChat, error: chatCheckError } = await supabase
+        .from('chats')
+        .select('id')
+        .or(`and(user_1.eq.${userId},user_2.eq.${targetUserId}),and(user_1.eq.${targetUserId},user_2.eq.${userId})`)
+        .maybeSingle();
+
+      if (chatCheckError) {
+        console.error('❌ Error checking existing chat:', chatCheckError);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to check existing chat'
+        });
+        return;
+      }
+
+      if (existingChat) {
+        finalChatId = existingChat.id;
+        console.log('✅ Using existing chat:', finalChatId);
+      } else {
+        console.log('🆕 Creating new chat...');
+        // Create new chat for random user invitation
+        const { data: newChat, error: insertError } = await supabase
+          .from('chats')
+          .insert([{
+            user_1: userId,
+            user_2: targetUserId
+          }])
+          .select('id')
+          .single();
+
+        if (insertError) {
+          console.error('❌ Error creating chat:', insertError);
+          res.status(500).json({
+            success: false,
+            message: 'Failed to create chat for invitation'
+          });
+          return;
+        }
+
+        finalChatId = newChat.id;
+        console.log('✅ Created new chat:', finalChatId);
+      }
+    } else {
+      console.log('✅ Using provided chat_id:', finalChatId);
+    }
+
+    console.log('🎯 Creating chess invitation...');
+    const invitation = await gameService.createChessInvitation({
+      inviter_id: userId,
+      invitee_id: targetUserId,
+      chat_id: finalChatId,
+      game_settings
+    });
+
+    console.log('✅ Chess invitation created:', invitation);
 
     const { data: inviterProfile } = await supabase
       .from('profiles')
@@ -38,28 +144,104 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     const inviterName = `${inviterProfile?.first_name} ${inviterProfile?.last_name || ''}`.trim();
 
-    const friendEmail = await getUserEmailFromId(friend_id);
-    if (friendEmail) {
-      const friendSockets = connectedUsers.get(friendEmail);
-      if (friendSockets) {
-        friendSockets.forEach(socketId => {
+    // Send real-time notification
+    const targetEmail = targetProfile.email;
+    console.log('📡 Sending real-time notification to:', targetEmail);
+    
+    if (targetEmail) {
+      const targetSockets = connectedUsers.get(targetEmail);
+      if (targetSockets) {
+        console.log('📡 Found sockets for target user:', targetSockets.size);
+        targetSockets.forEach(socketId => {
           io.to(socketId).emit('chess_invitation_received', {
             invitation,
             inviter_name: inviterName,
+            inviter_id: userId,
+            message: message || `You've been invited to play chess!`,
             room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
           });
         });
+      } else {
+        console.log('⚠️ No active sockets found for target user');
       }
+    }
+
+    // Send chat message about the invitation
+    // Only send message if no chat_id was provided (new chat created) or if custom message is provided
+    const shouldSendMessage = !chat_id || message;
+    
+    if (shouldSendMessage) {
+      console.log('💬 Sending chat message...');
+      
+      // Use the structured format like the working invitations
+      const messageContent = message || 
+        `Room ID: chess?\nroom=${invitation.room_id}\nClick to join the chess game`;
+      
+      const messageData = {
+        chat_id: finalChatId,
+        sender: userId,
+        message: messageContent,
+        has_media: false,
+        media: null,
+        message_type: 'chess_invitation',
+        reply_to: null,
+        status: 'sent',
+        created_at: new Date().toISOString(),
+        is_deleted: false,
+        is_edited: false
+      };
+
+      const { data: insertedMessage, error: messageError } = await supabase
+        .from('chatmessages')
+        .insert([messageData])
+        .select()
+        .single();
+
+      if (messageError) {
+        console.error('❌ Error sending chat message:', messageError);
+      } else {
+        console.log('✅ Chat message sent successfully');
+        
+        // Update chat timestamp
+        await supabase
+          .from('chats')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', finalChatId);
+        
+        // Send real-time message notification
+        const targetEmail = targetProfile.email;
+        if (targetEmail) {
+          const targetSockets = connectedUsers.get(targetEmail);
+          if (targetSockets) {
+            targetSockets.forEach(socketId => {
+              io.to(socketId).emit('receive_message', insertedMessage);
+            });
+          }
+        }
+      }
+    } else {
+      console.log('📝 No chat message sent (using existing friend chat)');
     }
 
     res.status(201).json({
       success: true,
-      data: invitation,
+      data: {
+        room_id: invitation.room_id,
+        chat_id: finalChatId,
+        room_link: `${process.env.CLIENT_URL}/chess?room=${invitation.room_id}`,
+        invitation_id: invitation.id,
+        inviter_name: inviterName,
+        invitee_name: `${targetProfile.first_name} ${targetProfile.last_name || ''}`.trim(),
+        status: invitation.status,
+        created_at: invitation.created_at,
+        expires_at: invitation.expires_at,
+        game_settings: invitation.game_settings
+      },
       message: 'Chess invitation sent successfully'
     });
 
   } catch (error) {
-    console.error('Error sending chess invite:', error);
+    console.error('❌ Error sending chess invite:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to send chess invitation',
@@ -174,24 +356,26 @@ export const saveGameResult = async (req: Request, res: Response): Promise<void>
     }
 
     const { room_id } = req.params;
-    const { winner, reason, moves } = req.body;
+    const { winner, loser, reason, moves } = req.body;
 
-    if (!winner || !reason) {
+    if (!winner || !loser || !reason) {
       res.status(400).json({
         success: false,
-        message: 'Missing required fields: winner, reason'
+        message: 'Missing required fields: winner, loser, reason'
       });
       return;
     }
 
     await gameService.saveGameResult(room_id, {
       winner,
+      loser,
       reason,
       moves: moves || []
     });
 
     io.to(`chess_room_${room_id}`).emit('chess_game_end', {
       winner,
+      loser,
       reason,
       ended_by: userId,
       timestamp: new Date().toISOString()
@@ -207,6 +391,80 @@ export const saveGameResult = async (req: Request, res: Response): Promise<void>
     res.status(500).json({
       success: false,
       message: 'Failed to save game result',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// Get all users (except admin/superadmin)
+export const fetchAllUsers = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const filters = req.body;
+
+    const result = await gameService.getAllUsers(filters);
+
+    res.json({
+      success: true,
+      data: result.users,
+      pagination: result.pagination
+    });
+
+  } catch (error) {
+    console.error('Error in fetchAllUsers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const getPlayerChessRanking = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const ranking = await gameService.getPlayerChessRanking(userId);
+
+    res.status(200).json({
+      success: true,
+      data: ranking
+    });
+
+  } catch (error) {
+    console.error('Error getting player chess ranking:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get player ranking',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const getChessLeaderboard = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { limit = 50 } = req.query;
+    const leaderboard = await gameService.getChessLeaderboard(Number(limit));
+
+    res.status(200).json({
+      success: true,
+      data: leaderboard
+    });
+
+  } catch (error) {
+    console.error('Error getting chess leaderboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get leaderboard',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }

@@ -216,16 +216,82 @@ export const gameService = {
     };
   },
 
+  // Add this method to calculate ELO rating changes
+  async calculateELORating(winnerRating: number, loserRating: number, kFactor: number = 32) {
+    const expectedWinner = 1 / (1 + Math.pow(10, (loserRating - winnerRating) / 400));
+    const expectedLoser = 1 / (1 + Math.pow(10, (winnerRating - loserRating) / 400));
+    
+    const winnerChange = Math.round(kFactor * (1 - expectedWinner));
+    const loserChange = Math.round(kFactor * (0 - expectedLoser));
+    
+    return {
+      winnerChange,
+      loserChange,
+      newWinnerRating: winnerRating + winnerChange,
+      newLoserRating: loserRating + loserChange
+    };
+  },
+
+  // Add this method to get or create user's chess rating
+  async getOrCreateChessRating(userId: string) {
+    const { data: existingRating, error } = await supabase
+      .from('chess_ratings')
+      .select('rating, games_played, wins, losses')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      // No rating exists, create new one with default rating
+      const defaultRating = 1200;
+      const { data: newRating, error: insertError } = await supabase
+        .from('chess_ratings')
+        .insert([{
+          user_id: userId,
+          rating: defaultRating,
+          games_played: 0,
+          wins: 0,
+          losses: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      return newRating;
+    }
+
+    if (error) throw error;
+    return existingRating;
+  },
+
+  // Update the saveGameResult method
   async saveGameResult(roomId: string, result: {
-    winner: string;
+    winner: string; // User ID of winner
+    loser: string;  // User ID of loser
     reason: string;
     moves: any[];
   }) {
+    // Get game data to find which player is white/black
+    const { data: gameData, error: gameError } = await supabase
+      .from('chess_games')
+      .select('white_player_id, black_player_id')
+      .eq('room_id', roomId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw new Error('Game not found');
+    }
+
+    // Determine if winner is white or black
+    const winnerColor = gameData.white_player_id === result.winner ? 'white' : 'black';
+
+    // Update the game with the correct winner color
     const { error } = await supabase
       .from('chess_games')
       .update({
         game_status: 'finished',
-        winner: result.winner,
+        winner: winnerColor, // Use "white" or "black"
         reason: result.reason,
         updated_at: new Date().toISOString()
       })
@@ -251,9 +317,208 @@ export const gameService = {
 
       if (movesError) throw movesError;
     }
+
+    // Get current ratings for both players
+    const [winnerRating, loserRating] = await Promise.all([
+      this.getOrCreateChessRating(result.winner),
+      this.getOrCreateChessRating(result.loser)
+    ]);
+
+    // Calculate new ELO ratings
+    const eloUpdate = await this.calculateELORating(winnerRating.rating, loserRating.rating);
+
+    // Update winner's rating
+    await supabase
+      .from('chess_ratings')
+      .update({
+        rating: eloUpdate.newWinnerRating,
+        games_played: winnerRating.games_played + 1,
+        wins: winnerRating.wins + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', result.winner);
+
+    // Update loser's rating
+    await supabase
+      .from('chess_ratings')
+      .update({
+        rating: eloUpdate.newLoserRating,
+        games_played: loserRating.games_played + 1,
+        losses: loserRating.losses + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', result.loser);
+
+    // Log rating changes
+    console.log(`🏆 ELO Rating Update:`);
+    console.log(`Winner ${result.winner}: ${winnerRating.rating} → ${eloUpdate.newWinnerRating} (+${eloUpdate.winnerChange})`);
+    console.log(`Loser ${result.loser}: ${loserRating.rating} → ${eloUpdate.newLoserRating} (${eloUpdate.loserChange})`);
+
+    // Award soul points using the provided user IDs directly
+    // Award 300 soul points to winner
+    try {
+      await supabase.rpc('increment_soulpoints', {
+        p_user_id: result.winner,
+        p_points: 300
+      });
+      console.log(`✅ Awarded 300 soul points to winner ${result.winner}`);
+    } catch (error) {
+      console.error('❌ Error awarding winner soul points:', error);
+    }
+
+    // Award 100 soul points to loser
+    try {
+      await supabase.rpc('increment_soulpoints', {
+        p_user_id: result.loser,
+        p_points: 100
+      });
+      console.log(`✅ Awarded 100 soul points to loser ${result.loser}`);
+    } catch (error) {
+      console.error('❌ Error awarding loser soul points:', error);
+    }
   },
 
   getInitialChessPosition() {
     return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  },
+
+  async getAllUsers(filters: {
+    search?: string;
+    role?: string;
+    limit?: number;
+    offset?: number;
+    sort_by?: string;
+    sort_order?: 'asc' | 'desc';
+  } = {}) {
+    const {
+      search,
+      role,
+      limit = 50,
+      offset = 0,
+      sort_by = 'created_at',
+      sort_order = 'desc'
+    } = filters;
+
+    let query = supabase
+      .from('profiles')
+      .select(`
+        id,
+        first_name,
+        last_name,
+        email,
+        avatar_url,
+        role,
+        created_at
+      `)
+      .eq('role', 'user');
+
+    if (search) {
+      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
+    }
+
+    if (role) {
+      query = query.eq('role', role);
+    }
+
+    query = query
+      .order(sort_by, { ascending: sort_order === 'asc' })
+      .range(offset, offset + limit - 1);
+
+    const { data: users, error } = await query;
+
+    if (error) {
+      console.error('Error fetching users in service:', error);
+      throw error;
+    }
+
+    const formattedUsers = users?.map(user => ({
+      id: user.id,
+      name: `${user.first_name} ${user.last_name || ''}`.trim(),
+      email: user.email,
+      avatar_url: user.avatar_url,
+      role: user.role,
+      created_at: user.created_at
+    })) || [];
+
+    return {
+      users: formattedUsers,
+      pagination: {
+        count: formattedUsers.length,
+        limit,
+        offset,
+        has_more: formattedUsers.length === limit
+      }
+    };
+  },
+
+  async getPlayerChessRanking(userId: string) {
+    const { data: playerRating, error } = await supabase
+      .from('chess_ratings')
+      .select('rating, games_played, wins, losses, draws')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      return {
+        ranking: null,
+        rating: 1200,
+        games_played: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        message: 'Player has no chess games yet'
+      };
+    }
+
+    if (error) throw error;
+
+    // Get player's rank
+    const { count: rank } = await supabase
+      .from('chess_ratings')
+      .select('*', { count: 'exact', head: true })
+      .gt('rating', playerRating.rating);
+
+    return {
+      ranking: (rank || 0) + 1,
+      rating: playerRating.rating,
+      games_played: playerRating.games_played,
+      wins: playerRating.wins,
+      losses: playerRating.losses,
+      draws: playerRating.draws || 0
+    };
+  },
+
+  async getChessLeaderboard(limit: number = 50) {
+    const { data: leaderboard, error } = await supabase
+      .from('chess_ratings')
+      .select(`
+        rating,
+        games_played,
+        wins,
+        losses,
+        draws,
+        profiles!inner(
+          id,
+          first_name,
+          last_name,
+          avatar_url
+        )
+      `)
+      .order('rating', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    return leaderboard.map((player, index) => ({
+      rank: index + 1,
+      user_id: player.profiles?.[0]?.id,
+      name: `${player.profiles?.[0]?.first_name} ${player.profiles?.[0]?.last_name}`.trim(),
+      avatar_url: player.profiles?.[0]?.avatar_url,
+      rating: player.rating,
+      games_played: player.games_played,
+      wins: player.wins,
+      losses: player.losses,
+      draws: player.draws || 0
+    }));
   }
 };
