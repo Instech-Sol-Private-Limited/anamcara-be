@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { soulStoriesServices } from '../../services/soulStories.services';
+import { soulStoriesServices } from '../../services/soulstories.services';
 import 'dotenv/config';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import multer from 'multer';
