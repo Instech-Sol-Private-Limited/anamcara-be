@@ -12,6 +12,7 @@ import {
   joinChamberByInvite,
   getAllChambers,
   updateChamber,
+  deleteChamber,
 } from '../controllers/chatmessages.controller';
 import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.middleware';
 
@@ -45,7 +46,10 @@ router.get('/get-chambers', authMiddleware, getUserChambers);
 router.get('/get-all-chambers', optionalAuthMiddleware, getAllChambers);
 
 // get chambers
-router.put('/update-chamber/:id', optionalAuthMiddleware, updateChamber);
+router.put('/update-chamber/:id', authMiddleware, updateChamber);
+
+// delete chambers
+router.delete('/delete-chamber/:id', authMiddleware, deleteChamber);
 
 // get chamber members
 router.get('/get-chamber-members/:chamber_id', authMiddleware, getChamberMembers);

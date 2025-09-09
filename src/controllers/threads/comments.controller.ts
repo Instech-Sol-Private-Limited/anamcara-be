@@ -22,6 +22,9 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
     }
 
     let parentData, parentError, authorId, parentTitle;
+    let isChamberPost = false;
+    let chamberId = null;
+
     if (targetType === 'thread') {
       ({ data: parentData, error: parentError } = await supabase
         .from('threads')
@@ -34,12 +37,14 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
     } else {
       ({ data: parentData, error: parentError } = await supabase
         .from('posts')
-        .select('id, user_id, content')
+        .select('id, user_id, content, is_chamber_post, chamber_id')
         .eq('id', targetId)
         .eq('is_active', true)
         .single());
       authorId = parentData?.user_id;
       parentTitle = parentData?.content?.slice(0, 30) || 'a post';
+      isChamberPost = parentData?.is_chamber_post || false;
+      chamberId = parentData?.chamber_id || null;
     }
 
     if (parentError || !parentData) {
@@ -68,9 +73,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
       .insert([insertObj])
       .select();
 
-    // Notification (don't notify self)
     if (authorId && authorId !== user_id) {
-      // Get author email
       const { data: authorProfile } = await supabase
         .from('profiles')
         .select('email')
@@ -78,16 +81,46 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
         .single();
 
       if (authorProfile) {
+        let soulpoints = targetType === 'thread' ? 5 : 3;
+        
+        if (targetType === 'post' && isChamberPost && chamberId) {
+          const { data: chamberData } = await supabase
+            .from('custom_chambers')
+            .select('monetization')
+            .eq('id', chamberId)
+            .single();
+
+          if (chamberData && chamberData.monetization?.enabled) {
+            soulpoints *= 2;
+          }
+        }
+
+        const { error: soulpointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: authorId,
+          p_points: soulpoints
+        });
+
+        if (soulpointsError) {
+          console.error('Error updating soulpoints:', soulpointsError);
+        }
+
+        const message = targetType === 'thread' 
+          ? `Comment posted on your thread "${parentTitle}"! +${soulpoints} soulpoints added to your profile`
+          : `Comment posted on your post! +${soulpoints} soulpoints added to your profile`;
+
         await sendNotification({
           recipientEmail: authorProfile.email,
           recipientUserId: authorId,
           actorUserId: user_id,
-          threadId: targetId, // always use threadId for NotificationInput
-          message: `Comment posted! +5 soulpoints added to your profile`,
-          type: targetType === 'thread' ? 'comment' : 'post_comment',
+          threadId: targetId,
+          message: message,
+          type: targetType === 'thread' ? 'comment' : 'post_comment_added',
           metadata: {
             [`${targetType}_id`]: targetId,
             commenter_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+            soulpoints: soulpoints,
+            is_chamber_post: isChamberPost,
+            chamber_id: chamberId
           },
         });
       }
