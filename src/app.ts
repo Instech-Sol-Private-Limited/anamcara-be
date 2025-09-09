@@ -37,6 +37,10 @@ import { handleZoomWebhook } from './controllers/zoomwebhook.controller';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 import { setupPaymentCron } from './services/paymentcron.service';
 import { collectDailyStats, collectMonthlyProviderStats, initializeStats } from './services/dailymarketplacestats.service';
+import PaymentRoute from './routes/payment.routes'
+
+
+
 dotenv.config();
 
 const app = express();
@@ -115,6 +119,10 @@ app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
 app.use('/api/campaigns', authMiddleware, campaignRoutes);
+app.use('/api/stripe', PaymentRoute);
+
+
+
 
 
 cron.schedule('0 0 * * *', updateDailyInsights);
@@ -147,6 +155,7 @@ const server = http.createServer(app);
 export const io = new Server(server, {
   cors: {
     origin: [
+
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:5173',
@@ -165,6 +174,7 @@ export const streamIo = new Server(server, {
   path: '/stream-socket',
   cors: {
     origin: [
+ 
       'http://localhost:5173',
       'http://localhost:5174',
       'https://anamcara.ai',
