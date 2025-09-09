@@ -21,7 +21,9 @@ import {
    verify2FABackupCodeController,
    removeTrustedDeviceController,
    getTrustedDevicesController,
-   regenerateBackupCodesController
+   regenerateBackupCodesController,
+   getUnapprovedUsersController,
+   approveUserController
 } from '../controllers/users.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
@@ -77,5 +79,7 @@ router.post('/2fa/regenerate-backup-codes', authMiddleware, regenerateBackupCode
 router.get('/2fa/trusted-devices', authMiddleware, getTrustedDevicesController);
 
 router.delete('/2fa/trusted-device/:deviceId', authMiddleware, removeTrustedDeviceController);
+router.get("/unapproved-users", authMiddleware, getUnapprovedUsersController);
 
+router.post("/approve-user/:userId", authMiddleware, approveUserController);
 export default router;

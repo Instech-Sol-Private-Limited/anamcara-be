@@ -10,6 +10,7 @@ import { generateAIDescription } from "../services/openai.service";
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
+import { promises } from "nodemailer/lib/xoauth2";
 
 
 const RESET_PASSWORD_SECRET = "anamcara_reset_password_secret";
@@ -1595,4 +1596,90 @@ function generateBackupCodes(): string[] {
     codes.push(code);
   }
   return codes;
+
 }
+export const getUnapprovedUsersController=async(req: Request, res: Response):Promise<any>=>{
+  try {
+    const { data: users, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("approved_status", false)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch unapproved users",
+        error: error.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: users || [],
+    });
+  } catch (err) {
+    console.error("Get unapproved users error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+export const approveUserController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const { data: user, error: fetchError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (fetchError || !user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.approved_status) {
+      return res.status(400).json({
+        success: false,
+        message: "User is already approved",
+      });
+    }
+
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({ approved_status: true })
+      .eq("id", userId);
+
+    if (updateError) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to approve user",
+        error: updateError.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User approved successfully",
+    });
+  } catch (err) {
+    console.error("Approve user error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
