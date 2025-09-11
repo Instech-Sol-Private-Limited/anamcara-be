@@ -577,6 +577,83 @@ const getApprovedCampaigns = async (req: Request, res: Response): Promise<any> =
 //     }
 // };
 
+// const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
+//     try {
+//         const userId = (req as any).user?.id;
+//         const { page = 1, limit = 10, status, approvalStatus } = req.query;
+//         const offset = (Number(page) - 1) * Number(limit);
+
+//         if (!userId) {
+//             return res.status(401).json({
+//                 success: false,
+//                 message: 'User authentication required'
+//             });
+//         }
+
+//         let query = supabase
+//   .from('hope_campaigns')
+//   .select(`
+//     *,
+//     creator:user_id(first_name, last_name, email, avatar_url),
+//     offered_product:offer_product_id(*),
+//     boosts:campaign_boost(*)
+//   `, { count: 'exact' })
+//   .eq('user_id', userId)
+//   .order('created_at', { ascending: false });
+//         if (status && status !== 'all') {
+//             query = query.eq('status', status);
+//         }
+
+//         if (approvalStatus === 'approved') {
+//             query = query.eq('is_approved', true);
+//         } else if (approvalStatus === 'pending') {
+//             query = query.eq('is_approved', false);
+//         }
+
+//         const { data: campaigns, error, count } = await query
+//             .range(offset, offset + Number(limit) - 1);
+
+//         if (error) {
+//             console.error('Database error:', error);
+//             throw new Error(`Database error: ${error.message}`);
+//         }
+
+//         const now = new Date();
+//         for (const campaign of campaigns || []) {
+//             if (campaign.deadline && new Date(campaign.deadline) <= now && campaign.status !== 'closed') {
+//                 await supabase
+//                     .from('hope_campaigns')
+//                     .update({ status: 'closed' })
+//                     .eq('id', campaign.id);
+
+//                 campaign.status = 'closed';
+//                 if (campaign.campaign_type === 'auction_donation') {
+//                     await transferProductToWinner(campaign.id);
+//                 }
+//             }
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             data: campaigns,
+//             pagination: {
+//                 page: Number(page),
+//                 limit: Number(limit),
+//                 total: count || 0,
+//                 pages: Math.ceil((count || 0) / Number(limit))
+//             }
+//         });
+
+//     } catch (error: any) {
+//         console.error('Error fetching user campaigns:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Failed to fetch user campaigns'
+//         });
+//     }
+// };
+
+
 const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
     try {
         const userId = (req as any).user?.id;
@@ -592,7 +669,23 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
 
         let query = supabase
             .from('hope_campaigns')
-            .select('*, creator:user_id(first_name, last_name, email, avatar_url), offered_product:offer_product_id(*)', { count: 'exact' })
+            .select(`
+                *,
+                creator:user_id(first_name, last_name, email, avatar_url),
+                offered_product:offer_product_id(*),
+                boosts:campaign_boost(
+                    id,
+                    boost_type,
+                    boost_percentage,
+                    boost_duration,
+                    boost_cost,
+                    start_time,
+                    end_time,
+                    status,
+                    created_at,
+                    updated_at
+                )
+            `, { count: 'exact' })
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
@@ -615,7 +708,10 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
         }
 
         const now = new Date();
+        
+        // Process campaigns and update expired ones
         for (const campaign of campaigns || []) {
+            // Handle campaign deadline expiry
             if (campaign.deadline && new Date(campaign.deadline) <= now && campaign.status !== 'closed') {
                 await supabase
                     .from('hope_campaigns')
@@ -626,6 +722,53 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
                 if (campaign.campaign_type === 'auction_donation') {
                     await transferProductToWinner(campaign.id);
                 }
+            }
+
+            // Handle boost expiry - update expired boosts
+            if (campaign.boosts && campaign.boosts.length > 0) {
+                const expiredBoosts = campaign.boosts.filter((boost: any)=>
+                    boost.status === 'active' && new Date(boost.end_time) <= now
+                );
+
+                if (expiredBoosts.length > 0) {
+                    const expiredBoostIds = expiredBoosts.map((boost: { id: any; }) => boost.id);
+                    
+                    // Update expired boosts in database
+                    const { error: boostUpdateError } = await supabase
+                        .from('campaign_boost')
+                        .update({ 
+                            status: 'expired',
+                            updated_at: now.toISOString()
+                        })
+                        .in('id', expiredBoostIds);
+
+                    if (boostUpdateError) {
+                        console.error('Failed to update expired boosts:', boostUpdateError);
+                    } else {
+                        // Update the boost status in the response data
+                        campaign.boosts.forEach((boost:any)=>
+                             {
+                            if (expiredBoostIds.includes(boost.id)) {
+                                boost.status = 'expired';
+                            }
+                        });
+                    }
+                }
+            }
+
+            // Add computed boost fields for backward compatibility
+            const activeBoost = campaign.boosts?.find((boost:any)=>
+                boost.status === 'active' && new Date(boost.end_time) > now
+            );
+
+            campaign.is_boosted = !!activeBoost;
+            if (activeBoost) {
+                campaign.boost_details = {
+                    boost_type: activeBoost.boost_type,
+                    boost_percentage: activeBoost.boost_percentage,
+                    boost_duration: activeBoost.boost_duration,
+                    boost_expires_at: activeBoost.end_time
+                };
             }
         }
 
@@ -648,7 +791,6 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
         });
     }
 };
-
 const getCampaignDetails = async (req: Request, res: Response): Promise<any> => {
     try {
         const { id } = req.params;
@@ -2111,6 +2253,197 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
         });
     }
 }
+
+// -------------- Product boost or promotion--------------
+export const createBoost = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id!;
+    const { campaign_id, boost_type, boost_percentage, boost_duration, boost_cost } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Use Supabase's transaction capability
+       const { data: result, error: transactionError } = await supabase.rpc('create_campaign_boost_transaction', {
+      p_user_id: userId,
+     p_campaign_id:campaign_id,
+      p_boost_type: boost_type,
+      p_boost_percentage: boost_percentage,
+      p_boost_duration: boost_duration,
+      p_boost_cost: boost_cost
+    });
+
+    if (transactionError) {
+      return res.status(500).json({ error: 'Failed to create boost: ' + transactionError.message });
+    }
+
+    if (result && result.error) {
+      const statusCode = result.error.includes('Insufficient') ? 400 : 404;
+      return res.status(statusCode).json({ error: result.error });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Boost created successfully',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error creating boost:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+};
+
+export const getActiveBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { campaign_id } = req.params;
+
+    const { data: boosts, error } = await supabase
+      .rpc('get_active_boosts', { campaign_id: campaign_id });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getUserBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+
+    const { data: boosts, error } = await supabase
+      .from('boosts')
+      .select(`
+        *,
+        product:products(
+          id,
+          title,
+          thumbnail
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch user boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching user boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getMarketplaceBoosts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: boosts, error } = await supabase
+      .from('boosts')
+      .select(`
+        *,
+        product:products(
+          id,
+          title,
+          category,
+          price_anam_coins,
+          status,
+          thumbnail,
+          user_id,
+          user:profiles(
+            id,
+            username,
+            avatar_url
+          )
+        )
+      `)
+      .eq('status', 'active')
+      .gt('end_time', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch marketplace boosts' });
+    }
+
+    res.json({ boosts });
+  } catch (error) {
+    console.error('Error fetching marketplace boosts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getActiveFeaturedProducts = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const now = new Date().toISOString();
+
+    const { error: expireError } = await supabase
+      .from("boosts")
+      .update({ status: "expired" })
+      .lte("end_time", now)
+      .neq("status", "expired");
+
+    if (expireError) {
+      console.error("Error expiring boosts:", expireError);
+    }
+
+    const { data: boostedProducts, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        creator:profiles (
+          id,
+          first_name,
+          last_name,
+          email,
+          avatar_url
+        ),
+        boosts!inner (
+          id,
+          end_time
+        )
+      `)
+      .eq("status", "approved")
+      .gt("boosts.end_time", now)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching boosted products:", error);
+      return res.status(500).json({ success: false, error: "Failed to fetch featured products" });
+    }
+
+    // 3. Attach flags
+    const featuredProducts =
+      boostedProducts?.map((product) => ({
+        ...product,
+        featured: true,
+        is_boosted: true,
+      })) || [];
+
+    res.status(200).json({
+      success: true,
+      products: featuredProducts,
+      count: featuredProducts.length,
+    });
+  } catch (error: any) {
+    console.error("Error fetching featured products:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
 
 export {
     createCampaign,
