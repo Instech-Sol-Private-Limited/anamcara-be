@@ -32,7 +32,7 @@ const router = express.Router();
 
 router.post('/', authMiddleware, createPost);
 
-router.get('/', authMiddleware, getPosts);
+router.get('/', optionalAuthMiddleware, getPosts);
 
 router.get('/trending', authMiddleware, getTrendingPosts);
 
