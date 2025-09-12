@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
 import { getChatParticipants, getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
+import { registerChessHandlers } from './chess.handler';
 
 type ChamberUpdateResponse = {
   success: boolean;
@@ -2243,4 +2244,7 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
   });
+  
+  // Register chess handlers separately
+  registerChessHandlers(io);
 };

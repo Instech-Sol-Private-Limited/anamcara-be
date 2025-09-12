@@ -2001,7 +2001,6 @@ const getOverallTotals = async (req: Request, res: Response): Promise<any> => {
     }
 };
 
-
 const claimDonations = async (req: Request, res: Response): Promise<any> => {
     try {
         const campaignId = req.params.id;
@@ -2037,6 +2036,68 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
 
         if (campaign.campaign_type === 'auction_donation') {
             finalAcAmount = campaign.highest_bid || 0;
+
+            // 🔹 Refund other bidders
+            const { data: allBids, error: bidsError } = await supabase
+                .from('campaign_bids')
+                .select('id, bidder_id, amount, currency, is_refunded')
+                .eq('campaign_id', campaignId);
+
+            if (bidsError) throw bidsError;
+
+            if (allBids && allBids.length > 0) {
+                for (const bid of allBids) {
+                    if (bid.amount === campaign.highest_bid) {
+                        // skip the highest bidder (the winner)
+                        continue;
+                    }
+
+                    if (bid.is_refunded) {
+                        continue; // already refunded
+                    }
+
+                    const refundAmountAC = bid.currency === 'AC'
+                        ? Number(bid.amount)
+                        : Number(bid.amount) / 2;
+
+                    if (refundAmountAC > 0) {
+                        // Update bidder's anamcoins wallet
+                        const { data: bidderCoins } = await supabase
+                            .from('anamcoins')
+                            .select('*')
+                            .eq('user_id', bid.bidder_id)
+                            .single();
+
+                        if (bidderCoins) {
+                            await supabase
+                                .from('anamcoins')
+                                .update({
+                                    total_coins: bidderCoins.total_coins + refundAmountAC,
+                                    available_coins: bidderCoins.available_coins + refundAmountAC,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('user_id', bid.bidder_id);
+                        } else {
+                            await supabase
+                                .from('anamcoins')
+                                .insert({
+                                    user_id: bid.bidder_id,
+                                    total_coins: refundAmountAC,
+                                    available_coins: refundAmountAC,
+                                    spent_coins: 0,
+                                    created_at: new Date().toISOString(),
+                                    updated_at: new Date().toISOString()
+                                });
+                        }
+
+                        // mark bid as refunded
+                        await supabase
+                            .from('campaign_bids')
+                            .update({ is_refunded: true })
+                            .eq('id', bid.id);
+                    }
+                }
+            }
         } else {
             const totalAcAmount = campaign.total_donations_ac || 0;
             const totalAbAmount = campaign.total_donations_ab || 0;
@@ -2047,6 +2108,7 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
             return res.status(400).json({ success: false, message: 'No funds to claim' });
         }
 
+        // 🔹 Credit campaign owner with final amount
         const { data: coins, error: coinsError } = await supabase
             .from('anamcoins')
             .select('*')
@@ -2063,9 +2125,7 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
                 })
                 .eq('user_id', userId);
 
-            if (updateError) {
-                throw updateError;
-            }
+            if (updateError) throw updateError;
         } else {
             const { error: insertError } = await supabase
                 .from('anamcoins')
@@ -2078,11 +2138,10 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
                     updated_at: new Date().toISOString()
                 });
 
-            if (insertError) {
-                throw insertError;
-            }
+            if (insertError) throw insertError;
         }
 
+        // 🔹 Mark campaign as claimed
         const { error: updateCampaignError } = await supabase
             .from('hope_campaigns')
             .update({
@@ -2092,9 +2151,7 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
             })
             .eq('id', campaignId);
 
-        if (updateCampaignError) {
-            throw updateCampaignError;
-        }
+        if (updateCampaignError) throw updateCampaignError;
 
         res.status(200).json({
             success: true,
@@ -2110,7 +2167,117 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
             message: 'Internal server error'
         });
     }
-}
+};
+
+// const claimDonations = async (req: Request, res: Response): Promise<any> => {
+//     try {
+//         const campaignId = req.params.id;
+//         const userId = req.user?.id!;
+
+//         if (!campaignId) {
+//             return res.status(400).json({ success: false, message: 'Campaign ID is required' });
+//         }
+
+//         const { data: campaign, error: campaignError } = await supabase
+//             .from('hope_campaigns')
+//             .select('*')
+//             .eq('id', campaignId)
+//             .single();
+
+//         if (campaignError || !campaign) {
+//             return res.status(404).json({ success: false, message: 'Campaign not found' });
+//         }
+
+//         if (campaign.status !== 'closed') {
+//             return res.status(400).json({ success: false, message: 'Campaign is not closed' });
+//         }
+
+//         if (campaign.user_id !== userId) {
+//             return res.status(403).json({ success: false, message: 'Only campaign creator can claim funds' });
+//         }
+
+//         if (campaign.is_claimed || campaign.claimed_at) {
+//             return res.status(400).json({ success: false, message: 'Funds already claimed' });
+//         }
+
+//         let finalAcAmount = 0;
+
+//         if (campaign.campaign_type === 'auction_donation') {
+//             finalAcAmount = campaign.highest_bid || 0;
+//         } else {
+//             const totalAcAmount = campaign.total_donations_ac || 0;
+//             const totalAbAmount = campaign.total_donations_ab || 0;
+//             finalAcAmount = totalAcAmount + (totalAbAmount / 2);
+//         }
+
+//         if (finalAcAmount <= 0) {
+//             return res.status(400).json({ success: false, message: 'No funds to claim' });
+//         }
+
+//         const { data: coins, error: coinsError } = await supabase
+//             .from('anamcoins')
+//             .select('*')
+//             .eq('user_id', userId)
+//             .single();
+
+//         if (coins) {
+//             const { error: updateError } = await supabase
+//                 .from('anamcoins')
+//                 .update({
+//                     total_coins: coins.total_coins + finalAcAmount,
+//                     available_coins: coins.available_coins + finalAcAmount,
+//                     updated_at: new Date().toISOString()
+//                 })
+//                 .eq('user_id', userId);
+
+//             if (updateError) {
+//                 throw updateError;
+//             }
+//         } else {
+//             const { error: insertError } = await supabase
+//                 .from('anamcoins')
+//                 .insert({
+//                     user_id: userId,
+//                     total_coins: finalAcAmount,
+//                     available_coins: finalAcAmount,
+//                     spent_coins: 0,
+//                     created_at: new Date().toISOString(),
+//                     updated_at: new Date().toISOString()
+//                 });
+
+//             if (insertError) {
+//                 throw insertError;
+//             }
+//         }
+
+//         const { error: updateCampaignError } = await supabase
+//             .from('hope_campaigns')
+//             .update({
+//                 claimed_at: new Date().toISOString(),
+//                 is_claimed: true,
+//                 updated_at: new Date().toISOString()
+//             })
+//             .eq('id', campaignId);
+
+//         if (updateCampaignError) {
+//             throw updateCampaignError;
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             message: 'Funds claimed successfully',
+//             amount: finalAcAmount,
+//             currency: 'AC'
+//         });
+
+//     } catch (error) {
+//         console.error('Error claiming funds:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Internal server error'
+//         });
+//     }
+// }
 
 export {
     createCampaign,

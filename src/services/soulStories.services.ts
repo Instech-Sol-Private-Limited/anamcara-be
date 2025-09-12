@@ -1,10 +1,11 @@
 import { supabase } from '../app';
-import { searchAllContent } from '../controllers/soulStories/soulStories.controlller';
+import { searchAllContent } from '../controllers/soulStories/soulStories.controller';
 import 'dotenv/config';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from 'fs';
 import path from 'path';
 import pdf from 'pdf-parse';
+
 
 // Gemini AI Service Class
 class GeminiService {
@@ -1100,6 +1101,23 @@ export const soulStoriesServices = {
         .from('soul_stories')
         .update({ total_views: (story.total_views || 0) + 1 })
         .eq('id', storyId);
+  
+      // Award 15 soul points for accessing a story
+      try {
+        // Award 15 soul points for accessing a story
+        const { error: soulPointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: userId,
+          p_points: 15
+        });
+
+        if (soulPointsError) {
+          console.error('❌ Error awarding soul points:', soulPointsError);
+        } else {
+          console.log(`✅ Successfully awarded 15 soul points to user ${userId} for story ${storyId}`);
+        }
+      } catch (error) {
+        console.error('❌ Exception in soul points award:', error);
+      }
   
       // Get user's access for this story from existing table
       const { data: userAccess } = await supabase
