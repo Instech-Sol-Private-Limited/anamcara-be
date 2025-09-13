@@ -38,6 +38,10 @@ import { registerStreamingHandlers } from './sockets/streaming.handler';
 import { setupPaymentCron } from './services/paymentcron.service';
 import gameRoutes from './routes/game.routes';
 import { collectDailyStats, collectMonthlyProviderStats, initializeStats } from './services/dailymarketplacestats.service';
+import PaymentRoute from './routes/payment.routes'
+
+
+
 dotenv.config();
 
 const app = express();
@@ -112,10 +116,12 @@ app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 app.use('/api/slots', authMiddleware, availableSlotsRoutes);
 app.use('/api/products', authMiddleware, productsRoutes);
+app.use('/api/boostcampaign',authMiddleware,  campaignRoutes);
 app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
 app.use('/api/campaigns', authMiddleware, campaignRoutes);
+app.use('/api/stripe', PaymentRoute);
 app.use('/api/games', authMiddleware, gameRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
@@ -148,6 +154,7 @@ const server = http.createServer(app);
 export const io = new Server(server, {
   cors: {
     origin: [
+
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:5173',
@@ -166,6 +173,7 @@ export const streamIo = new Server(server, {
   path: '/stream-socket',
   cors: {
     origin: [
+ 
       'http://localhost:5173',
       'http://localhost:5174',
       'https://anamcara.ai',
