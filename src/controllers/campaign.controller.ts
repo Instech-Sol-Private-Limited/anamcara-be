@@ -791,6 +791,7 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
         });
     }
 };
+
 const getCampaignDetails = async (req: Request, res: Response): Promise<any> => {
     try {
         const { id } = req.params;
