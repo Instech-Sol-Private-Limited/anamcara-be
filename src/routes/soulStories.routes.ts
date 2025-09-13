@@ -32,7 +32,7 @@ import {
     uploadPdf,
     shareStory,
     purchaseAIToolAccess
-} from "../controllers/soulStories/soulStories.controlller"
+} from "../controllers/soulStories/soulStories.controller"
 
 
 const router = express.Router();

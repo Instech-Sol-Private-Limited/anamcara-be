@@ -36,6 +36,7 @@ import campaignRoutes from './routes/campaign.routes';
 import { handleZoomWebhook } from './controllers/zoomwebhook.controller';
 import { registerStreamingHandlers } from './sockets/streaming.handler';
 import { setupPaymentCron } from './services/paymentcron.service';
+import gameRoutes from './routes/game.routes';
 import { collectDailyStats, collectMonthlyProviderStats, initializeStats } from './services/dailymarketplacestats.service';
 import PaymentRoute from './routes/payment.routes'
 
@@ -121,10 +122,7 @@ app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
 app.use('/api/campaigns', authMiddleware, campaignRoutes);
 app.use('/api/stripe', PaymentRoute);
-
-
-
-
+app.use('/api/games', authMiddleware, gameRoutes);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron();
