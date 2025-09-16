@@ -22,7 +22,7 @@ function getTargetInfo(req) {
 }
 // add new comment
 const createComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const { content, imgs = [] } = req.body;
         const { id: user_id, first_name, last_name, email } = req.user;
@@ -30,8 +30,9 @@ const createComment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!content || !user_id || !first_name) {
             return res.status(400).json({ error: 'Missing required fields!' });
         }
-        // Fetch parent (thread or post) and author
         let parentData, parentError, authorId, parentTitle;
+        let isChamberPost = false;
+        let chamberId = null;
         if (targetType === 'thread') {
             ({ data: parentData, error: parentError } = yield app_1.supabase
                 .from('threads')
@@ -45,12 +46,14 @@ const createComment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         else {
             ({ data: parentData, error: parentError } = yield app_1.supabase
                 .from('posts')
-                .select('id, user_id, content')
+                .select('id, user_id, content, is_chamber_post, chamber_id')
                 .eq('id', targetId)
                 .eq('is_active', true)
                 .single());
             authorId = parentData === null || parentData === void 0 ? void 0 : parentData.user_id;
             parentTitle = ((_a = parentData === null || parentData === void 0 ? void 0 : parentData.content) === null || _a === void 0 ? void 0 : _a.slice(0, 30)) || 'a post';
+            isChamberPost = (parentData === null || parentData === void 0 ? void 0 : parentData.is_chamber_post) || false;
+            chamberId = (parentData === null || parentData === void 0 ? void 0 : parentData.chamber_id) || null;
         }
         if (parentError || !parentData) {
             return res.status(400).json({ error: `No ${targetType} found!` });
@@ -66,7 +69,6 @@ const createComment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             user_name,
             user_id,
         };
-        console.log(insertObj);
         if (targetType === 'thread')
             insertObj.thread_id = targetId;
         else
@@ -75,25 +77,47 @@ const createComment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             .from('threadcomments')
             .insert([insertObj])
             .select();
-        // Notification (don't notify self)
         if (authorId && authorId !== user_id) {
-            // Get author email
             const { data: authorProfile } = yield app_1.supabase
                 .from('profiles')
                 .select('email')
                 .eq('id', authorId)
                 .single();
             if (authorProfile) {
+                let soulpoints = targetType === 'thread' ? 5 : 3;
+                if (targetType === 'post' && isChamberPost && chamberId) {
+                    const { data: chamberData } = yield app_1.supabase
+                        .from('custom_chambers')
+                        .select('monetization')
+                        .eq('id', chamberId)
+                        .single();
+                    if (chamberData && ((_b = chamberData.monetization) === null || _b === void 0 ? void 0 : _b.enabled)) {
+                        soulpoints *= 2;
+                    }
+                }
+                const { error: soulpointsError } = yield app_1.supabase.rpc('increment_soulpoints', {
+                    p_user_id: authorId,
+                    p_points: soulpoints
+                });
+                if (soulpointsError) {
+                    console.error('Error updating soulpoints:', soulpointsError);
+                }
+                const message = targetType === 'thread'
+                    ? `Comment posted on your thread "${parentTitle}"! +${soulpoints} soulpoints added to your profile`
+                    : `Comment posted on your post! +${soulpoints} soulpoints added to your profile`;
                 yield (0, emitNotification_1.sendNotification)({
                     recipientEmail: authorProfile.email,
                     recipientUserId: authorId,
                     actorUserId: user_id,
-                    threadId: targetId, // always use threadId for NotificationInput
-                    message: `Comment posted! +5 soulpoints added to your profile`,
-                    type: targetType === 'thread' ? 'comment' : 'post_comment',
+                    threadId: targetId,
+                    message: message,
+                    type: targetType === 'thread' ? 'comment' : 'post_comment_added',
                     metadata: {
                         [`${targetType}_id`]: targetId,
                         commenter_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+                        soulpoints: soulpoints,
+                        is_chamber_post: isChamberPost,
+                        chamber_id: chamberId
                     },
                 });
             }

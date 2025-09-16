@@ -873,6 +873,44 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
+export const getUserPostsMedia = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { userId } = req.params;
+
+    const { data: posts, error } = await supabase
+      .from('posts')
+      .select('id, media_url, media_type')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    const mediaData = posts.map((post) => {
+      return {
+        post_id: post.id,
+        images: post.media_type === 'image' && post.media_url ? [post.media_url] : [],
+        videos: post.media_type === 'video' && post.media_url ? [post.media_url] : [],
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: mediaData,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error fetching user posts media',
+    });
+  }
+};
+
 export const getTrendingPosts = async (req: Request, res: Response): Promise<any> => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;

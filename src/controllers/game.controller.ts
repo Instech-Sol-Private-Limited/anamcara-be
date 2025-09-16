@@ -1,4 +1,3 @@
-// src/controllers/game.controller.ts
 import { Request, Response } from 'express';
 import { supabase, io } from '../app';
 import { gameService } from '../services/game.service';
@@ -396,7 +395,6 @@ export const saveGameResult = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// Get all users (except admin/superadmin)
 export const fetchAllUsers = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;

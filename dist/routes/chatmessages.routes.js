@@ -23,7 +23,9 @@ router.get('/get-chambers', auth_middleware_1.authMiddleware, chatmessages_contr
 // get chambers
 router.get('/get-all-chambers', auth_middleware_1.optionalAuthMiddleware, chatmessages_controller_1.getAllChambers);
 // get chambers
-router.put('/update-chamber/:id', auth_middleware_1.optionalAuthMiddleware, chatmessages_controller_1.updateChamber);
+router.put('/update-chamber/:id', auth_middleware_1.authMiddleware, chatmessages_controller_1.updateChamber);
+// delete chambers
+router.delete('/delete-chamber/:id', auth_middleware_1.authMiddleware, chatmessages_controller_1.deleteChamber);
 // get chamber members
 router.get('/get-chamber-members/:chamber_id', auth_middleware_1.authMiddleware, chatmessages_controller_1.getChamberMembers);
 // get chamber messages

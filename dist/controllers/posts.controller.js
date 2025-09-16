@@ -12,6 +12,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updatePost = exports.deletePost = exports.getPollResults = exports.voteOnPoll = exports.getTrendingPosts = exports.getUserPosts = exports.getPostComments = exports.addReply = exports.addComment = exports.getPosts = exports.createPost = exports.updatePostReaction = void 0;
 const app_1 = require("../app");
 const emitNotification_1 = require("../sockets/emitNotification");
+const posts_service_1 = require("../services/posts.service");
+const manageChambers_1 = require("../sockets/manageChambers");
 const postFieldMap = {
     like: 'total_likes',
     dislike: 'total_dislikes',
@@ -20,16 +22,25 @@ const postFieldMap = {
     hug: 'total_hugs',
     soul: 'total_souls',
 };
-// Toggle post reaction (using thread_reactions table with post_id)
+const getReactionDisplayName = (reactionType) => {
+    const displayNames = {
+        'like': 'like',
+        'dislike': 'dislike',
+        'insightful': 'insightful reaction',
+        'heart': 'heart',
+        'hug': 'hug',
+        'soul': 'soul reaction'
+    };
+    return displayNames[reactionType] || reactionType;
+};
 const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { postId } = req.params;
     const { type } = req.body;
     const { id: user_id } = req.user;
     if (!user_id || !postFieldMap[type]) {
         return res.status(400).json({ error: 'Invalid user or reaction type.' });
     }
-    // Check for existing reaction
     const { data: existing, error: fetchError } = yield app_1.supabase
         .from('thread_reactions')
         .select('*')
@@ -40,10 +51,9 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
     if (fetchError && fetchError.code !== 'PGRST116') {
         return res.status(500).json({ error: fetchError.message });
     }
-    // Get post and author
     const { data: postData, error: postError } = yield app_1.supabase
         .from('posts')
-        .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls')
+        .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, is_chamber_post, chamber_id')
         .eq('id', postId)
         .single();
     if (postError || !postData) {
@@ -61,7 +71,6 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
             authorProfile = profileData;
         }
     }
-    // Prepare update fields
     const updates = {
         total_likes: (_a = postData.total_likes) !== null && _a !== void 0 ? _a : 0,
         total_dislikes: (_b = postData.total_dislikes) !== null && _b !== void 0 ? _b : 0,
@@ -70,20 +79,8 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
         total_hugs: (_e = postData.total_hugs) !== null && _e !== void 0 ? _e : 0,
         total_souls: (_f = postData.total_souls) !== null && _f !== void 0 ? _f : 0,
     };
-    const getReactionDisplayName = (reactionType) => {
-        const displayNames = {
-            'like': 'like',
-            'dislike': 'dislike',
-            'insightful': 'insightful reaction',
-            'heart': 'heart',
-            'hug': 'hug',
-            'soul': 'soul reaction'
-        };
-        return displayNames[reactionType] || reactionType;
-    };
     if (existing) {
         if (existing.type === type) {
-            // Remove reaction
             const field = postFieldMap[type];
             updates[field] = Math.max(0, updates[field] - 1);
             const { error: deleteError } = yield app_1.supabase
@@ -115,7 +112,6 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
             }
             return res.status(200).json({ message: `${type} removed!` });
         }
-        // Change reaction
         const prevField = postFieldMap[existing.type];
         const currentField = postFieldMap[type];
         updates[prevField] = Math.max(0, updates[prevField] - 1);
@@ -154,7 +150,6 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
         return res.status(200).json({ message: `Reaction updated to ${type}!` });
     }
     else {
-        // Add new reaction
         const field = postFieldMap[type];
         updates[field] += 1;
         const { error: insertError } = yield app_1.supabase
@@ -169,7 +164,6 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (updatePostError)
             return res.status(500).json({ error: updatePostError.message });
         if (shouldSendNotification && authorProfile) {
-            // Soulpoints logic
             const soulpointsMap = {
                 'like': 2,
                 'dislike': 0,
@@ -178,7 +172,26 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 'hug': 2,
                 'soul': 2
             };
-            const soulpoints = soulpointsMap[type] || 0;
+            let soulpoints = soulpointsMap[type] || 0;
+            if (postData.is_chamber_post && postData.chamber_id) {
+                const { data: chamberData, error: chamberError } = yield app_1.supabase
+                    .from('custom_chambers')
+                    .select('monetization')
+                    .eq('id', postData.chamber_id)
+                    .single();
+                if (!chamberError && chamberData && ((_g = chamberData.monetization) === null || _g === void 0 ? void 0 : _g.enabled)) {
+                    soulpoints *= 2;
+                }
+            }
+            if (soulpoints > 0) {
+                const { error: soulpointsError } = yield app_1.supabase.rpc('increment_soulpoints', {
+                    p_user_id: postData.user_id,
+                    p_points: soulpoints
+                });
+                if (soulpointsError) {
+                    console.error('Error updating soulpoints:', soulpointsError);
+                }
+            }
             yield (0, emitNotification_1.sendNotification)({
                 recipientEmail: authorProfile.email,
                 recipientUserId: postData.user_id,
@@ -190,7 +203,9 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
                     reaction_type: type,
                     post_id: postId,
                     actor_user_id: user_id,
-                    soulpoints
+                    soulpoints,
+                    is_chamber_post: postData.is_chamber_post,
+                    chamber_id: postData.chamber_id
                 }
             });
         }
@@ -198,119 +213,111 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.updatePostReaction = updatePostReaction;
-// Create a new post
 const createPost = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
         if (!userId) {
-            return res.status(401).json({
+            res.status(401).json({
                 success: false,
                 message: 'Unauthorized: Please login to create a post'
             });
+            return;
         }
-        const { content, mediaUrl, mediaType, feelingEmoji, feelingLabel, feelingType, questionCategory, questionTitle, questionDescription, questionColor, pollOptions } = req.body;
-        // Validate required fields based on post type
-        if (pollOptions && pollOptions.length > 0) {
-            if (!Array.isArray(pollOptions) || pollOptions.length < 2) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Poll must have at least 2 options'
-                });
-            }
-        }
-        else if (questionCategory) {
-            if (!questionTitle) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Question title is required for question posts'
-                });
-            }
-        }
-        else if (!content && !mediaUrl) {
-            return res.status(400).json({
+        const { content, media_url, media_type, feeling_emoji, feeling_label, feeling_type, question_category, question_title, question_description, question_color, poll_options, embedded_items, is_chamber_post = false, chamber_id } = req.body;
+        const validationErrors = (0, posts_service_1.validatePostRequest)(req.body);
+        if (validationErrors.length > 0) {
+            res.status(400).json({
                 success: false,
-                message: 'Post content or media is required'
+                message: 'Validation failed',
+                errors: validationErrors
             });
+            return;
         }
-        // Determine post type
-        let postType = 'regular';
-        if (pollOptions && pollOptions.length > 0) {
-            postType = 'poll';
+        if (is_chamber_post && chamber_id) {
+            const hasPermission = yield (0, posts_service_1.checkChamberPermission)(chamber_id, userId);
+            if (!hasPermission) {
+                res.status(403).json({
+                    success: false,
+                    message: 'You do not have permission to post in this chamber'
+                });
+                return;
+            }
         }
-        else if (questionCategory) {
-            postType = 'question';
-        }
-        const { data, error } = yield app_1.supabase
-            .from('posts')
-            .insert({
+        const postType = (0, posts_service_1.determinePostType)({
+            poll_options,
+            question_category,
+            embedded_items
+        });
+        const postData = {
             user_id: userId,
-            content,
-            media_url: mediaUrl,
-            media_type: mediaType,
+            content: (content === null || content === void 0 ? void 0 : content.trim()) || null,
+            media_url: media_url || null,
+            media_type: media_type || null,
             post_type: postType,
-            feeling_emoji: feelingEmoji,
-            feeling_label: feelingLabel,
-            feeling_type: feelingType,
-            question_category: questionCategory,
-            question_title: questionTitle,
-            question_description: questionDescription,
-            question_color: questionColor,
-            poll_options: pollOptions
-        })
-            .select(`
-        *,
-        profiles (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          email
-        )
-      `)
-            .single();
+            feeling_emoji: feeling_emoji || null,
+            feeling_label: feeling_label || null,
+            feeling_type: feeling_type || null,
+            question_category: question_category || null,
+            question_title: question_title || null,
+            question_description: question_description || null,
+            question_color: question_color || null,
+            poll_options: poll_options || null,
+            embedded_items: embedded_items || null,
+            is_chamber_post,
+            chamber_id: is_chamber_post ? chamber_id : null
+        };
+        const { data: post, error } = yield (0, posts_service_1.createPostInDatabase)(postData);
         if (error) {
-            return res.status(500).json({
+            console.error('Database error:', error);
+            res.status(500).json({
                 success: false,
-                message: error.message
+                message: 'Failed to create post',
+                error: error.message
             });
+            return;
         }
-        // Send notification for post creation
-        const { data: profileData } = yield app_1.supabase
-            .from('profiles')
-            .select('email')
-            .eq('id', userId)
-            .single();
-        if (profileData) {
-            yield (0, emitNotification_1.sendNotification)({
-                recipientEmail: profileData.email,
-                recipientUserId: userId,
-                actorUserId: null,
-                threadId: data.id,
-                message: 'Post created successfully! +5 soulpoints added to your profile',
-                type: 'post_creation',
-                metadata: {
-                    soulpoints: 5,
-                    post_id: data.id,
-                    post_type: postType
-                }
-            });
+        let allocatedPoints = 0;
+        let chamberName = '';
+        try {
+            allocatedPoints = yield (0, posts_service_1.allocateSoulpointsForPost)(userId, is_chamber_post, chamber_id);
+            if (is_chamber_post && chamber_id) {
+                const { data: chamber } = yield app_1.supabase
+                    .from('custom_chambers')
+                    .select('name')
+                    .eq('id', chamber_id)
+                    .single();
+                chamberName = (chamber === null || chamber === void 0 ? void 0 : chamber.name) || '';
+            }
+            yield (0, posts_service_1.sendPostCreationNotification)(userId, post.id, postType, allocatedPoints, is_chamber_post, chamberName);
+        }
+        catch (notificationError) {
+            console.error('Failed to send notification, but post was created:', notificationError);
+        }
+        if (is_chamber_post && chamber_id) {
+            try {
+                yield (0, manageChambers_1.notifyChamberMembers)(chamber_id, post.id, userId);
+            }
+            catch (chamberError) {
+                console.error('Failed to notify chamber members:', chamberError);
+            }
         }
         res.status(201).json({
             success: true,
             message: 'Post created successfully',
-            data
+            data: Object.assign(Object.assign({}, post), { allocated_soulpoints: allocatedPoints, is_chamber_post: is_chamber_post, chamber_name: chamberName || undefined })
         });
     }
     catch (error) {
+        console.error('Unexpected error in createPost:', error);
         res.status(500).json({
             success: false,
-            message: error.message || 'Error creating post'
+            message: 'Internal server error',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
 exports.createPost = createPost;
-// Get posts with pagination
 const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -344,29 +351,46 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 message: error.message
             });
         }
-        // Add user reactions and comment counts
         const postsWithReactions = yield Promise.all(allPosts.map((post) => __awaiter(void 0, void 0, void 0, function* () {
             let userReaction = null;
+            let chamberInfo = null;
             if (user_id) {
                 const { data: reactionData } = yield app_1.supabase
                     .from('thread_reactions')
                     .select('type')
                     .eq('user_id', user_id)
-                    .eq('post_id', post.id)
+                    .eq('target_id', post.id)
                     .eq('target_type', 'post')
                     .maybeSingle();
                 if (reactionData) {
                     userReaction = reactionData.type;
                 }
             }
-            // Get comment count using threadcomments table with post_id
+            if (post.is_chamber_post && post.chamber_id) {
+                const { data: chamberData } = yield app_1.supabase
+                    .from('custom_chambers')
+                    .select('id, name, logo, member_count, color_theme, is_public, monetization')
+                    .eq('id', post.chamber_id)
+                    .eq('is_active', true)
+                    .maybeSingle();
+                if (chamberData) {
+                    chamberInfo = {
+                        id: chamberData.id,
+                        name: chamberData.name,
+                        logo: chamberData.logo,
+                        member_count: chamberData.member_count,
+                        color_theme: chamberData.color_theme,
+                        is_public: chamberData.is_public,
+                        monetization: chamberData.monetization
+                    };
+                }
+            }
             const { data: comments } = yield app_1.supabase
                 .from('threadcomments')
                 .select('id, post_id, content, is_deleted')
                 .eq('post_id', post.id)
                 .eq('is_deleted', false);
             const commentIds = (comments === null || comments === void 0 ? void 0 : comments.map(c => c.id)) || [];
-            // Get subcomments/replies count
             const subcommentsResults = yield Promise.all(commentIds.map(commentId => app_1.supabase
                 .from('threadsubcomments')
                 .select('id')
@@ -374,7 +398,7 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 .eq('is_deleted', false)));
             const totalComments = (comments === null || comments === void 0 ? void 0 : comments.length) || 0;
             const totalReplies = subcommentsResults.reduce((sum, result) => { var _a; return sum + (((_a = result.data) === null || _a === void 0 ? void 0 : _a.length) || 0); }, 0);
-            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, total_comments: totalComments + totalReplies });
+            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, total_comments: totalComments + totalReplies, chamber: chamberInfo });
         })));
         res.status(200).json({
             success: true,
@@ -395,29 +419,17 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getPosts = getPosts;
 const addComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
         const { postId } = req.params;
         const { content } = req.body;
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized: Please login to comment'
-            });
-        }
         if (!content || content.trim().length === 0) {
             return res.status(400).json({
                 success: false,
                 message: 'Comment content is required'
             });
         }
-        // Get user profile for comment
-        const { data: userProfile } = yield app_1.supabase
-            .from('profiles')
-            .select('first_name, last_name, avatar_url')
-            .eq('id', userId)
-            .single();
         const { data, error } = yield app_1.supabase
             .from('threadcomments')
             .insert({
@@ -433,10 +445,9 @@ const addComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 message: error.message
             });
         }
-        // Send notification to post author
         const { data: postData } = yield app_1.supabase
             .from('posts')
-            .select('user_id, content')
+            .select('user_id, content, is_chamber_post, chamber_id')
             .eq('id', postId)
             .single();
         if (postData && postData.user_id !== userId) {
@@ -446,18 +457,38 @@ const addComment = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 .eq('id', postData.user_id)
                 .single();
             if (authorProfile) {
+                let soulpoints = 2;
+                if (postData.is_chamber_post && postData.chamber_id) {
+                    const { data: chamberData } = yield app_1.supabase
+                        .from('custom_chambers')
+                        .select('monetization')
+                        .eq('id', postData.chamber_id)
+                        .single();
+                    if (chamberData && ((_b = chamberData.monetization) === null || _b === void 0 ? void 0 : _b.enabled)) {
+                        soulpoints *= 2;
+                    }
+                }
+                const { error: soulpointsError } = yield app_1.supabase.rpc('increment_soulpoints', {
+                    p_user_id: postData.user_id,
+                    p_points: soulpoints
+                });
+                if (soulpointsError) {
+                    console.error('Error updating soulpoints:', soulpointsError);
+                }
                 yield (0, emitNotification_1.sendNotification)({
                     recipientEmail: authorProfile.email,
                     recipientUserId: postData.user_id,
                     actorUserId: userId,
                     threadId: postId,
-                    message: `**@someone** commented on your post. +2 soulpoints added!`,
+                    message: `**@someone** commented on your post. +${soulpoints} soulpoints added!`,
                     type: 'post_comment_added',
                     metadata: {
                         comment_id: data.id,
                         post_id: postId,
                         actor_user_id: userId,
-                        soulpoints: 2
+                        soulpoints: soulpoints,
+                        is_chamber_post: postData.is_chamber_post,
+                        chamber_id: postData.chamber_id
                     }
                 });
             }
@@ -591,7 +622,6 @@ const addReply = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
 });
 exports.addReply = addReply;
-// Get post comments with nested replies (using threadcomments and threadsubcomments)
 const getPostComments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { postId } = req.params;
@@ -630,7 +660,6 @@ const getPostComments = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getPostComments = getPostComments;
-// Get posts by user
 const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -715,7 +744,6 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getUserPosts = getUserPosts;
-// Get trending posts
 const getTrendingPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const limit = parseInt(req.query.limit) || 10;
@@ -761,7 +789,6 @@ const getTrendingPosts = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getTrendingPosts = getTrendingPosts;
-// Vote on poll
 const voteOnPoll = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -882,7 +909,6 @@ const voteOnPoll = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.voteOnPoll = voteOnPoll;
-// Get poll results
 const getPollResults = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { postId } = req.params;
@@ -936,7 +962,6 @@ const getPollResults = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.getPollResults = getPollResults;
-// Delete post (soft delete)
 const deletePost = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -972,7 +997,6 @@ const deletePost = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.deletePost = deletePost;
-// Update post
 const updatePost = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
