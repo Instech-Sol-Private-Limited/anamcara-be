@@ -10,7 +10,8 @@ import {
   getPollResults,
   deletePost,
   updatePost,
-  updatePostReaction
+  updatePostReaction,
+  getUserPostsMedia
 } from '../controllers/posts.controller';
 import {
   createComment,
@@ -37,6 +38,8 @@ router.get('/', optionalAuthMiddleware, getPosts);
 router.get('/trending', authMiddleware, getTrendingPosts);
 
 router.get('/user/:userId', authMiddleware, getUserPosts);
+
+router.get('/user-media/:userId', authMiddleware, getUserPostsMedia);
 
 router.put('/:postId', authMiddleware, updatePost);
 

@@ -1,26 +1,9 @@
 import { Request, Response } from "express";
-import { soulStoriesServices } from '../../services/soulstories.services';
+import { soulStoriesServices } from "../../services/soulStories.services"; 
 import 'dotenv/config';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-
-// Add type for story data
-interface StoryData {
-  id: string;
-  status: string;
-  price: number;
-  category: string;
-  free_pages: number;
-  free_episodes: number;
-  title: string;
-  story_type: string;
-  created_at: string;
-  monetization_type: string;
-}
-
-// Remove the GeminiService class and geminiService initialization
 
 export const createStory = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -183,6 +166,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
     });
   }
 };
+
 export const getStories = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -219,6 +203,7 @@ export const getStories = async (req: Request, res: Response) => {
     });
   }
 };
+
 export const deleteeStory = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -252,6 +237,7 @@ export const deleteeStory = async (req: Request, res: Response) => {
     });
   }
 };
+
 export const purchaseContent = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -364,6 +350,7 @@ export const getUserRevenue = async (req: Request, res: Response): Promise<void>
     });
   }
 };
+
 export const searchAllContent = async (req: Request, res: Response) => {
   try {
     const { query, category } = req.body;
@@ -716,8 +703,7 @@ export const getStoryWithReactions = async (req: Request, res: Response): Promis
 export const getCommentReactions = async (req: Request, res: Response): Promise<void> => {
   try {
     const { comment_id } = req.params;
-    const userId = req.user?.id; // Optional - can work without authentication
-
+    const userId = req.user?.id;
     if (!comment_id) {
       res.status(400).json({ 
         success: false, 
@@ -961,7 +947,6 @@ export const getUserFriends = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// Add this new endpoint for AI thumbnail suggestions
 export const generateThumbnailSuggestions = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -1047,7 +1032,6 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
   }
 };
 
-// Add quick single suggestion endpoint for faster responses
 export const generateQuickSuggestion = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -1090,6 +1074,7 @@ export const generateQuickSuggestion = async (req: Request, res: Response): Prom
     });
   }
 };
+
 export const updateStory = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -1438,7 +1423,6 @@ export const checkPdfQuality = async (req: Request, res: Response): Promise<void
   }
 };
 
-// Configure multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../../../uploads/pdfs');
@@ -1462,11 +1446,7 @@ const upload = multer({
 
 export const uploadPdfMiddleware = upload.single('pdf');
 
-// Single function that handles both multer and business logic
-export const uploadPdf = async (req: any, res: any): Promise<void> => {
-  console.log('🔍 Upload PDF function called');
-  
-  // Use multer middleware directly in the function
+export const uploadPdf = async (req: any, res: any): Promise<void> => {  
   upload.single('pdf')(req, res, async (err) => {
     console.log('🔍 Multer callback executed');
     

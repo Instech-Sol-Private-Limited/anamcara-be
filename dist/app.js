@@ -31,6 +31,7 @@ const profile_routes_1 = __importDefault(require("./routes/profile.routes"));
 const reports_routes_1 = __importDefault(require("./routes/reports.routes"));
 const notifications_routes_1 = __importDefault(require("./routes/notifications.routes"));
 const chatmessages_routes_1 = __importDefault(require("./routes/chatmessages.routes"));
+const soulStories_routes_1 = __importDefault(require("./routes/soulStories.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const dailyInsightsCron_1 = __importDefault(require("./crons/dailyInsightsCron"));
 const dailyinsights_controller_1 = require("./controllers/dailyinsights.controller");
@@ -42,8 +43,18 @@ const course_routes_1 = __importDefault(require("./routes/course.routes"));
 const enrollment_routes_1 = __importDefault(require("./routes/enrollment.routes"));
 const stories_routes_1 = __importDefault(require("./routes/stories.routes"));
 const streams_routes_1 = __importDefault(require("./routes/streams.routes"));
-const streaming_handler_1 = require("./sockets/streaming.handler");
 const users_routes_1 = __importDefault(require("./routes/users.routes"));
+const availability_routes_1 = __importDefault(require("./routes/availability.routes"));
+const products_routes_1 = __importDefault(require("./routes/products.routes"));
+const vault_routes_1 = __importDefault(require("./routes/vault.routes"));
+const analytics_routes_1 = __importDefault(require("./routes/analytics.routes"));
+const campaign_routes_1 = __importDefault(require("./routes/campaign.routes"));
+const zoomwebhook_controller_1 = require("./controllers/zoomwebhook.controller");
+const streaming_handler_1 = require("./sockets/streaming.handler");
+const paymentcron_service_1 = require("./services/paymentcron.service");
+const game_routes_1 = __importDefault(require("./routes/game.routes"));
+const dailymarketplacestats_service_1 = require("./services/dailymarketplacestats.service");
+const payment_routes_1 = __importDefault(require("./routes/payment.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -63,7 +74,6 @@ exports.supabase = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, pro
 exports.openai = new openai_1.OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
-// Middleware to allow WebSocket upgrade requests
 app.use((req, res, next) => {
     if (req.path.includes('/socket.io/') || req.headers.upgrade === 'websocket') {
         return next();
@@ -87,9 +97,11 @@ app.use(express_1.default.json());
 app.get('/', (req, res) => {
     res.status(200).send(`<h1>Server is running...</h1>`);
 });
+app.post('/api/webhooks/zoom', express_1.default.json(), zoomwebhook_controller_1.handleZoomWebhook);
 app.use('/api/conversations', auth_middleware_1.authMiddleware, conversation_routes_1.default);
 app.use('/api/chat', auth_middleware_1.authMiddleware, chat_routes_1.default);
 app.use('/api/auth', auth_routes_1.default);
+app.use('/api/users', users_routes_1.default);
 app.use('/api/blogs', blog_routes_1.default);
 app.use('/api/categories', threadcategory_routes_1.default);
 app.use('/api/threads', threads_routes_1.default);
@@ -98,14 +110,44 @@ app.use('/api/reports', reports_routes_1.default);
 app.use('/api/notifications', notifications_routes_1.default);
 app.get('/api/daily-insights', dailyinsights_controller_1.getDailyInsights);
 app.use('/api/friends', friends_routes_1.default);
-app.use('/api/chat-messages', auth_middleware_1.authMiddleware, chatmessages_routes_1.default);
+app.use('/api/chat-messages', chatmessages_routes_1.default);
 app.use('/api/posts', posts_routes_1.default);
 app.use('/api/courses', course_routes_1.default);
 app.use('/api/enrollment', enrollment_routes_1.default);
 app.use('/api/stories', auth_middleware_1.authMiddleware, stories_routes_1.default);
 app.use('/api/streams', auth_middleware_1.authMiddleware, streams_routes_1.default);
-app.use('/api/users', users_routes_1.default);
+app.use('/api/slots', auth_middleware_1.authMiddleware, availability_routes_1.default);
+app.use('/api/products', auth_middleware_1.authMiddleware, products_routes_1.default);
+app.use('/api/boostcampaign', auth_middleware_1.authMiddleware, campaign_routes_1.default);
+app.use('/api/soul-stories', soulStories_routes_1.default);
+app.use('/api/vault', auth_middleware_1.authMiddleware, vault_routes_1.default);
+app.use('/api/admin/marketplace-analytics', auth_middleware_1.authMiddleware, analytics_routes_1.default);
+app.use('/api/campaigns', auth_middleware_1.authMiddleware, campaign_routes_1.default);
+app.use('/api/stripe', payment_routes_1.default);
+app.use('/api/games', auth_middleware_1.authMiddleware, game_routes_1.default);
 node_cron_1.default.schedule('0 0 * * *', dailyInsightsCron_1.default);
+(0, paymentcron_service_1.setupPaymentCron)();
+node_cron_1.default.schedule('0 2 * * *', () => __awaiter(void 0, void 0, void 0, function* () {
+    console.log('🔄 Running daily marketplace stats collection...');
+    try {
+        yield (0, dailymarketplacestats_service_1.collectDailyStats)();
+        console.log('✅ Daily marketplace stats collection completed successfully.');
+    }
+    catch (error) {
+        console.error('❌ Daily stats collection failed:', error);
+    }
+}));
+node_cron_1.default.schedule('0 3 1 * *', () => __awaiter(void 0, void 0, void 0, function* () {
+    console.log('🔄 Running monthly provider stats collection...');
+    try {
+        yield (0, dailymarketplacestats_service_1.collectMonthlyProviderStats)();
+        console.log('✅ Monthly provider stats collection completed successfully.');
+    }
+    catch (error) {
+        console.error('❌ Monthly provider stats collection failed:', error);
+    }
+}));
+(0, dailymarketplacestats_service_1.initializeStats)();
 const server = http_1.default.createServer(app);
 exports.io = new socket_io_1.Server(server, {
     cors: {
@@ -113,7 +155,10 @@ exports.io = new socket_io_1.Server(server, {
             'http://localhost:3000',
             'http://localhost:3001',
             'http://localhost:5173',
-            'http://localhost:5174'
+            'http://localhost:5174',
+            'https://anamcara.ai',
+            'https://nirvana.anamcara.ai',
+            'https://soulstream.anamcara.ai',
         ],
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         credentials: true
@@ -125,7 +170,10 @@ exports.streamIo = new socket_io_1.Server(server, {
     cors: {
         origin: [
             'http://localhost:5173',
-            'http://localhost:5174'
+            'http://localhost:5174',
+            'https://anamcara.ai',
+            'https://nirvana.anamcara.ai',
+            'https://soulstream.anamcara.ai',
         ],
         methods: ['GET', 'POST']
     },

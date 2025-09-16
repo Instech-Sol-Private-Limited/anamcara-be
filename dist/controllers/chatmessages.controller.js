@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getChamberMessages = exports.getTravelMessages = exports.getPublicMessages = exports.getDirectMessages = exports.getChamberMembers = exports.getUserChambers = exports.updateChamber = exports.getAllChambers = exports.joinChamberByInvite = exports.createChamber = exports.getUserConversations = exports.getUserFriends = void 0;
+exports.getChamberMessages = exports.getTravelMessages = exports.getPublicMessages = exports.getDirectMessages = exports.getChamberMembers = exports.getUserChambers = exports.deleteChamber = exports.updateChamber = exports.getAllChambers = exports.joinChamberByInvite = exports.createChamber = exports.getUserConversations = exports.getUserFriends = void 0;
 const app_1 = require("../app");
 // ----------------------- friends ----------------------
 // user frineds
@@ -175,8 +175,8 @@ exports.getUserConversations = getUserConversations;
 // create custom chamber
 const createChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description = '', tags = [], members = [], is_public = false, chamber_img = null // New optional field with null default
-         } = req.body;
+        const { name, description = '', custom_url, category, color_theme = '#6366f1', rules = [], policies = '', monetization = { enabled: false }, logo = null, cover_img = null, tags = [], members = [], is_public = false } = req.body;
+        console.log(req.body);
         const { id: userId } = req.user;
         if (!name || !userId) {
             return res.status(400).json({ error: 'Missing chamber name or userId' });
@@ -197,13 +197,21 @@ const createChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             {
                 name,
                 description,
+                custom_url,
+                category,
+                color_theme,
+                rules,
+                policies,
+                monetization,
+                logo,
+                cover_img,
                 tags,
                 is_public,
                 is_active: true,
                 creator_id: userId,
                 member_count: members.length + 1,
                 invite_code,
-                chamber_img // Added the image field (can be null)
+                chamber_img: logo
             },
         ])
             .select()
@@ -211,18 +219,20 @@ const createChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (chamberError)
             throw chamberError;
         const chamberId = chamber.id;
+        // Insert chamber members
+        // Insert chamber members
         const memberInserts = [
             {
                 chamber_id: chamberId,
                 user_id: userId,
                 joined_at: new Date().toISOString(),
-                is_moderator: true,
+                role: "admin"
             },
-            ...members.map((uid) => ({
+            ...members.map((member) => ({
                 chamber_id: chamberId,
-                user_id: uid,
+                user_id: member.value,
                 joined_at: new Date().toISOString(),
-                is_moderator: false,
+                role: "member"
             })),
         ];
         const { error: membersError } = yield app_1.supabase.from('chamber_members').insert(memberInserts);
@@ -231,8 +241,7 @@ const createChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const inviteLink = `${process.env.FRONTEND_URL || 'https://yourdomain.com'}/join/${invite_code}`;
         res.status(201).json({
             message: 'Chamber created successfully',
-            chamber: Object.assign(Object.assign({}, chamber), { invite_link: inviteLink, chamber_img // Include in response
-             })
+            chamber: Object.assign(Object.assign({}, chamber), { invite_link: inviteLink })
         });
     }
     catch (err) {
@@ -291,18 +300,14 @@ exports.joinChamberByInvite = joinChamberByInvite;
 // get all chambers
 const getAllChambers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { id: userId } = req.user;
         const page = parseInt(req.query.page) || 1;
         const limit = 12;
         const offset = (page - 1) * limit;
-        if (!userId) {
-            return res.status(400).json({ error: 'Missing userId' });
-        }
         const { count: totalChambers } = yield app_1.supabase
             .from('custom_chambers')
             .select('*', { count: 'exact', head: true })
             .eq('is_active', true);
-        const { data: chamberslist, error: ownedError } = yield app_1.supabase
+        const { data: chamberslist, error: chambersError } = yield app_1.supabase
             .from('custom_chambers')
             .select(`
                 *,
@@ -316,33 +321,76 @@ const getAllChambers = (req, res) => __awaiter(void 0, void 0, void 0, function*
             .eq('is_active', true)
             .range(offset, offset + limit - 1)
             .order('updated_at', { ascending: false });
-        if (ownedError)
-            throw ownedError;
+        if (chambersError)
+            throw chambersError;
+        const chamberIds = chamberslist.map((c) => c.id);
+        let membersByChamber = {};
+        if (chamberIds.length > 0) {
+            const { data: membersList, error: membersError } = yield app_1.supabase
+                .from('chamber_members')
+                .select(`
+                    *,
+                    profile:profiles!user_id(
+                        id,
+                        first_name,
+                        last_name,
+                        email,
+                        avatar_url,
+                        is_active
+                    )
+                `)
+                .in('chamber_id', chamberIds);
+            if (membersError)
+                throw membersError;
+            membersByChamber = membersList.reduce((acc, member) => {
+                var _a, _b, _c, _d, _e, _f, _g, _h;
+                if (!acc[member.chamber_id])
+                    acc[member.chamber_id] = [];
+                // Map all chamber_members columns to the response
+                acc[member.chamber_id].push({
+                    id: member.id,
+                    chamber_id: member.chamber_id,
+                    user_id: member.user_id,
+                    joined_at: member.joined_at,
+                    is_moderator: member.is_moderator,
+                    role: member.role,
+                    is_banned: member.is_banned,
+                    banned_until: member.banned_until,
+                    ban_reason: member.ban_reason,
+                    is_flagged: member.is_flagged,
+                    flagged_count: member.flagged_count,
+                    last_flagged_at: member.last_flagged_at,
+                    is_paid: member.is_paid,
+                    payment_type: member.payment_type,
+                    last_payment_at: member.last_payment_at,
+                    next_payment_due: member.next_payment_due,
+                    payment_status: member.payment_status,
+                    // Profile information
+                    email: (_a = member.profile) === null || _a === void 0 ? void 0 : _a.email,
+                    first_name: (_b = member.profile) === null || _b === void 0 ? void 0 : _b.first_name,
+                    last_name: (_c = member.profile) === null || _c === void 0 ? void 0 : _c.last_name,
+                    avatar_url: (_d = member.profile) === null || _d === void 0 ? void 0 : _d.avatar_url,
+                    is_active: (_e = member.profile) === null || _e === void 0 ? void 0 : _e.is_active,
+                    // Computed fields for convenience
+                    user_name: `${((_f = member.profile) === null || _f === void 0 ? void 0 : _f.first_name) || ''} ${((_g = member.profile) === null || _g === void 0 ? void 0 : _g.last_name) || ''}`.trim(),
+                    is_creator: chamberIds.includes(member.chamber_id) &&
+                        ((_h = chamberslist.find((c) => c.id === member.chamber_id)) === null || _h === void 0 ? void 0 : _h.creator_id) === member.user_id
+                });
+                return acc;
+            }, {});
+        }
+        // Map to consistent format
         const allChambers = chamberslist.map((chamber) => {
-            var _a, _b, _c;
-            return ({
-                id: chamber.id,
-                chat_id: chamber.id,
-                chamber_id: chamber.id,
-                chamber_name: chamber.name,
-                name: chamber.name,
-                description: chamber.description,
-                is_public: chamber.is_public,
-                invite_code: chamber.invite_code,
-                chamber_img: chamber.chamber_img || '',
-                cover_img: chamber.cover_img || '',
-                is_active: chamber.is_active,
-                creator_id: chamber.creator_id,
-                tags: chamber.tags || [],
-                member_count: chamber.member_count || 0,
-                created_at: chamber.created_at,
-                updated_at: chamber.updated_at,
-                creator: {
+            var _a, _b, _c, _d, _e, _f, _g;
+            const inviteLink = `${process.env.FRONTEND_URL || 'https://yourdomain.com'}/join/${chamber.invite_code}`;
+            return Object.assign(Object.assign({}, chamber), { chamber_id: chamber.id, invite_link: inviteLink, creator: {
                     id: chamber.creator_id,
                     user_name: `${((_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name) || ''} ${((_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name) || ''}`.trim() || 'Creator Name',
                     avatar_url: ((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.avatar_url) || '',
-                }
-            });
+                    first_name: (_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.first_name,
+                    last_name: (_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.last_name,
+                    email: (_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.email
+                }, members: membersByChamber[chamber.id] || [], member_count: ((_g = membersByChamber[chamber.id]) === null || _g === void 0 ? void 0 : _g.length) || 0 });
         });
         const totalPages = Math.ceil((totalChambers || 0) / limit);
         res.status(200).json({
@@ -370,13 +418,14 @@ const updateChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         const { id: userId } = req.user;
         const chamberId = req.params.id;
-        const { name, description, is_public, cover_img, chamber_img } = req.body;
+        const { name, description = '', custom_url, category, color_theme = '#6366f1', rules = [], policies = '', monetization = { enabled: false }, logo = null, cover_img = null, is_public = false } = req.body;
         if (!userId) {
             return res.status(400).json({ error: 'Missing userId' });
         }
         if (!chamberId) {
             return res.status(400).json({ error: 'Missing chamberId' });
         }
+        // Validate ownership
         const { data: existingChamber, error: fetchError } = yield app_1.supabase
             .from('custom_chambers')
             .select('creator_id')
@@ -390,16 +439,23 @@ const updateChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (existingChamber.creator_id !== userId) {
             return res.status(403).json({ error: 'Unauthorized to update this chamber' });
         }
+        // Prepare update payload
         const updateData = {
             name,
             description,
+            custom_url,
+            category,
+            color_theme,
+            rules,
+            policies,
+            monetization,
+            logo,
+            cover_img,
+            chamber_img: logo,
             is_public,
             updated_at: new Date().toISOString()
         };
-        if (cover_img)
-            updateData.cover_img = cover_img;
-        if (chamber_img)
-            updateData.chamber_img = chamber_img;
+        // Update chamber
         const { data: updatedChamber, error: updateError } = yield app_1.supabase
             .from('custom_chambers')
             .update(updateData)
@@ -415,27 +471,28 @@ const updateChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             `);
         if (updateError)
             throw updateError;
+        const chamber = updatedChamber[0];
         const formattedChamber = {
-            id: updatedChamber[0].id,
-            chat_id: updatedChamber[0].id,
-            chamber_id: updatedChamber[0].id,
-            chamber_name: updatedChamber[0].name,
-            name: updatedChamber[0].name,
-            description: updatedChamber[0].description,
-            is_public: updatedChamber[0].is_public,
-            invite_code: updatedChamber[0].invite_code,
-            chamber_img: updatedChamber[0].chamber_img || '',
-            cover_img: updatedChamber[0].cover_img || '',
-            is_active: updatedChamber[0].is_active,
-            creator_id: updatedChamber[0].creator_id,
-            tags: updatedChamber[0].tags || [],
-            member_count: updatedChamber[0].member_count || 0,
-            created_at: updatedChamber[0].created_at,
-            updated_at: updatedChamber[0].updated_at,
+            id: chamber.id,
+            chat_id: chamber.id,
+            chamber_id: chamber.id,
+            chamber_name: chamber.name,
+            name: chamber.name,
+            description: chamber.description,
+            is_public: chamber.is_public,
+            invite_code: chamber.invite_code,
+            chamber_img: chamber.chamber_img || '',
+            cover_img: chamber.cover_img || '',
+            is_active: chamber.is_active,
+            creator_id: chamber.creator_id,
+            tags: chamber.tags || [],
+            member_count: chamber.member_count || 0,
+            created_at: chamber.created_at,
+            updated_at: chamber.updated_at,
             creator: {
-                id: updatedChamber[0].creator_id,
-                user_name: `${((_a = updatedChamber[0].creator) === null || _a === void 0 ? void 0 : _a.first_name) || ''} ${((_b = updatedChamber[0].creator) === null || _b === void 0 ? void 0 : _b.last_name) || ''}`.trim() || 'Creator Name',
-                avatar_url: ((_c = updatedChamber[0].creator) === null || _c === void 0 ? void 0 : _c.avatar_url) || '',
+                id: chamber.creator_id,
+                user_name: `${((_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name) || ''} ${((_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name) || ''}`.trim() || 'Creator Name',
+                avatar_url: ((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.avatar_url) || '',
             }
         };
         res.status(200).json({
@@ -452,6 +509,46 @@ const updateChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.updateChamber = updateChamber;
+const deleteChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id: userId } = req.user;
+        const { chamberId } = req.params;
+        if (!userId) {
+            return res.status(400).json({ error: "Missing userId" });
+        }
+        if (!chamberId) {
+            return res.status(400).json({ error: "Missing chamberId" });
+        }
+        const { data: chamber, error: chamberError } = yield app_1.supabase
+            .from("custom_chambers")
+            .select("id, creator_id")
+            .eq("id", chamberId)
+            .single();
+        if (chamberError)
+            throw chamberError;
+        if (!chamber) {
+            return res.status(404).json({ error: "Chamber not found" });
+        }
+        if (chamber.creator_id !== userId) {
+            return res
+                .status(403)
+                .json({ error: "Unauthorized: only creator can delete chamber" });
+        }
+        yield app_1.supabase.from("chamber_members").delete().eq("chamber_id", chamberId);
+        const { error: deleteError } = yield app_1.supabase
+            .from("custom_chambers")
+            .delete()
+            .eq("id", chamberId);
+        if (deleteError)
+            throw deleteError;
+        res.status(200).json({ success: true, message: "Chamber deleted successfully" });
+    }
+    catch (err) {
+        console.error("Error deleting chamber:", err);
+        res.status(500).json({ error: "Failed to delete chamber" });
+    }
+});
+exports.deleteChamber = deleteChamber;
 // get conversion
 const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -465,6 +562,7 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
             .select(`
                 *,
                 creator:profiles!creator_id(
+                    id,
                     first_name,
                     last_name,
                     avatar_url
@@ -490,6 +588,7 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
                 chambers:custom_chambers(
                     *,
                     creator:profiles!creator_id(
+                        id,
                         first_name,
                         last_name,
                         avatar_url
@@ -512,8 +611,67 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
         const joinedChambers = memberChambers
             .map((item) => item.chambers)
             .filter((chamber) => !!chamber);
-        const allChambers = [...ownedChambers, ...joinedChambers].map((chamber) => {
-            var _a, _b, _c, _d;
+        // Combine all chambers
+        const allChambers = [...ownedChambers, ...joinedChambers];
+        const chamberIds = allChambers.map((c) => c.id);
+        let membersByChamber = {};
+        if (chamberIds.length > 0) {
+            // Fetch complete chamber_members data for all chambers
+            const { data: membersList, error: membersError } = yield app_1.supabase
+                .from('chamber_members')
+                .select(`
+                    *,
+                    profile:profiles!user_id(
+                        id,
+                        first_name,
+                        last_name,
+                        email,
+                        avatar_url,
+                        is_active
+                    )
+                `)
+                .in('chamber_id', chamberIds);
+            if (membersError)
+                throw membersError;
+            membersByChamber = membersList.reduce((acc, member) => {
+                var _a, _b, _c, _d, _e, _f, _g, _h;
+                if (!acc[member.chamber_id])
+                    acc[member.chamber_id] = [];
+                // Map all chamber_members columns to the response
+                acc[member.chamber_id].push({
+                    id: member.id,
+                    chamber_id: member.chamber_id,
+                    user_id: member.user_id,
+                    joined_at: member.joined_at,
+                    is_moderator: member.is_moderator,
+                    role: member.role,
+                    is_banned: member.is_banned,
+                    banned_until: member.banned_until,
+                    ban_reason: member.ban_reason,
+                    is_flagged: member.is_flagged,
+                    flagged_count: member.flagged_count,
+                    last_flagged_at: member.last_flagged_at,
+                    is_paid: member.is_paid,
+                    payment_type: member.payment_type,
+                    last_payment_at: member.last_payment_at,
+                    next_payment_due: member.next_payment_due,
+                    payment_status: member.payment_status,
+                    // Profile information
+                    email: (_a = member.profile) === null || _a === void 0 ? void 0 : _a.email,
+                    first_name: (_b = member.profile) === null || _b === void 0 ? void 0 : _b.first_name,
+                    last_name: (_c = member.profile) === null || _c === void 0 ? void 0 : _c.last_name,
+                    avatar_url: (_d = member.profile) === null || _d === void 0 ? void 0 : _d.avatar_url,
+                    is_active: (_e = member.profile) === null || _e === void 0 ? void 0 : _e.is_active,
+                    // Computed fields for convenience
+                    user_name: `${((_f = member.profile) === null || _f === void 0 ? void 0 : _f.first_name) || ''} ${((_g = member.profile) === null || _g === void 0 ? void 0 : _g.last_name) || ''}`.trim(),
+                    is_creator: ((_h = allChambers.find((c) => c.id === member.chamber_id)) === null || _h === void 0 ? void 0 : _h.creator_id) === member.user_id
+                });
+                return acc;
+            }, {});
+        }
+        // Format the final response
+        const formattedChambers = allChambers.map((chamber) => {
+            var _a, _b, _c, _d, _e, _f, _g;
             return ({
                 id: chamber.id,
                 chat_id: chamber.id,
@@ -528,9 +686,9 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
                 is_chamber: true,
                 creator_id: chamber.creator_id,
                 tags: chamber.tags || [],
-                member_count: chamber.member_count || 0,
+                member_count: ((_a = membersByChamber[chamber.id]) === null || _a === void 0 ? void 0 : _a.length) || 0,
                 updated_at: chamber.updated_at,
-                last_message: ((_a = chamber.last_message) === null || _a === void 0 ? void 0 : _a[0]) ? {
+                last_message: ((_b = chamber.last_message) === null || _b === void 0 ? void 0 : _b[0]) ? {
                     id: chamber.last_message[0].id,
                     message: chamber.last_message[0].message,
                     created_at: chamber.last_message[0].created_at,
@@ -538,16 +696,20 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
                 } : null,
                 creator: {
                     id: chamber.creator_id,
-                    user_name: `${((_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.first_name) || ''} ${((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.last_name) || ''}`.trim() || 'Creator Name',
-                    avatar_url: ((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.avatar_url) || '',
-                }
+                    user_name: `${((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.first_name) || ''} ${((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.last_name) || ''}`.trim() || 'Creator Name',
+                    avatar_url: ((_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.avatar_url) || '',
+                    first_name: (_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.first_name,
+                    last_name: (_g = chamber.creator) === null || _g === void 0 ? void 0 : _g.last_name
+                },
+                // Include complete members data
+                members: membersByChamber[chamber.id] || []
             });
         });
         res.status(200).json({
             success: true,
-            data: allChambers,
+            data: formattedChambers,
             pagination: {
-                total: allChambers.length,
+                total: formattedChambers.length,
                 page: 1,
                 pages: 1,
                 hasMore: false
@@ -565,7 +727,7 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getUserChambers = getUserChambers;
 // get chamber members
 const getChamberMembers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const { chamber_id } = req.params;
         const { id: userId } = req.user;
@@ -575,13 +737,13 @@ const getChamberMembers = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const { data: chamber, error: chamberError } = yield app_1.supabase
             .from('custom_chambers')
             .select(`
-                id,
-                is_public,
-                creator_id,
+                *,
                 creator:profiles!creator_id(
+                    id,
                     first_name,
                     last_name,
-                    avatar_url
+                    avatar_url,
+                    email
                 )
             `)
             .eq('id', chamber_id)
@@ -600,39 +762,58 @@ const getChamberMembers = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 return res.status(403).json({ error: 'Not authorized to view this chamber' });
             }
         }
-        // Get all members with their profile data
+        // Get all members with their profile data and all chamber_members columns
         const { data: members, error: membersError } = yield app_1.supabase
             .from('chamber_members')
             .select(`
-                user_id,
-                is_moderator,
-                joined_at,
+                *,
                 profiles:user_id (
                     id,
                     first_name,
                     last_name,
                     avatar_url,
-                    email
+                    email,
+                    is_active
                 )
             `)
-            .eq('chamber_id', chamber_id);
+            .eq('chamber_id', chamber_id)
+            .order('joined_at', { ascending: true });
         if (membersError)
             throw membersError;
-        // Format the response
-        const formattedMembers = members.map((member) => ({
-            id: member.user_id,
-            chamber_id,
-            user_id: member.user_id,
-            first_name: member.profiles.first_name,
-            last_name: member.profiles.last_name,
-            full_name: `${member.profiles.first_name} ${member.profiles.last_name}`.trim(),
-            avatar_url: member.profiles.avatar_url,
-            is_moderator: member.is_moderator,
-            is_creator: member.user_id === chamber.creator_id,
-            joined_at: member.joined_at,
-            online: false,
-            email: member.profiles.email || '',
-        }));
+        // Format the response to include all chamber_members data
+        const formattedMembers = members.map((member) => {
+            var _a, _b, _c, _d, _e, _f, _g;
+            return ({
+                // Chamber members table columns
+                id: member.id,
+                chamber_id: member.chamber_id,
+                user_id: member.user_id,
+                joined_at: member.joined_at,
+                is_moderator: member.is_moderator,
+                role: member.role,
+                is_banned: member.is_banned,
+                banned_until: member.banned_until,
+                ban_reason: member.ban_reason,
+                is_flagged: member.is_flagged,
+                flagged_count: member.flagged_count,
+                last_flagged_at: member.last_flagged_at,
+                is_paid: member.is_paid,
+                payment_type: member.payment_type,
+                last_payment_at: member.last_payment_at,
+                next_payment_due: member.next_payment_due,
+                payment_status: member.payment_status,
+                // Profile data
+                first_name: (_a = member.profiles) === null || _a === void 0 ? void 0 : _a.first_name,
+                last_name: (_b = member.profiles) === null || _b === void 0 ? void 0 : _b.last_name,
+                full_name: `${((_c = member.profiles) === null || _c === void 0 ? void 0 : _c.first_name) || ''} ${((_d = member.profiles) === null || _d === void 0 ? void 0 : _d.last_name) || ''}`.trim(),
+                avatar_url: (_e = member.profiles) === null || _e === void 0 ? void 0 : _e.avatar_url,
+                email: (_f = member.profiles) === null || _f === void 0 ? void 0 : _f.email,
+                is_active: (_g = member.profiles) === null || _g === void 0 ? void 0 : _g.is_active,
+                // Additional computed fields
+                is_creator: member.user_id === chamber.creator_id,
+                online: false, // You might want to implement actual online status logic
+            });
+        });
         res.status(200).json({
             success: true,
             data: {
@@ -641,11 +822,20 @@ const getChamberMembers = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 is_public: chamber.is_public,
                 creator: {
                     id: chamber.creator_id,
-                    first_name: (_b = (_a = chamber.creator) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.first_name,
-                    last_name: (_d = (_c = chamber.creator) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.last_name,
-                    full_name: `${((_f = (_e = chamber.creator) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.first_name) || ''} ${((_h = (_g = chamber.creator) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.last_name) || ''}`.trim(),
-                    avatar_url: (_k = (_j = chamber.creator) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.avatar_url
+                    first_name: (_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name,
+                    last_name: (_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name,
+                    full_name: `${((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.first_name) || ''} ${((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.last_name) || ''}`.trim(),
+                    avatar_url: (_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.avatar_url,
+                    email: (_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.email,
                 },
+                chamber_info: {
+                    id: chamber.id,
+                    name: chamber.name,
+                    description: chamber.description,
+                    is_public: chamber.is_public,
+                    created_at: chamber.created_at,
+                    custom_url: chamber.custom_url
+                }
             }
         });
     }

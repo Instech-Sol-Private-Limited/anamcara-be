@@ -1,13 +1,4 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -18,68 +9,15 @@ const comments_controller_1 = require("../controllers/threads/comments.controlle
 const replies_controller_1 = require("../controllers/threads/replies.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = express_1.default.Router();
-// Create a new post
-router.post('/', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.createPost)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Get all posts with pagination
-router.get('/', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.getPosts)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Get trending posts
-router.get('/trending', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.getTrendingPosts)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Get posts by specific user
-router.get('/user/:userId', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.getUserPosts)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Get single post
-// router.get('/:postId', authMiddleware, async (req, res, next) => {
-//   try {
-//     await getPost(req, res);
-//   } catch (err) {
-//     next(err);
-//   }
-// });
-// Update post
-router.put('/:postId', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.updatePost)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Delete post (soft delete)
-router.delete('/:postId', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.deletePost)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
+router.post('/', auth_middleware_1.authMiddleware, posts_controller_1.createPost);
+router.get('/', auth_middleware_1.optionalAuthMiddleware, posts_controller_1.getPosts);
+router.get('/trending', auth_middleware_1.authMiddleware, posts_controller_1.getTrendingPosts);
+router.get('/user/:userId', auth_middleware_1.authMiddleware, posts_controller_1.getUserPosts);
+router.put('/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePost);
+router.delete('/:postId', auth_middleware_1.authMiddleware, posts_controller_1.deletePost);
+router.post('/:postId/vote', auth_middleware_1.authMiddleware, posts_controller_1.voteOnPoll);
+router.get('/:postId/results', auth_middleware_1.authMiddleware, posts_controller_1.getPollResults);
+router.patch('/apply-react/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePostReaction);
 // Toggle like on post
 // router.post('/:postId/like', authMiddleware, async (req, res, next) => {
 //   try {
@@ -104,25 +42,6 @@ router.delete('/:postId', auth_middleware_1.authMiddleware, (req, res, next) => 
 //     next(err);
 //   }
 // });
-// Vote on poll
-router.post('/:postId/vote', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.voteOnPoll)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-// Get poll results
-router.get('/:postId/results', auth_middleware_1.authMiddleware, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        yield (0, posts_controller_1.getPollResults)(req, res);
-    }
-    catch (err) {
-        next(err);
-    }
-}));
-router.patch('/apply-react/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePostReaction);
 // // ========== Post Comments ==========
 router.post('/:postId/comments', auth_middleware_1.optionalAuthMiddleware, comments_controller_1.createComment);
 router.get('/comments', auth_middleware_1.optionalAuthMiddleware, comments_controller_1.getComments);
