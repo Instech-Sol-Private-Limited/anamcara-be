@@ -39,6 +39,7 @@ import { setupPaymentCron } from './services/paymentcron.service';
 import gameRoutes from './routes/game.routes';
 import { collectDailyStats, collectMonthlyProviderStats, initializeStats } from './services/dailymarketplacestats.service';
 import PaymentRoute from './routes/payment.routes'
+import anamfamilyRoutes from './routes/anamfamily.routes'
 
 
 
@@ -111,6 +112,7 @@ app.use('/api/friends', friendsRoutes);
 app.use('/api/chat-messages', chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
+app.use('/api/anamfamily', anamfamilyRoutes)  // Add space after comma
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
