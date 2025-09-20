@@ -402,14 +402,9 @@ export const joinChamberByInvite = async (req: Request, res: Response): Promise<
 // get all chambers
 export const getAllChambers = async (req: Request, res: Response): Promise<any> => {
     try {
-        const { id: userId } = req.user!;
         const page = parseInt(req.query.page as string) || 1;
         const limit = 12;
         const offset = (page - 1) * limit;
-
-        if (!userId) {
-            return res.status(400).json({ error: 'Missing userId' });
-        }
 
         const { count: totalChambers } = await supabase
             .from('custom_chambers')

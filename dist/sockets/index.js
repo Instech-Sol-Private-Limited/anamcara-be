@@ -13,6 +13,7 @@ exports.registerSocketHandlers = exports.connectedUsers = void 0;
 const app_1 = require("../app");
 const getUserFriends_1 = require("./getUserFriends");
 const manageChambers_1 = require("./manageChambers");
+const chess_handler_1 = require("./chess.handler");
 exports.connectedUsers = new Map();
 const registerSocketHandlers = (io) => {
     console.log(exports.connectedUsers);
@@ -1752,5 +1753,7 @@ const registerSocketHandlers = (io) => {
             }
         }));
     });
+    // Register chess handlers separately
+    (0, chess_handler_1.registerChessHandlers)(io);
 };
 exports.registerSocketHandlers = registerSocketHandlers;

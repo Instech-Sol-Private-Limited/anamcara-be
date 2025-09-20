@@ -12,7 +12,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.rejectFriendRequest = exports.acceptFriendRequest = exports.sendFriendRequest = void 0;
 const app_1 = require("../app");
 const emitNotification_1 = require("../sockets/emitNotification");
-// Send friend request
 const sendFriendRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { senderId, receiverId } = req.body;
@@ -153,7 +152,6 @@ const sendFriendRequest = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.sendFriendRequest = sendFriendRequest;
-// Accept friend request
 const acceptFriendRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { friendshipId, userId } = req.body;
@@ -223,7 +221,6 @@ const acceptFriendRequest = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.acceptFriendRequest = acceptFriendRequest;
-// Reject friend request
 const rejectFriendRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { friendshipId } = req.body;

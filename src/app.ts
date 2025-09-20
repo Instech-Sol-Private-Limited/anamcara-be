@@ -108,7 +108,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.get('/api/daily-insights', getDailyInsights);
 app.use('/api/friends', friendsRoutes);
-app.use('/api/chat-messages', authMiddleware, chatMessageRoutes);
+app.use('/api/chat-messages', chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
 app.use('/api/enrollment', enrollmentRoutes);
