@@ -280,7 +280,7 @@ const createPost = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         let allocatedPoints = 0;
         let chamberName = '';
         try {
-            allocatedPoints = yield (0, posts_service_1.allocateSoulpointsForPost)(userId, is_chamber_post, chamber_id);
+            allocatedPoints = yield (0, posts_service_1.allocatesoulpointsForPost)(userId, is_chamber_post, chamber_id);
             if (is_chamber_post && chamber_id) {
                 const { data: chamber } = yield app_1.supabase
                     .from('custom_chambers')
