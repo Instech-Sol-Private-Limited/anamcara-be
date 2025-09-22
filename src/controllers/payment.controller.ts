@@ -69,8 +69,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
         },
       ],
       mode: "payment",
-      success_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/user/vault?tab=vault&session_id={CHECKOUT_SESSION_ID}&success=true`,
-      cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/user/vault?tab=vault&cancelled=true`,
+      success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&session_id={CHECKOUT_SESSION_ID}&success=true`,
+      cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&cancelled=true`,
       metadata: sessionMetadata,
       expires_at: Math.floor(Date.now() / 1000) + (30 * 60),
       ...(metadata?.userEmail && { customer_email: metadata.userEmail }),
@@ -512,111 +512,112 @@ export const sessionuserid = async (req: Request, res: Response) => {
     });
   }
 };
-export const userid = async (req: Request, res: Response) => {
-   try {
-     const { userId } = req.params;
- 
-     if (!userId) {
-       res.status(400).json({ error: "User ID is required" });
-       return;
-     }
- 
-     // Fetch AnamCoins data for the user
-     const { data: anamCoinsData, error } = await supabase
-       .from('anamcoins')
-       .select('*')
-       .eq('user_id', userId)
-       .single();
- 
-     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-       console.error('Error fetching AnamCoins:', error);
-       res.status(500).json({ 
-         success: false,
-         error: 'Failed to fetch AnamCoins data',
-         details: error.message 
-       });
-       return;
-     }
- 
-     // If no record exists, return default values
-     if (!anamCoinsData) {
-       res.json({
-         success: true,
-         data: {
-           user_id: userId,
-           total_coins: 0,
-           available_coins: 0,
-           spent_coins: 0,
-           created_at: new Date().toISOString(),
-           updated_at: new Date().toISOString()
-         }
-       });
-       return;
-     }
- 
-     res.json({
-       success: true,
-       data: anamCoinsData
-     });
- 
-   } catch (error: any) {
-     console.error("Error fetching AnamCoins:", error);
-     res.status(500).json({ 
-       success: false,
-       error: error.message || "Failed to fetch AnamCoins data" 
-     });
-   }
- };
 
- export const historyuserid= async (req: Request, res: Response) => {
-   try {
-     const { userId } = req.params;
-     const { limit = 20, offset = 0 } = req.query;
- 
-     if (!userId) {
-       res.status(400).json({ error: "User ID is required" });
-       return;
-     }
- 
-     const { data: historyData, error } = await supabase
-       .from('anamcoins_history')
-       .select('*')
-       .eq('user_id', userId)
-       .order('created_at', { ascending: false })
-       .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
- 
-     if (error) {
-       console.error('Error fetching AnamCoins history:', error);
-       res.status(500).json({ 
-         success: false,
-         error: 'Failed to fetch AnamCoins history',
-         details: error.message 
-       });
-       return;
-     }
- 
-     res.json({
-       success: true,
-       data: historyData || []
-     });
- 
-   } catch (error: any) {
-     console.error("Error fetching AnamCoins history:", error);
-     res.status(500).json({ 
-       success: false,
-       error: error.message || "Failed to fetch AnamCoins history" 
-     });
-   }
- }
- 
- export const redeem= async (req: Request, res: Response) => {
+export const userid = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      res.status(400).json({ error: "User ID is required" });
+      return;
+    }
+
+    // Fetch AnamCoins data for the user
+    const { data: anamCoinsData, error } = await supabase
+      .from('anamcoins')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Error fetching AnamCoins:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch AnamCoins data',
+        details: error.message
+      });
+      return;
+    }
+
+    // If no record exists, return default values
+    if (!anamCoinsData) {
+      res.json({
+        success: true,
+        data: {
+          user_id: userId,
+          total_coins: 0,
+          available_coins: 0,
+          spent_coins: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: anamCoinsData
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching AnamCoins:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to fetch AnamCoins data"
+    });
+  }
+};
+
+export const historyuserid = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    if (!userId) {
+      res.status(400).json({ error: "User ID is required" });
+      return;
+    }
+
+    const { data: historyData, error } = await supabase
+      .from('anamcoins_history')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+
+    if (error) {
+      console.error('Error fetching AnamCoins history:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch AnamCoins history',
+        details: error.message
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: historyData || []
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching AnamCoins history:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to fetch AnamCoins history"
+    });
+  }
+}
+
+export const redeem = async (req: Request, res: Response) => {
   try {
     const { userId, soulPointsAmount } = req.body;
 
     if (!userId || !soulPointsAmount || soulPointsAmount < 100) {
-      res.status(400).json({ 
+      res.status(400).json({
         success: false,
-        error: "Invalid request. User ID and minimum 100 SoulPoints required." 
+        error: "Invalid request. User ID and minimum 100 SoulPoints required."
       });
       return;
     }
@@ -644,7 +645,7 @@ export const userid = async (req: Request, res: Response) => {
     // Deduct SoulPoints
     const { error: deductError } = await supabase
       .from('soulpoints')
-      .update({ 
+      .update({
         points: currentSoulPoints.points - actualSoulPointsUsed,
         updated_at: new Date().toISOString()
       })
@@ -736,9 +737,9 @@ export const userid = async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error("Error redeeming SoulPoints:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: error.message || "Failed to redeem SoulPoints" 
+      error: error.message || "Failed to redeem SoulPoints"
     });
   }
 };

@@ -76,7 +76,6 @@ export const updateProfile = async (req: Request, res: Response) => {
       }
     }
 
-    // Validate social media URLs if provided
     const validateUrl = (url: string, platform: string) => {
       if (!url) return true; // Allow empty URLs
       try {
@@ -111,7 +110,6 @@ export const updateProfile = async (req: Request, res: Response) => {
       updated_at: new Date().toISOString()
     };
 
-    // Add new fields if provided
     if (username) updateData.username = username;
     if (profile_type) updateData.profile_type = profile_type;
     if (cover_url) updateData.cover_url = cover_url;

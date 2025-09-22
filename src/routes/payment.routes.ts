@@ -16,6 +16,7 @@ router.get("/transactions/:userId", transactionuserid)
 router.get("/balances/:userId", balanceuserid)
 
 router.get("/session/:id", sessionuserid)
+
 router.get("/:userId", userid)
 
 
