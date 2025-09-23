@@ -3,6 +3,7 @@ import { supabase, io } from '../app';
 import { gameService } from '../services/game.service';
 import { connectedUsers } from '../sockets';
 import { getUserEmailFromId } from '../sockets/getUserFriends';
+import { sendNotification } from '../sockets/emitNotification';
 
 export const sendChessInvite = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -143,6 +144,25 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     const inviterName = `${inviterProfile?.first_name} ${inviterProfile?.last_name || ''}`.trim();
 
+    // Store notification using existing system
+    await sendNotification({
+      recipientEmail: targetProfile.email,
+      recipientUserId: targetUserId,
+      actorUserId: userId,
+      threadId: null,
+      message: message || `You've been invited to play chess!`,
+      type: 'chess_invitation',
+      metadata: {
+        invitation_id: invitation.id,
+        room_id: invitation.room_id,
+        inviter_name: inviterName,
+        game_settings: game_settings,
+        game_type: game_settings.game_type || 'casual',
+        bet_amount: game_settings.bet_amount || 0,
+        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+      }
+    });
+
     // Send real-time notification
     const targetEmail = targetProfile.email;
     console.log('📡 Sending real-time notification to:', targetEmail);
@@ -157,7 +177,10 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
             inviter_name: inviterName,
             inviter_id: userId,
             message: message || `You've been invited to play chess!`,
-            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+            // Add betting info from game_settings for notification only
+            game_type: game_settings.game_type || 'casual',
+            bet_amount: game_settings.bet_amount || 0
           });
         });
       } else {
