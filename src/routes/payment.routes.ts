@@ -1,6 +1,6 @@
-import { Router, Request, Response } from "express";
-
-import { accountdashboarduserid, balanceuserid, checkaccountstatususerId, createCheckoutSession, historyid, historyuserid, onboardingretrun, processsuccess, redeem, sessionuserid, setupwithdrawalaccount, transactionuserid, userid, WithDraw } from "../controllers/payment.controller";
+import { Router } from "express";
+import express from 'express';
+import { accountdashboarduserid, balanceuserid, checkaccountstatususerId, createCheckoutSession, getCompleteAccountStatus, handleStripeWebhook, historyid, historyuserid, onboardingretrun, processsuccess, redeem, sessionuserid, setupwithdrawalaccount, transactionuserid, transferACToUserAccount, userid, WithDraw } from "../controllers/payment.controller";
 import { authMiddleware } from "../middleware/auth.middleware";
 
 const router = Router();
@@ -16,6 +16,7 @@ router.get("/transactions/:userId", transactionuserid)
 router.get("/balances/:userId", balanceuserid)
 
 router.get("/session/:id", sessionuserid)
+
 router.get("/:userId", userid)
 
 
@@ -26,16 +27,23 @@ router.post("/redeem", redeem)
 
 //=================== WithDrawal=========================//
 
-router.post("/setup-withdrawal-account", authMiddleware, setupwithdrawalaccount)
+router.post("/setup-withdrawal-account", authMiddleware, setupwithdrawalaccount);
 
-router.get("/check-account-status/:userId",  authMiddleware,checkaccountstatususerId)
+router.get("/check-account-status/:userId", authMiddleware, checkaccountstatususerId);
 
-router.post("/withdraw", authMiddleware, WithDraw)
+router.post("/withdraw", authMiddleware, WithDraw);
 
-router.get("/history/:userId",  authMiddleware,historyid)
+router.get("/history/:userId", authMiddleware, historyid);
 
-router.post("/account-dashboard/:userId", accountdashboarduserid)
+router.post("/account-dashboard/:userId", authMiddleware, accountdashboarduserid);
 
-router.get("/onboarding-return", onboardingretrun)
+router.get("/onboarding-return", onboardingretrun);
+
+// New routes
+router.post("/transfer-ac", authMiddleware, transferACToUserAccount);
+
+router.get("/complete-status/:userId", authMiddleware, getCompleteAccountStatus);
+
+router.post("/webhook", express.raw({ type: 'application/json' }), handleStripeWebhook);
 
 export default router;
