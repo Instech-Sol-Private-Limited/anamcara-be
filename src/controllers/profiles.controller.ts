@@ -96,6 +96,7 @@ export const updateProfile = async (req: Request, res: Response) => {
       first_name,
       last_name, 
       avatar_url,
+      cover_url,
       facebook_url: facebook_url || null,
       twitter_url: twitter_url || null,
       instagram_url: instagram_url || null,
@@ -110,9 +111,11 @@ export const updateProfile = async (req: Request, res: Response) => {
       updated_at: new Date().toISOString()
     };
 
+    console.log(updateData)
+    
     if (username) updateData.username = username;
     if (profile_type) updateData.profile_type = profile_type;
-    if (cover_url) updateData.cover_url = cover_url;
+    // if (cover_url) updateData.cover_url = cover_url;
     if (title) updateData.title = title;
     if (company) updateData.company = company;
     if (expertise) updateData.expertise = expertise;
