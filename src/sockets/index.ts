@@ -3,6 +3,7 @@ import { supabase } from '../app';
 import { getChatParticipants, getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
 import { registerChessHandlers } from './chess.handler';
+import { registerChessAIHandlers } from './chess-ai.handler';
 
 type ChamberUpdateResponse = {
   success: boolean;
@@ -2247,4 +2248,5 @@ export const registerSocketHandlers = (io: Server) => {
   
   // Register chess handlers separately
   registerChessHandlers(io);
+  registerChessAIHandlers(io);
 };
