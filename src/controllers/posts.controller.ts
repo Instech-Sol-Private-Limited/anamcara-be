@@ -399,6 +399,7 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           first_name,
           last_name,
           avatar_url,
+          username,
           email
         )
       `)
@@ -434,7 +435,7 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
       if (post.is_chamber_post && post.chamber_id) {
         const { data: chamberData } = await supabase
           .from('custom_chambers')
-          .select('id, name, logo, member_count, color_theme, is_public, monetization')
+          .select('id, name, custom_url, logo, member_count, color_theme, is_public, monetization')
           .eq('id', post.chamber_id)
           .eq('is_active', true)
           .maybeSingle();
@@ -444,6 +445,7 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
             id: chamberData.id,
             name: chamberData.name,
             logo: chamberData.logo,
+            custom_url: chamberData.custom_url,
             member_count: chamberData.member_count,
             color_theme: chamberData.color_theme,
             is_public: chamberData.is_public,
