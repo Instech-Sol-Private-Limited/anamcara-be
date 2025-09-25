@@ -40,7 +40,7 @@ router.post('/create-chamber', authMiddleware, createChamber);
 router.post('/join-chamber/:invite_code', authMiddleware, joinChamberByInvite);
 
 // get chambers
-router.get('/get-chambers', authMiddleware, getUserChambers);
+router.get('/get-chambers/:userId', authMiddleware, getUserChambers);
 
 // get chambers
 router.get('/get-all-chambers', optionalAuthMiddleware, getAllChambers);

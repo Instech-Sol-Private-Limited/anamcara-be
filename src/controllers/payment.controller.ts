@@ -69,8 +69,8 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
         },
       ],
       mode: "payment",
-      success_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/user/vault?tab=vault&session_id={CHECKOUT_SESSION_ID}&success=true`,
-      cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/user/vault?tab=vault&cancelled=true`,
+      success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&session_id={CHECKOUT_SESSION_ID}&success=true`,
+      cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&cancelled=true`,
       metadata: sessionMetadata,
       expires_at: Math.floor(Date.now() / 1000) + (30 * 60),
       ...(metadata?.userEmail && { customer_email: metadata.userEmail }),
@@ -512,111 +512,112 @@ export const sessionuserid = async (req: Request, res: Response) => {
     });
   }
 };
-export const userid = async (req: Request, res: Response) => {
-   try {
-     const { userId } = req.params;
- 
-     if (!userId) {
-       res.status(400).json({ error: "User ID is required" });
-       return;
-     }
- 
-     // Fetch AnamCoins data for the user
-     const { data: anamCoinsData, error } = await supabase
-       .from('anamcoins')
-       .select('*')
-       .eq('user_id', userId)
-       .single();
- 
-     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-       console.error('Error fetching AnamCoins:', error);
-       res.status(500).json({ 
-         success: false,
-         error: 'Failed to fetch AnamCoins data',
-         details: error.message 
-       });
-       return;
-     }
- 
-     // If no record exists, return default values
-     if (!anamCoinsData) {
-       res.json({
-         success: true,
-         data: {
-           user_id: userId,
-           total_coins: 0,
-           available_coins: 0,
-           spent_coins: 0,
-           created_at: new Date().toISOString(),
-           updated_at: new Date().toISOString()
-         }
-       });
-       return;
-     }
- 
-     res.json({
-       success: true,
-       data: anamCoinsData
-     });
- 
-   } catch (error: any) {
-     console.error("Error fetching AnamCoins:", error);
-     res.status(500).json({ 
-       success: false,
-       error: error.message || "Failed to fetch AnamCoins data" 
-     });
-   }
- };
 
- export const historyuserid= async (req: Request, res: Response) => {
-   try {
-     const { userId } = req.params;
-     const { limit = 20, offset = 0 } = req.query;
- 
-     if (!userId) {
-       res.status(400).json({ error: "User ID is required" });
-       return;
-     }
- 
-     const { data: historyData, error } = await supabase
-       .from('anamcoins_history')
-       .select('*')
-       .eq('user_id', userId)
-       .order('created_at', { ascending: false })
-       .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
- 
-     if (error) {
-       console.error('Error fetching AnamCoins history:', error);
-       res.status(500).json({ 
-         success: false,
-         error: 'Failed to fetch AnamCoins history',
-         details: error.message 
-       });
-       return;
-     }
- 
-     res.json({
-       success: true,
-       data: historyData || []
-     });
- 
-   } catch (error: any) {
-     console.error("Error fetching AnamCoins history:", error);
-     res.status(500).json({ 
-       success: false,
-       error: error.message || "Failed to fetch AnamCoins history" 
-     });
-   }
- }
- 
- export const redeem= async (req: Request, res: Response) => {
+export const userid = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      res.status(400).json({ error: "User ID is required" });
+      return;
+    }
+
+    // Fetch AnamCoins data for the user
+    const { data: anamCoinsData, error } = await supabase
+      .from('anamcoins')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Error fetching AnamCoins:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch AnamCoins data',
+        details: error.message
+      });
+      return;
+    }
+
+    // If no record exists, return default values
+    if (!anamCoinsData) {
+      res.json({
+        success: true,
+        data: {
+          user_id: userId,
+          total_coins: 0,
+          available_coins: 0,
+          spent_coins: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: anamCoinsData
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching AnamCoins:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to fetch AnamCoins data"
+    });
+  }
+};
+
+export const historyuserid = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    if (!userId) {
+      res.status(400).json({ error: "User ID is required" });
+      return;
+    }
+
+    const { data: historyData, error } = await supabase
+      .from('anamcoins_history')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+
+    if (error) {
+      console.error('Error fetching AnamCoins history:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch AnamCoins history',
+        details: error.message
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: historyData || []
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching AnamCoins history:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to fetch AnamCoins history"
+    });
+  }
+}
+
+export const redeem = async (req: Request, res: Response) => {
   try {
     const { userId, soulPointsAmount } = req.body;
 
     if (!userId || !soulPointsAmount || soulPointsAmount < 100) {
-      res.status(400).json({ 
+      res.status(400).json({
         success: false,
-        error: "Invalid request. User ID and minimum 100 SoulPoints required." 
+        error: "Invalid request. User ID and minimum 100 SoulPoints required."
       });
       return;
     }
@@ -644,7 +645,7 @@ export const userid = async (req: Request, res: Response) => {
     // Deduct SoulPoints
     const { error: deductError } = await supabase
       .from('soulpoints')
-      .update({ 
+      .update({
         points: currentSoulPoints.points - actualSoulPointsUsed,
         updated_at: new Date().toISOString()
       })
@@ -736,9 +737,9 @@ export const userid = async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error("Error redeeming SoulPoints:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: error.message || "Failed to redeem SoulPoints" 
+      error: error.message || "Failed to redeem SoulPoints"
     });
   }
 };
@@ -747,9 +748,9 @@ export const userid = async (req: Request, res: Response) => {
 
 export const setupwithdrawalaccount = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId, userEmail, userCountry = 'AE' } = req.body;
+    const userId = req.body?.id!;
+    const { email, country = 'TH' } = req.body;
 
-    // Check if user already has account
     const { data: existingAccount } = await supabase
       .from('user_accounts')
       .select('*')
@@ -761,40 +762,55 @@ export const setupwithdrawalaccount = async (req: Request, res: Response): Promi
       return;
     }
 
-    // If account exists but not ready, create new onboarding link
     let accountId = existingAccount?.stripe_account_id;
 
     if (!accountId) {
-      // Create Express account
-      const account = await stripe.accounts.create({
-        type: 'standard',
-        country: userCountry,
-        email: userEmail,
-      });
+      const accountParams: any = {
+        type: 'express',
+        country: country.toUpperCase(),
+        email: email,
+        capabilities: {
+          card_payments: { requested: true },
+        },
+        settings: {
+          payouts: {
+            schedule: {
+              delay_days: 'minimum',
+            },
+          },
+        },
+      };
+
+      if (country.toUpperCase() !== 'TH') {
+        accountParams.capabilities.transfers = { requested: true };
+      }
+
+      const account = await stripe.accounts.create(accountParams);
 
       accountId = account.id;
 
-      // Save account info
-      await supabase.from('user_accounts').upsert({
+      const accountConnection = await supabase.from('user_accounts').upsert({
         user_id: userId,
         stripe_account_id: account.id,
         account_ready: false,
+        account_type: 'express',
+        country: country.toUpperCase(),
         created_at: new Date().toISOString()
       });
-    }
 
-    // Create onboarding link with FIXED return URLs pointing to TextVault tab
+    }
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${process.env.CLIENT_URL}/user/dashboard#vault`,
-      return_url: `${process.env.CLIENT_URL}/user/dashboard?setup=complete&accountId=${accountId}#vault`,
+      refresh_url: `${process.env.BASE_URL}/user/dashboard#vault`,
+      return_url: `${process.env.BASE_URL}/oasis/vault`,
       type: 'account_onboarding',
     });
 
     res.json({
       success: true,
       onboardingUrl: accountLink.url,
-      accountId: accountId
+      accountId: accountId,
+      country: country.toUpperCase()
     });
 
   } catch (error: any) {
@@ -820,7 +836,7 @@ export const checkaccountstatususerId = async (req: Request, res: Response): Pro
 
     // Check with Stripe
     const account = await stripe.accounts.retrieve(userAccount.stripe_account_id);
-    const isReady = account.charges_enabled && account.payouts_enabled;
+    const isReady = account.details_submitted && account.payouts_enabled;
 
     // Update our database when account status changes
     if (isReady !== userAccount.account_ready) {
@@ -833,12 +849,26 @@ export const checkaccountstatususerId = async (req: Request, res: Response): Pro
         .eq('user_id', userId);
     }
 
+    // Get account balance if ready
+    let balance = null;
+    if (isReady) {
+      try {
+        const stripeBalance = await stripe.balance.retrieve({
+          stripeAccount: userAccount.stripe_account_id,
+        });
+        balance = stripeBalance;
+      } catch (balanceError) {
+        console.warn("Could not retrieve balance:", balanceError);
+      }
+    }
+
     res.json({
       accountReady: isReady,
       needsSetup: !isReady,
       accountId: userAccount.stripe_account_id,
-      chargesEnabled: account.charges_enabled,
-      payoutsEnabled: account.payouts_enabled
+      detailsSubmitted: account.details_submitted,
+      payoutsEnabled: account.payouts_enabled,
+      balance: balance
     });
 
   } catch (error: any) {
@@ -847,14 +877,13 @@ export const checkaccountstatususerId = async (req: Request, res: Response): Pro
   }
 };
 
-export const WithDraw = async (req: Request, res: Response): Promise<void> => {
-
+export const transferACToUserAccount = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, acAmount } = req.body;
 
     // Validate input
     if (!acAmount || acAmount < 10) {
-      res.status(400).json({ error: "Minimum withdrawal: 10 AC" });
+      res.status(400).json({ error: "Minimum transfer: 10 AC" });
       return;
     }
 
@@ -867,15 +896,15 @@ export const WithDraw = async (req: Request, res: Response): Promise<void> => {
 
     if (!userAccount?.account_ready) {
       res.status(400).json({
-        error: "Withdrawal account not set up. Please connect your bank account first.",
+        error: "Account not set up. Please connect your bank account first.",
         needsSetup: true
       });
       return;
     }
 
-    // Check AnamCoins balance from the correct table
+    // Check AnamCoins balance
     const { data: balance, error: balanceError } = await supabase
-      .from('anamcoins')  // Make sure this table exists
+      .from('anamcoins')
       .select('total_coins')
       .eq('user_id', userId)
       .single();
@@ -894,28 +923,145 @@ export const WithDraw = async (req: Request, res: Response): Promise<void> => {
 
     // Calculate amounts (100 AC = 89 USD after 11% tax)
     const grossUSD = acAmount * 1; // 1:1 rate
-    const tax = grossUSD * 0.11; // 11% tax
+    const tax = grossUSD * 0.11; // 11% platform fee
     const netUSD = grossUSD - tax;
     const transferAmount = Math.floor(netUSD * 100); // Convert to cents
 
     if (transferAmount < 50) { // Stripe minimum $0.50
-      res.status(400).json({ error: "Amount too small after tax deduction" });
+      res.status(400).json({ error: "Amount too small after fee deduction" });
       return;
     }
 
-    // Create transfer to user's connected account
-    const transfer = await stripe.payouts.create({
+    // Create transfer from YOUR platform account to user's connected account
+    const transfer = await stripe.transfers.create({
       amount: transferAmount,
       currency: 'usd',
       destination: userAccount.stripe_account_id,
-      description: `AnamCoins withdrawal: ${acAmount} AC → $${netUSD.toFixed(2)} USD`,
+      description: `AnamCoins transfer: ${acAmount} AC → $${netUSD.toFixed(2)} USD`,
       metadata: {
         userId: userId,
         acAmount: acAmount.toString(),
         grossUSD: grossUSD.toString(),
-        taxAmount: tax.toString(),
-        netUSD: netUSD.toString()
+        platformFee: tax.toString(),
+        netUSD: netUSD.toString(),
+        transfer_type: 'ac_to_stripe'
       }
+    });
+
+    // Generate unique transaction ID
+    const transactionId = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Save transfer record
+    const { data: transferRecord, error: transferError } = await supabase
+      .from('ac_transfers')
+      .insert({
+        transaction_id: transactionId,
+        user_id: userId,
+        ac_amount: acAmount,
+        gross_amount: grossUSD,
+        platform_fee: tax,
+        net_amount: netUSD,
+        stripe_transfer_id: transfer.id,
+        status: 'completed',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (transferError) {
+      console.error("Failed to save transfer record:", transferError);
+      res.status(500).json({ error: "Failed to save transfer record" });
+      return;
+    }
+
+    // DEDUCT AC from user's balance
+    const { error: updateError } = await supabase
+      .from('anamcoins')
+      .update({
+        total_coins: balance.total_coins - acAmount,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId);
+
+    if (updateError) {
+      console.error("Failed to update user balance:", updateError);
+      res.status(500).json({ error: "Failed to update balance" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      transfer: transferRecord,
+      transferId: transfer.id,
+      message: `Successfully transferred ${acAmount} AC to your Stripe account. $${netUSD.toFixed(2)} is now available for withdrawal.`,
+      details: {
+        acAmount,
+        grossUSD,
+        platformFee: tax,
+        netUSD,
+        remainingBalance: balance.total_coins - acAmount
+      }
+    });
+
+  } catch (error: any) {
+    console.error("Transfer error:", error);
+    res.status(500).json({ error: `Transfer failed: ${error.message}` });
+  }
+};
+
+export const WithDraw = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, amount } = req.body;
+
+    // Validate input
+    if (!amount || amount < 1) {
+      res.status(400).json({ error: "Minimum withdrawal: $1 USD" });
+      return;
+    }
+
+    // Check user's account is ready
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (!userAccount?.account_ready) {
+      res.status(400).json({
+        error: "Withdrawal account not set up. Please connect your bank account first.",
+        needsSetup: true
+      });
+      return;
+    }
+
+    // Check Stripe account balance
+    const balance = await stripe.balance.retrieve({
+      stripeAccount: userAccount.stripe_account_id,
+    });
+
+    const availableUSD = balance.available.find(b => b.currency === 'usd');
+    const requestedAmount = Math.floor(amount * 100); // Convert to cents
+
+    if (!availableUSD || availableUSD.amount < requestedAmount) {
+      res.status(400).json({
+        error: `Insufficient funds in Stripe account. Available: $${(availableUSD?.amount || 0) / 100}`,
+        availableBalance: (availableUSD?.amount || 0) / 100
+      });
+      return;
+    }
+
+    // Create payout to user's bank account
+    const payout = await stripe.payouts.create({
+      amount: requestedAmount,
+      currency: 'usd',
+      method: 'standard', // Can be 'instant' for faster but with fee
+      description: `Bank withdrawal: $${amount}`,
+      metadata: {
+        userId: userId,
+        withdrawal_type: 'bank_payout'
+      }
+    }, {
+      stripeAccount: userAccount.stripe_account_id, // Payout from user's connected account
     });
 
     // Generate unique transaction ID
@@ -927,64 +1073,39 @@ export const WithDraw = async (req: Request, res: Response): Promise<void> => {
       .insert({
         transaction_id: transactionId,
         user_id: userId,
-        ac_amount: acAmount,
-        gross_amount: grossUSD,
-        tax_amount: tax,
-        net_amount: netUSD,
-        stripe_transfer_id: transfer.id,
-        status: 'completed',
+        amount: amount,
+        currency: 'usd',
+        stripe_payout_id: payout.id,
+        status: payout.status,
+        estimated_arrival: new Date(payout.arrival_date * 1000).toISOString(),
         created_at: new Date().toISOString()
       })
       .select()
       .single();
 
     if (withdrawalError) {
-      // If withdrawal record fails, we should ideally reverse the transfer
       console.error("Failed to save withdrawal record:", withdrawalError);
       res.status(500).json({ error: "Failed to save withdrawal record" });
       return;
     }
 
-    // DEDUCT AC from user's balance - CRITICAL STEP
-    const { error: updateError } = await supabase
-      .from('anamcoins')
-      .update({
-        total_coins: balance.total_coins - acAmount,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId);
-
-    if (updateError) {
-      console.error("Failed to update user balance:", updateError);
-      // Note: In production, you'd want to handle this more carefully
-      // possibly by reversing the Stripe transfer
-    }
-
     res.json({
       success: true,
       withdrawal,
-      transferId: transfer.id,
-      message: `Successfully withdrawn ${acAmount} AC. $${netUSD.toFixed(2)} has been sent to your bank account.`,
+      payoutId: payout.id,
+      message: `Withdrawal initiated. $${amount} will arrive in your bank account by ${new Date(payout.arrival_date * 1000).toLocaleDateString()}.`,
       details: {
-        acAmount,
-        grossUSD,
-        taxAmount: tax,
-        netUSD,
-        remainingBalance: balance.total_coins - acAmount
+        amount,
+        currency: 'usd',
+        estimatedArrival: new Date(payout.arrival_date * 1000),
+        status: payout.status,
+        remainingBalance: (availableUSD.amount - requestedAmount) / 100
       }
     });
 
   } catch (error: any) {
     console.error("Withdrawal error:", error);
-
-    // Provide more specific error messages
-    if (error.type === 'StripeCardError') {
-      res.status(400).json({ error: "Payment processing failed. Please check your account details." });
-    } else if (error.type === 'StripeInvalidRequestError') {
-      res.status(400).json({ error: "Invalid request. Please check your account setup." });
-    } else {
-      res.status(500).json({ error: `Withdrawal failed: ${error.message}` });
-    }
+    res.status(500).json({ error: `Withdrawal failed: ${error.message}` });
   }
 };
 
@@ -993,71 +1114,53 @@ export const historyid = async (req: Request, res: Response) => {
     const { userId } = req.params;
     const { limit = 50, offset = 0 } = req.query;
 
-    // Check if withdrawals table exists first
-    const { data: tableCheck } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_schema', 'public')
-      .eq('table_name', 'withdrawals')
-      .single();
+    const { data: transfers, error: transfersError } = await supabase
+      .from('ac_transfers')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
 
-    if (!tableCheck) {
-      // Return empty array if table doesn't exist yet
-      res.json({
-        success: true,
-        withdrawals: [],
-        count: 0,
-        message: "Withdrawals table not yet created"
-      });
-      return;
-    }
-
-    const { data: withdrawals, error } = await supabase
+    // Get withdrawals
+    const { data: withdrawals, error: withdrawalsError } = await supabase
       .from('withdrawals')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .range(Number(offset), Number(offset) + Number(limit) - 1);
 
-    if (error) {
-      console.error("History fetch error:", error);
-
-      // If table doesn't exist error, return empty array
-      if (error.code === '42P01') {
-        res.json({
-          success: true,
-          withdrawals: [],
-          count: 0,
-          message: "No withdrawals table found - please create the database schema"
-        });
-        return;
-      }
-
-      res.status(500).json({ error: "Failed to fetch withdrawal history" });
-      return;
+    if (transfersError && transfersError.code !== '42P01') {
+      console.error("Transfers fetch error:", transfersError);
     }
+
+    if (withdrawalsError && withdrawalsError.code !== '42P01') {
+      console.error("Withdrawals fetch error:", withdrawalsError);
+    }
+
+    // Combine and sort by date
+    const allTransactions = [
+      ...(transfers || []).map(t => ({ ...t, type: 'transfer' })),
+      ...(withdrawals || []).map(w => ({ ...w, type: 'withdrawal' }))
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     res.json({
       success: true,
+      transactions: allTransactions,
+      transfers: transfers || [],
       withdrawals: withdrawals || [],
-      count: withdrawals?.length || 0
+      count: allTransactions.length
     });
 
   } catch (error: any) {
     console.error("History error:", error);
-
-    // Handle table doesn't exist gracefully
-    if (error.code === '42P01') {
-      res.json({
-        success: true,
-        withdrawals: [],
-        count: 0,
-        message: "Withdrawals table not found - please run the database schema setup"
-      });
-      return;
-    }
-
-    res.status(500).json({ error: error.message });
+    res.json({
+      success: true,
+      transactions: [],
+      transfers: [],
+      withdrawals: [],
+      count: 0,
+      message: "History tables not found - please run database setup"
+    });
   }
 };
 
@@ -1084,6 +1187,7 @@ export const accountdashboarduserid = async (req: Request, res: Response) => {
     const loginLink = await stripe.accounts.createLoginLink(userAccount.stripe_account_id);
 
     res.json({
+      success: true,
       dashboardUrl: loginLink.url
     });
 
@@ -1098,13 +1202,12 @@ export const onboardingretrun = async (req: Request, res: Response) => {
     const { accountId } = req.query;
 
     if (!accountId) {
-      res.redirect(`${process.env.CLIENT_URL}/user/dashboard#Vault`);
+      res.redirect(`${process.env.CLIENT_URL}/user/dashboard#vault`);
       return;
     }
 
-    // Check account status and update database
     const account = await stripe.accounts.retrieve(accountId as string);
-    const isReady = account.charges_enabled && account.payouts_enabled;
+    const isReady = account.details_submitted && account.payouts_enabled;
 
     await supabase
       .from('user_accounts')
@@ -1123,4 +1226,117 @@ export const onboardingretrun = async (req: Request, res: Response) => {
   }
 };
 
+export const getCompleteAccountStatus = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
 
+    // Get user account info
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    // Get AnamCoins balance
+    const { data: acBalance } = await supabase
+      .from('anamcoins')
+      .select('total_coins')
+      .eq('user_id', userId)
+      .single();
+
+    let stripeBalance = null;
+    let accountDetails = null;
+
+    if (userAccount?.stripe_account_id) {
+      try {
+        // Get Stripe account details
+        accountDetails = await stripe.accounts.retrieve(userAccount.stripe_account_id);
+
+        // Get Stripe balance if account is ready
+        if (accountDetails.details_submitted && accountDetails.payouts_enabled) {
+          stripeBalance = await stripe.balance.retrieve({
+            stripeAccount: userAccount.stripe_account_id,
+          });
+        }
+      } catch (error) {
+        console.warn("Could not retrieve Stripe data:", error);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        hasStripeAccount: !!userAccount?.stripe_account_id,
+        accountReady: userAccount?.account_ready || false,
+        stripeAccountId: userAccount?.stripe_account_id,
+        anamCoinsBalance: acBalance?.total_coins || 0,
+        stripeBalance: stripeBalance,
+        accountDetails: accountDetails ? {
+          detailsSubmitted: accountDetails.details_submitted,
+          payoutsEnabled: accountDetails.payouts_enabled,
+          chargesEnabled: accountDetails.charges_enabled,
+          country: accountDetails.country,
+          email: accountDetails.email
+        } : null
+      }
+    });
+
+  } catch (error: any) {
+    console.error("Complete status error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const handleStripeWebhook = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const sig = req.headers['stripe-signature'] as string;
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+    const event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+
+    switch (event.type) {
+      case 'account.updated':
+        const account = event.data.object as Stripe.Account;
+
+        await supabase
+          .from('user_accounts')
+          .update({
+            account_ready: account.details_submitted && account.payouts_enabled,
+            updated_at: new Date().toISOString()
+          })
+          .eq('stripe_account_id', account.id);
+        break;
+
+      case 'payout.paid':
+      case 'payout.failed':
+        const payout = event.data.object as Stripe.Payout;
+
+        await supabase
+          .from('withdrawals')
+          .update({
+            status: payout.status,
+            updated_at: new Date().toISOString()
+          })
+          .eq('stripe_payout_id', payout.id);
+        break;
+
+      case 'transfer.created':
+      case 'transfer.updated':
+        const transfer = event.data.object as Stripe.Transfer;
+
+        await supabase
+          .from('ac_transfers')
+          .update({
+            status: transfer.amount > 0 ? 'completed' : 'failed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('stripe_transfer_id', transfer.id);
+        break;
+    }
+
+    res.json({ received: true });
+  } catch (error: any) {
+    console.error("Webhook error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
