@@ -481,14 +481,18 @@ const updateCommentReaction = async (
       .eq('id', comment_id);
 
     if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', user_id)  // this is the user who reacted
+  .single();
     if (shouldSendNotification && authorProfile) {
       await sendNotification({
         recipientEmail: authorProfile.email,
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
+        message: `${actorProfile?.first_name} ${ actorProfile?.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
         type: parentType === 'thread' ? 'reaction_updated' : 'post_comment_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,

@@ -60,7 +60,11 @@ export const updatePostReaction = async (
     .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, is_chamber_post, chamber_id')
     .eq('id', postId)
     .single();
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', user_id)  // this is the user who reacted
+  .single();
   if (postError || !postData) {
     return res.status(404).json({ error: 'Post not found!' });
   }
@@ -79,6 +83,8 @@ export const updatePostReaction = async (
       authorProfile = profileData;
     }
   }
+
+
 
   const updates = {
     total_likes: postData.total_likes ?? 0,
@@ -156,7 +162,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
+        message: `**@${  actorProfile?.first_name    } ${ actorProfile?.last_name}** changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
         type: 'post_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,
@@ -225,7 +231,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. +${soulpoints} soulpoints added!`,
+        message: `**@${  actorProfile?.first_name    } ${ actorProfile?.last_name}** reacted with _${getReactionDisplayName(type)}_ on your post. +${soulpoints} soulpoints added!`,
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,
@@ -529,7 +535,11 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
         message: error.message
       });
     }
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)  // this is the user who reacted
+  .single();
     const { data: postData } = await supabase
       .from('posts')
       .select('user_id, content, is_chamber_post, chamber_id')
@@ -572,7 +582,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
           recipientUserId: postData.user_id,
           actorUserId: userId,
           threadId: postId,
-          message: `**@someone** commented on your post. +${soulpoints} soulpoints added!`,
+          message: `${  actorProfile?.first_name    } ${ actorProfile?.last_name} commented on your post. +${soulpoints} soulpoints added!`,
           type: 'post_comment_added',
           metadata: {
             comment_id: data.id,
@@ -667,7 +677,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: commentData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `**@someone** replied to your comment. +1 soulpoint added!`,
+            message: `**${commentAuthorProfile?.first_name} ${ commentAuthorProfile?.last_name }** replied to your comment. +1 soulpoint added!`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -679,7 +689,11 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
           });
         }
       }
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)  // this is the user who reacted
+  .single();
       // Also send notification to post author if different from comment author
       const { data: postData } = await supabase
         .from('posts')
@@ -700,7 +714,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: postData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `**@someone** replied to a comment on your post.`,
+            message: `**${actorProfile?.first_name} ${ actorProfile?.last_name}}** replied to a comment on your post.`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1050,7 +1064,11 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
           message: error.message
         });
       }
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)  // this is the user who reacted
+  .single();
       // Send notification to poll creator
       if (post.user_id !== userId) {
         const { data: authorProfile } = await supabase
@@ -1065,7 +1083,7 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: post.user_id,
             actorUserId: userId,
             threadId: postId,
-            message: `**@someone** voted on your poll. +1 soulpoint added!`,
+            message: `**${  actorProfile?.first_name    } ${ actorProfile?.last_name}** voted on your poll. +1 soulpoint added!`,
             type: 'poll_vote_added',
             metadata: {
               post_id: postId,

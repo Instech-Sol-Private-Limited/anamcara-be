@@ -586,14 +586,18 @@ const updateReaction = async (
       .eq('id', thread_id);
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
-
+const { data: actorProfile, error: actorError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', user_id)  // this is the user who reacted
+  .single();
     if (shouldSendNotification && authorProfile) {
       await sendNotification({
         recipientEmail: authorProfile.email,
         recipientUserId: threadData.author_id,
         actorUserId: user_id,
         threadId: thread_id,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.split(' ').length > 3
+        message: `${actorProfile?.first_name} ${ actorProfile?.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.split(' ').length > 3
           ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
           : threadData.title
           }**`,
