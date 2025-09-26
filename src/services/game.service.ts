@@ -15,7 +15,7 @@ export const gameService = {
     
     const roomId = `chess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     console.log('🏠 Generated room ID:', roomId);
-    
+    //
     const invitationData = {
       room_id: roomId,
       inviter_id: data.inviter_id,

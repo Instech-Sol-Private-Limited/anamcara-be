@@ -497,7 +497,7 @@ export const fetchAllUsers = async (req: Request, res: Response) => {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-
+//
     const filters = req.body;
 
     const result = await gameService.getAllUsers(filters);

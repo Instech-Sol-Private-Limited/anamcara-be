@@ -79,7 +79,7 @@ export const registerChessAIHandlers = (io: Server) => {
           } else {
             console.log('❌ No AI move generated, retrying...');
           }
-          
+          //
           // Small delay before retry
           if (attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 100));
