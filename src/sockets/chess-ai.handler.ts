@@ -79,7 +79,7 @@ export const registerChessAIHandlers = (io: Server) => {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
-        
+        //
         if (!aiMove) {
           console.log('❌ Failed to generate valid AI move after', maxAttempts, 'attempts');
           socket.emit('ai_move_error', { message: 'Failed to generate valid AI move' });
