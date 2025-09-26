@@ -3,7 +3,80 @@ import { supabase, io } from '../app';
 import { gameService } from '../services/game.service';
 import { connectedUsers } from '../sockets';
 import { getUserEmailFromId } from '../sockets/getUserFriends';
+import { sendNotification } from '../sockets/emitNotification';
+import { chessAIService } from '../services/chess-ai.service';
+export const createAIGame = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
 
+    const { difficulty = 'medium', player_color = 'white' } = req.body;
+
+    console.log('🤖 Creating AI game:', { userId, difficulty, player_color });
+
+    const aiGameData = await chessAIService.createAIGame(userId, difficulty, player_color);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        room_id: aiGameData.room_id,
+        room_link: `${process.env.CLIENT_URL}/chess/room/${aiGameData.room_id}`,
+        ai_difficulty: aiGameData.ai_difficulty,
+        player_color: aiGameData.player_color,
+        game_type: 'ai'
+      },
+      message: 'AI chess game created successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating AI game:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create AI game',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const requestAIMove = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { room_id } = req.params;
+    const { difficulty } = req.body;
+
+    console.log('🤖 AI move requested for room:', room_id);
+
+    // Generate AI move
+    const aiMove = chessAIService.generateAIMove(difficulty);
+
+    if (!aiMove) {
+      res.status(400).json({ success: false, message: 'No valid AI moves available' });
+      return;
+    }
+
+    // Add natural delay
+    setTimeout(() => {
+      res.status(200).json({
+        success: true,
+        data: {
+          move: aiMove,
+          ai_move: true,
+          room_id: room_id
+        },
+        message: 'AI move generated successfully'
+      });
+    }, Math.random() * 1000 + 500);
+
+  } catch (error) {
+    console.error('❌ Error generating AI move:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate AI move',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }}
 export const sendChessInvite = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -143,6 +216,25 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     const inviterName = `${inviterProfile?.first_name} ${inviterProfile?.last_name || ''}`.trim();
 
+    // Store notification using existing system
+    await sendNotification({
+      recipientEmail: targetProfile.email,
+      recipientUserId: targetUserId,
+      actorUserId: userId,
+      threadId: null,
+      message: message || `You've been invited to play chess!`,
+      type: 'chess_invitation',
+      metadata: {
+        invitation_id: invitation.id,
+        room_id: invitation.room_id,
+        inviter_name: inviterName,
+        game_settings: game_settings,
+        game_type: game_settings.game_type || 'casual',
+        bet_amount: game_settings.bet_amount || 0,
+        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+      }
+    });
+
     // Send real-time notification
     const targetEmail = targetProfile.email;
     console.log('📡 Sending real-time notification to:', targetEmail);
@@ -157,7 +249,10 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
             inviter_name: inviterName,
             inviter_id: userId,
             message: message || `You've been invited to play chess!`,
-            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+            // Add betting info from game_settings for notification only
+            game_type: game_settings.game_type || 'casual',
+            bet_amount: game_settings.bet_amount || 0
           });
         });
       } else {
@@ -463,6 +558,95 @@ export const getChessLeaderboard = async (req: Request, res: Response): Promise<
     res.status(500).json({
       success: false,
       message: 'Failed to get leaderboard',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const getAIGameStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { room_id } = req.params;
+
+    const { data: gameRoom, error } = await supabase
+      .from('chess_games')
+      .select('*')
+      .eq('room_id', room_id)
+      .eq('is_ai_game', true)
+      .single();
+
+    if (error || !gameRoom) {
+      res.status(404).json({
+        success: false,
+        message: 'AI game not found'
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        room_id: gameRoom.room_id,
+        ai_difficulty: gameRoom.ai_difficulty,
+        player_color: gameRoom.player_color,
+        current_turn: gameRoom.current_turn,
+        game_status: gameRoom.game_status,
+        is_ai_game: gameRoom.is_ai_game
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting AI game status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get AI game status',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const generateAIMoveWithBoard = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { room_id } = req.params;
+    const { board_state, difficulty = 'medium' } = req.body;
+
+    console.log('🤖 AI move requested with board state:', { room_id, difficulty });
+
+    const aiMove = chessAIService.generateAIMove(difficulty, board_state);
+
+    if (!aiMove) {
+      res.status(400).json({
+        success: false,
+        message: 'No valid AI moves available'
+      });
+      return;
+    }
+
+    if (!chessAIService.isValidMove(board_state, aiMove)) {
+      res.status(400).json({
+        success: false,
+        message: 'Generated invalid move'
+      });
+      return;
+    }
+
+    console.log('✅ AI move generated:', aiMove);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        move: aiMove,
+        ai_move: true,
+        room_id: room_id,
+        difficulty: difficulty
+      },
+      message: 'AI move generated successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating AI move with board:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate AI move',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
