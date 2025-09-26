@@ -47,12 +47,6 @@ export const registerChessAIHandlers = (io: Server) => {
           aiColor = gameRoom?.player_color === 'white' ? 'black' : 'white';
         }
         
-        // Ensure board state is valid
-        if (!boardState || !boardState.a8) {
-          console.log('❌ Invalid board state, using initial board');
-          boardState = chessAIService.getInitialBoardState();
-        }
-        
         console.log('🤖 AI using board state:', JSON.stringify(boardState, null, 2));
         console.log('🤖 AI color:', aiColor);
         

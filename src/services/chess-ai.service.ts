@@ -1,5 +1,32 @@
 import { supabase } from '../app';
 
+interface ChessMove {
+  from: string;
+  to: string;
+  piece: string;
+  captured: string | null;
+  san: string;
+  isCastling?: boolean;
+  isEnPassant?: boolean;
+  promotion?: string;
+}
+
+interface GameState {
+  board: { [key: string]: string | null };
+  currentTurn: 'white' | 'black';
+  castlingRights: {
+    whiteKing: boolean;
+    whiteQueen: boolean;
+    blackKing: boolean;
+    blackQueen: boolean;
+  };
+  enPassantTarget: string | null;
+  halfMoveClock: number;
+  fullMoveNumber: number;
+  whiteKing?: string;
+  blackKing?: string;
+}
+
 export const chessAIService = {
   async createAIGame(userId: string, difficulty: 'easy' | 'medium' | 'hard' = 'medium', playerColor: 'white' | 'black' = 'white') {
     const roomId = `chess_ai_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -50,42 +77,119 @@ export const chessAIService = {
       board = this.fenToBoard(board);
     }
     
-    console.log(' AI using board state:', board);
+    console.log('🤖 AI using board state:', board);
     
-    const possibleMoves = this.findPossibleMoves(board, aiColor || 'black');
+    // Find all pieces of the AI color
+    const aiColorPrefix = aiColor === 'white' ? 'w' : 'b';
+    const aiPieces = [];
+    for (const [square, piece] of Object.entries(board)) {
+      if (piece && (piece as string).startsWith(aiColorPrefix)) {
+        aiPieces.push({ square, piece: piece as string });
+      }
+    }
     
-    console.log(' Found possible moves:', possibleMoves.length);
+    console.log(`🤖 Found ${aiColor} pieces:`, aiPieces);
     
-    if (possibleMoves.length === 0) {
-      console.log('🤖 No possible moves for AI');
+    // Get valid moves for ALL piece types
+    const allValidMoves = [];
+    
+    for (const { square, piece } of aiPieces) {
+      const gameState: GameState = {
+        board,
+        currentTurn: aiColor || 'black',
+        castlingRights: {
+          whiteKing: true,
+          whiteQueen: true,
+          blackKing: true,
+          blackQueen: true
+        },
+        enPassantTarget: null,
+        halfMoveClock: 0,
+        fullMoveNumber: 1,
+        whiteKing: this.findKing(board, 'w') || undefined,
+        blackKing: this.findKing(board, 'b') || undefined
+      };
+      
+      const pieceMoves = this.getPieceMoves(square, piece, gameState);
+      allValidMoves.push(...pieceMoves);
+    }
+    
+    console.log('🤖 All valid moves found:', allValidMoves.length);
+    
+    if (allValidMoves.length === 0) {
+      console.log('🤖 No valid moves available');
       return null;
     }
-
+    
+    // Filter out moves that would put own king in check
+    const legalMoves = allValidMoves.filter(move => !this.wouldPutKingInCheck(move, {
+      board,
+      currentTurn: aiColor || 'black',
+      castlingRights: {
+        whiteKing: true,
+        whiteQueen: true,
+        blackKing: true,
+        blackQueen: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1,
+      whiteKing: this.findKing(board, 'w') || undefined,
+      blackKing: this.findKing(board, 'b') || undefined
+    }));
+    
+    console.log('🤖 Legal moves after check validation:', legalMoves.length);
+    
+    if (legalMoves.length === 0) {
+      console.log('🤖 No legal moves available (all would put king in check)');
+      return null;
+    }
+    
     let selectedMove;
     switch (difficulty) {
       case 'easy':
-        selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+        selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
         break;
       case 'medium':
-        const capturingMoves = possibleMoves.filter(move => move.captured);
-        selectedMove = capturingMoves.length > 0 
-          ? capturingMoves[Math.floor(Math.random() * capturingMoves.length)]
-          : possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+        selectedMove = this.selectMediumMove(legalMoves, {
+          board,
+          currentTurn: aiColor || 'black',
+          castlingRights: {
+            whiteKing: true,
+            whiteQueen: true,
+            blackKing: true,
+            blackQueen: true
+          },
+          enPassantTarget: null,
+          halfMoveClock: 0,
+          fullMoveNumber: 1,
+          whiteKing: this.findKing(board, 'w') || undefined,
+          blackKing: this.findKing(board, 'b') || undefined
+        });
         break;
       case 'hard':
-        const centerMoves = possibleMoves.filter(move => 
-          this.isCenterSquare(move.to) || move.captured
-        );
-        selectedMove = centerMoves.length > 0 
-          ? centerMoves[Math.floor(Math.random() * centerMoves.length)]
-          : possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+        selectedMove = this.selectHardMove(legalMoves, {
+          board,
+          currentTurn: aiColor || 'black',
+          castlingRights: {
+            whiteKing: true,
+            whiteQueen: true,
+            blackKing: true,
+            blackQueen: true
+          },
+          enPassantTarget: null,
+          halfMoveClock: 0,
+          fullMoveNumber: 1,
+          whiteKing: this.findKing(board, 'w') || undefined,
+          blackKing: this.findKing(board, 'b') || undefined
+        });
         break;
       default:
-        selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+        selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
     }
 
-    if (!selectedMove.from || !selectedMove.to || !selectedMove.piece) {
-      console.log('❌ Invalid move generated:', selectedMove);
+    if (!selectedMove) {
+      console.log('❌ No valid move selected');
       return null;
     }
 
@@ -105,6 +209,621 @@ export const chessAIService = {
     };
   },
 
+  getAllLegalMoves(gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const piecePrefix = gameState.currentTurn === 'white' ? 'w' : 'b';
+    
+    for (const square in gameState.board) {
+      const piece = gameState.board[square];
+      if (piece && piece.startsWith(piecePrefix)) {
+        const pieceMoves = this.getPieceMoves(square, piece, gameState);
+        moves.push(...pieceMoves);
+      }
+    }
+    
+    // Filter out moves that would put own king in check
+    return moves.filter(move => !this.wouldPutKingInCheck(move, gameState));
+  },
+
+  getPieceMoves(square: string, piece: string, gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    
+    switch (piece) {
+      // Black pieces - using correct notation from board state
+      case 'bP': moves.push(...this.getPawnMoves(square, 'black', gameState)); break;
+      case 'bN': moves.push(...this.getKnightMoves(square, gameState)); break;
+      case 'bB': moves.push(...this.getBishopMoves(square, gameState)); break;
+      case 'bR': moves.push(...this.getRookMoves(square, gameState)); break;
+      case 'bQ': moves.push(...this.getQueenMoves(square, gameState)); break;
+      case 'bK': moves.push(...this.getKingMoves(square, gameState)); break;
+      
+      // White pieces - using correct notation from board state
+      case 'wP': moves.push(...this.getPawnMoves(square, 'white', gameState)); break;
+      case 'wN': moves.push(...this.getKnightMoves(square, gameState)); break;
+      case 'wB': moves.push(...this.getBishopMoves(square, gameState)); break;
+      case 'wR': moves.push(...this.getRookMoves(square, gameState)); break;
+      case 'wQ': moves.push(...this.getQueenMoves(square, gameState)); break;
+      case 'wK': moves.push(...this.getKingMoves(square, gameState)); break;
+    }
+    
+    return moves;
+  },
+
+  getPawnMoves(square: string, color: 'white' | 'black', gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    
+    const direction = color === 'white' ? 1 : -1;
+    const startRank = color === 'white' ? 2 : 7;
+    const pieceNotation = color === 'white' ? 'wP' : 'bP'; // Use uppercase P
+    
+    // Forward move
+    const newRank = rankNum + direction;
+    if (newRank >= 1 && newRank <= 8) {
+      const newSquare = file + newRank;
+      if (!gameState.board[newSquare]) {
+        moves.push({
+          from: square,
+          to: newSquare,
+          piece: pieceNotation,
+          captured: null,
+          san: newSquare
+        });
+        
+        // Double move from starting position
+        if (rankNum === startRank) {
+          const doubleMoveRank = rankNum + (2 * direction);
+          if (doubleMoveRank >= 1 && doubleMoveRank <= 8) {
+            const doubleMoveSquare = file + doubleMoveRank;
+            if (!gameState.board[doubleMoveSquare]) {
+              moves.push({
+                from: square,
+                to: doubleMoveSquare,
+                piece: pieceNotation,
+                captured: null,
+                san: doubleMoveSquare
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    // Captures
+    const captureRank = rankNum + direction;
+    if (captureRank >= 1 && captureRank <= 8) {
+      // Left capture
+      if (fileNum > 0) {
+        const captureLeft = String.fromCharCode(fileNum - 1 + 97) + captureRank;
+        const targetPiece = gameState.board[captureLeft];
+        if (targetPiece && targetPiece.startsWith(color === 'white' ? 'b' : 'w')) {
+          moves.push({
+            from: square,
+            to: captureLeft,
+            piece: pieceNotation,
+            captured: targetPiece,
+            san: file + 'x' + captureLeft
+          });
+        }
+      }
+      
+      // Right capture
+      if (fileNum < 7) {
+        const captureRight = String.fromCharCode(fileNum + 1 + 97) + captureRank;
+        const targetPiece = gameState.board[captureRight];
+        if (targetPiece && targetPiece.startsWith(color === 'white' ? 'b' : 'w')) {
+          moves.push({
+            from: square,
+            to: captureRight,
+            piece: pieceNotation,
+            captured: targetPiece,
+            san: file + 'x' + captureRight
+          });
+        }
+      }
+    }
+    
+    return moves;
+  },
+
+  getKnightMoves(square: string, gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    const currentPiece = gameState.board[square];
+    
+    if (!currentPiece) return moves;
+    
+    const currentPieceColor = currentPiece.charAt(0);
+    
+    const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+    
+    for (const [fileOffset, rankOffset] of knightMoves) {
+      const newFileNum = fileNum + fileOffset;
+      const newRankNum = rankNum + rankOffset;
+      
+      if (newFileNum >= 0 && newFileNum <= 7 && newRankNum >= 1 && newRankNum <= 8) {
+        const newFile = String.fromCharCode(newFileNum + 97);
+        const newSquare = newFile + newRankNum;
+        const targetPiece = gameState.board[newSquare];
+        
+        if (!targetPiece || targetPiece.charAt(0) !== currentPieceColor) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: targetPiece,
+            san: targetPiece ? 'Nx' + newSquare : 'N' + newSquare
+          });
+        }
+      }
+    }
+    
+    return moves;
+  },
+
+  getBishopMoves(square: string, gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    const currentPiece = gameState.board[square];
+    
+    if (!currentPiece) return moves;
+    
+    const currentPieceColor = currentPiece.charAt(0);
+    
+    const directions = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    
+    for (const [fileDir, rankDir] of directions) {
+      for (let i = 1; i < 8; i++) {
+        const newFileNum = fileNum + (fileDir * i);
+        const newRankNum = rankNum + (rankDir * i);
+        
+        if (newFileNum < 0 || newFileNum > 7 || newRankNum < 1 || newRankNum > 8) break;
+        
+        const newFile = String.fromCharCode(newFileNum + 97);
+        const newSquare = newFile + newRankNum;
+        const targetPiece = gameState.board[newSquare];
+        
+        if (!targetPiece) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: null,
+            san: 'B' + newSquare
+          });
+        } else if (targetPiece.charAt(0) !== currentPieceColor) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: targetPiece,
+            san: 'Bx' + newSquare
+          });
+          break;
+        } else {
+          break;
+        }
+      }
+    }
+    
+    return moves;
+  },
+
+  getRookMoves(square: string, gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    const currentPiece = gameState.board[square];
+    
+    if (!currentPiece) return moves;
+    
+    const currentPieceColor = currentPiece.charAt(0);
+    
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    
+    for (const [fileDir, rankDir] of directions) {
+      for (let i = 1; i < 8; i++) {
+        const newFileNum = fileNum + (fileDir * i);
+        const newRankNum = rankNum + (rankDir * i);
+        
+        if (newFileNum < 0 || newFileNum > 7 || newRankNum < 1 || newRankNum > 8) break;
+        
+        const newFile = String.fromCharCode(newFileNum + 97);
+        const newSquare = newFile + newRankNum;
+        const targetPiece = gameState.board[newSquare];
+        
+        if (!targetPiece) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: null,
+            san: 'R' + newSquare
+          });
+        } else if (targetPiece.charAt(0) !== currentPieceColor) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: targetPiece,
+            san: 'Rx' + newSquare
+          });
+          break;
+        } else {
+          break;
+        }
+      }
+    }
+    
+    return moves;
+  },
+
+  getQueenMoves(square: string, gameState: GameState): ChessMove[] {
+    return [...this.getBishopMoves(square, gameState), ...this.getRookMoves(square, gameState)];
+  },
+
+  getKingMoves(square: string, gameState: GameState): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    const currentPiece = gameState.board[square];
+    
+    if (!currentPiece) return moves;
+    
+    const currentPieceColor = currentPiece.charAt(0);
+    
+    const directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+    
+    for (const [fileDir, rankDir] of directions) {
+      const newFileNum = fileNum + fileDir;
+      const newRankNum = rankNum + rankDir;
+      
+      if (newFileNum >= 0 && newFileNum <= 7 && newRankNum >= 1 && newRankNum <= 8) {
+        const newFile = String.fromCharCode(newFileNum + 97);
+        const newSquare = newFile + newRankNum;
+        const targetPiece = gameState.board[newSquare];
+        
+        if (!targetPiece || targetPiece.charAt(0) !== currentPieceColor) {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: currentPiece,
+            captured: targetPiece,
+            san: targetPiece ? 'Kx' + newSquare : 'K' + newSquare
+          });
+        }
+      }
+    }
+    
+    return moves;
+  },
+
+  wouldPutKingInCheck(move: ChessMove, gameState: GameState): boolean {
+    // Create a copy of the board
+    const newBoard = { ...gameState.board };
+    
+    // Make the move on the copy
+    newBoard[move.to] = move.piece;
+    newBoard[move.from] = null;
+    
+    // Handle special moves
+    if (move.isCastling) {
+      // Move the rook
+      if (move.to === 'g1') {
+        newBoard['f1'] = 'wR';
+        newBoard['h1'] = null;
+      } else if (move.to === 'c1') {
+        newBoard['d1'] = 'wR';
+        newBoard['a1'] = null;
+      } else if (move.to === 'g8') {
+        newBoard['f8'] = 'bR';
+        newBoard['h8'] = null;
+      } else if (move.to === 'c8') {
+        newBoard['d8'] = 'bR';
+        newBoard['a8'] = null;
+      }
+    }
+    
+    if (move.isEnPassant) {
+      // Remove the captured pawn
+      const capturedRank = move.to.charAt(1);
+      const capturedFile = move.to.charAt(0);
+      const capturedSquare = capturedFile + (move.piece.charAt(0) === 'w' ? '5' : '4');
+      newBoard[capturedSquare] = null;
+    }
+    
+    // Find the king of the moving color
+    const kingColor = move.piece.charAt(0) as 'w' | 'b';
+    const kingSquare = this.findKing(newBoard, kingColor);
+    
+    if (!kingSquare) {
+      return false;
+    }
+    
+    // Check if any opponent piece can attack the king
+    const opponentColor = kingColor === 'w' ? 'black' : 'white';
+    const opponentMoves = this.getAllMovesWithoutCheckValidation(newBoard, opponentColor);
+    
+    return opponentMoves.some(opponentMove => opponentMove.to === kingSquare);
+  },
+
+  getAllMovesWithoutCheckValidation(board: { [key: string]: string | null }, color: 'white' | 'black'): ChessMove[] {
+    const moves: ChessMove[] = [];
+    const piecePrefix = color === 'white' ? 'w' : 'b';
+    
+    // Find king positions
+    const whiteKing = this.findKing(board, 'w');
+    const blackKing = this.findKing(board, 'b');
+    
+    const gameState: GameState = {
+      board,
+      currentTurn: color,
+      castlingRights: {
+        whiteKing: true,
+        whiteQueen: true,
+        blackKing: true,
+        blackQueen: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1,
+      whiteKing: whiteKing || undefined,
+      blackKing: blackKing || undefined
+    };
+    
+    for (const square in board) {
+      const piece = board[square];
+      if (piece && piece.startsWith(piecePrefix)) {
+        const pieceMoves = this.getPieceMoves(square, piece, gameState);
+        moves.push(...pieceMoves);
+      }
+    }
+    
+    return moves;
+  },
+
+  findKing(board: { [key: string]: string | null }, color: 'w' | 'b'): string | null {
+    for (const square in board) {
+      const piece = board[square];
+      if (piece === `${color}K`) {
+        return square;
+      }
+    }
+    return null;
+  },
+
+  isInCheck(board: { [key: string]: string | null }, color: 'white' | 'black'): boolean {
+    const kingColor = color === 'white' ? 'w' : 'b';
+    const kingSquare = this.findKing(board, kingColor);
+    
+    if (!kingSquare) {
+      return false;
+    }
+    
+    const opponentColor = color === 'white' ? 'black' : 'white';
+    const opponentMoves = this.getAllMovesWithoutCheckValidation(board, opponentColor);
+    
+    return opponentMoves.some(move => move.to === kingSquare);
+  },
+
+  isCheckmate(board: { [key: string]: string | null }, color: 'white' | 'black'): boolean {
+    // Check if king is in check
+    if (!this.isInCheck(board, color)) {
+      return false;
+    }
+    
+    // Check if any legal moves exist
+    const gameState: GameState = {
+      board,
+      currentTurn: color,
+      castlingRights: {
+        whiteKing: true,
+        whiteQueen: true,
+        blackKing: true,
+        blackQueen: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1
+    };
+    
+    const legalMoves = this.getAllLegalMoves(gameState);
+    return legalMoves.length === 0;
+  },
+
+  isStalemate(board: { [key: string]: string | null }, color: 'white' | 'black'): boolean {
+    // Check if king is not in check
+    if (this.isInCheck(board, color)) {
+      return false;
+    }
+    
+    // Check if any legal moves exist
+    const gameState: GameState = {
+      board,
+      currentTurn: color,
+      castlingRights: {
+        whiteKing: true,
+        whiteQueen: true,
+        blackKing: true,
+        blackQueen: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1
+    };
+    
+    const legalMoves = this.getAllLegalMoves(gameState);
+    return legalMoves.length === 0;
+  },
+
+  selectMediumMove(moves: ChessMove[], gameState: GameState): ChessMove {
+    // Priority: 1. Captures, 2. Center control, 3. Development, 4. Random
+    const capturingMoves = moves.filter(move => move.captured);
+    if (capturingMoves.length > 0) {
+      return capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
+    }
+    
+    const centerMoves = moves.filter(move => this.isCenterSquare(move.to));
+    if (centerMoves.length > 0) {
+      return centerMoves[Math.floor(Math.random() * centerMoves.length)];
+    }
+    
+    const developmentMoves = moves.filter(move => this.isDevelopmentMove(move));
+    if (developmentMoves.length > 0) {
+      return developmentMoves[Math.floor(Math.random() * developmentMoves.length)];
+    }
+    
+    return moves[Math.floor(Math.random() * moves.length)];
+  },
+
+  selectHardMove(moves: ChessMove[], gameState: GameState): ChessMove {
+    // Priority: 1. High-value captures, 2. Threats, 3. Center control, 4. Development
+    const scoredMoves = moves.map(move => ({
+      ...move,
+      score: this.evaluateMove(move, gameState)
+    }));
+    
+    scoredMoves.sort((a, b) => b.score - a.score);
+    
+    // Select from top 3 moves to add some randomness
+    const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
+    return topMoves[Math.floor(Math.random() * topMoves.length)];
+  },
+
+  evaluateMove(move: ChessMove, gameState: GameState): number {
+    let score = 0;
+    
+    // Capture value
+    if (move.captured) {
+      const pieceValues: { [key: string]: number } = { 'p': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0 };
+      const pieceType = move.captured.charAt(1);
+      score += pieceValues[pieceType] || 0;
+    }
+    
+    // Center control
+    if (this.isCenterSquare(move.to)) {
+      score += 0.5;
+    }
+    
+    // Extended center
+    if (this.isExtendedCenter(move.to)) {
+      score += 0.3;
+    }
+    
+    // Piece development (moving from back rank)
+    const fromRank = parseInt(move.from.charAt(1));
+    if ((move.piece.charAt(0) === 'w' && fromRank === 1) || 
+        (move.piece.charAt(0) === 'b' && fromRank === 8)) {
+      score += 0.2;
+    }
+    
+    return score;
+  },
+
+  isDevelopmentMove(move: ChessMove): boolean {
+    const piece = move.piece.charAt(1);
+    const fromRank = parseInt(move.from.charAt(1));
+    const pieceColor = move.piece.charAt(0);
+    
+    // Knights and bishops developing from back rank
+    if ((piece === 'N' || piece === 'B') && 
+        ((pieceColor === 'w' && fromRank === 1) || (pieceColor === 'w' && fromRank === 2))) {
+      return true;
+    }
+    
+    // Pawns advancing
+    if (piece === 'p' && 
+        ((pieceColor === 'w' && fromRank <= 3) || (pieceColor === 'b' && fromRank >= 6))) {
+      return true;
+    }
+    
+    return false;
+  },
+
+  isCenterSquare(square: string): boolean {
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    
+    // True center squares: d4, d5, e4, e5
+    return (fileNum === 3 || fileNum === 4) && (rankNum === 4 || rankNum === 5);
+  },
+
+  isExtendedCenter(square: string): boolean {
+    const [file, rank] = square.split('');
+    const fileNum = file.charCodeAt(0) - 97;
+    const rankNum = parseInt(rank);
+    
+    // Extended center squares: c3-f6
+    return fileNum >= 2 && fileNum <= 5 && rankNum >= 3 && rankNum <= 6;
+  },
+
+  isValidMove(boardState: any, move: any): boolean {
+    if (!move || !move.from || !move.to || !move.piece) {
+      return false;
+    }
+    
+    let board = boardState;
+    
+    if (!board) {
+      board = this.getInitialBoardState();
+    }
+    
+    if (typeof board === 'string') {
+      board = this.fenToBoard(board);
+    }
+    
+    // Check if the piece exists at the source square
+    if (!board[move.from] || board[move.from] !== move.piece) {
+      return false;
+    }
+    
+    // Check if destination square is not occupied by same color piece
+    const targetPiece = board[move.to];
+    if (targetPiece && targetPiece.charAt(0) === move.piece.charAt(0)) {
+      return false;
+    }
+    
+    // Check if trying to capture king
+    if (targetPiece && targetPiece.charAt(1) === 'K') {
+      return false;
+    }
+    
+    // Create game state for validation
+    const gameState: GameState = {
+      board,
+      currentTurn: move.piece.charAt(0) === 'w' ? 'white' : 'black',
+      castlingRights: {
+        whiteKing: true,
+        whiteQueen: true,
+        blackKing: true,
+        blackQueen: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1
+    };
+    
+    // Validate that it's a legal move for the piece type
+    const possibleMoves = this.getPieceMoves(move.from, move.piece, gameState);
+    const isValidPieceMove = possibleMoves.some(m => m.to === move.to);
+    
+    if (!isValidPieceMove) {
+      return false;
+    }
+    
+    // Check if move would put own king in check
+    return !this.wouldPutKingInCheck(move, gameState);
+  },
+
   isAITurn(gameRoom: any, currentTurn: string): boolean {
     if (!gameRoom.is_ai_game) return false;
     
@@ -112,7 +831,7 @@ export const chessAIService = {
     return currentTurn === aiColor;
   },
 
-  getInitialBoardState(): any {
+  getInitialBoardState(): { [key: string]: string | null } {
     return {
       'a8': 'bR', 'b8': 'bN', 'c8': 'bB', 'd8': 'bQ', 'e8': 'bK', 'f8': 'bB', 'g8': 'bN', 'h8': 'bR',
       'a7': 'bp', 'b7': 'bp', 'c7': 'bp', 'd7': 'bp', 'e7': 'bp', 'f7': 'bp', 'g7': 'bp', 'h7': 'bp',
@@ -125,10 +844,18 @@ export const chessAIService = {
     };
   },
 
-  fenToBoard(fen: string): any {
+  fenToBoard(fen: string): { [key: string]: string | null } {
     const board: { [key: string]: string | null } = {};
     const parts = fen.split(' ');
     const position = parts[0];
+    
+    // Initialize all squares to null
+    for (let rank = 1; rank <= 8; rank++) {
+      for (let file = 0; file < 8; file++) {
+        const square = String.fromCharCode(97 + file) + rank;
+        board[square] = null;
+      }
+    }
     
     let rank = 8;
     let file = 0;
@@ -157,319 +884,21 @@ export const chessAIService = {
     return board;
   },
 
-  findPossibleMoves(board: any, color: 'white' | 'black'): any[] {
-    const moves = [];
-    const piecePrefix = color === 'white' ? 'w' : 'b';
-    
-    for (const square in board) {
-      const piece = board[square];
-      if (piece && piece.startsWith(piecePrefix)) {
-        const pieceMoves = this.getPieceMoves(square, piece, board);
-        moves.push(...pieceMoves);
-      }
-    }
-    
-    return moves;
-  },
-
-  getPieceMoves(square: string, piece: string, board: any): any[] {
-    const moves = [];
-    
-    switch (piece) {
-      // Black pieces
-      case 'bp': moves.push(...this.getPawnMoves(square, 'black', board)); break;
-      case 'bN': moves.push(...this.getKnightMoves(square, board)); break;
-      case 'bB': moves.push(...this.getBishopMoves(square, board)); break;
-      case 'bR': moves.push(...this.getRookMoves(square, board)); break;
-      case 'bQ': moves.push(...this.getQueenMoves(square, board)); break;
-      case 'bK': moves.push(...this.getKingMoves(square, board)); break;
-      
-      // White pieces
-      case 'wp': moves.push(...this.getPawnMoves(square, 'white', board)); break;
-      case 'wN': moves.push(...this.getKnightMoves(square, board)); break;
-      case 'wB': moves.push(...this.getBishopMoves(square, board)); break;
-      case 'wR': moves.push(...this.getRookMoves(square, board)); break;
-      case 'wQ': moves.push(...this.getQueenMoves(square, board)); break;
-      case 'wK': moves.push(...this.getKingMoves(square, board)); break;
-    }
-    
-    return moves;
-  },
-
-  getPawnMoves(square: string, color: 'white' | 'black', board: any): any[] {
-    const moves = [];
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    const direction = color === 'white' ? 1 : -1;
-    const startRank = color === 'white' ? 2 : 7;
-    
-    const newRank = rankNum + direction;
-    let newSquare = null;
-    
-    if (newRank >= 1 && newRank <= 8) {
-      newSquare = file + newRank;
-      if (!board[newSquare]) {
-        moves.push({
-          from: square,
-          to: newSquare,
-          piece: color === 'white' ? 'wp' : 'bp',
-          captured: null,
-          san: newSquare
-        });
-      }
-    }
-    
-    if (rankNum === startRank) {
-      const doubleMoveRank = rankNum + (2 * direction);
-      if (doubleMoveRank >= 1 && doubleMoveRank <= 8) {
-        const doubleMoveSquare = file + doubleMoveRank;
-        if (!board[doubleMoveSquare] && (!newSquare || !board[newSquare])) {
-          moves.push({
-            from: square,
-            to: doubleMoveSquare,
-            piece: color === 'white' ? 'wp' : 'bp',
-            captured: null,
-            san: doubleMoveSquare
-          });
-        }
-      }
-    }
-    
-    const captureLeft = String.fromCharCode(fileNum - 1 + 97) + newRank;
-    const captureRight = String.fromCharCode(fileNum + 1 + 97) + newRank;
-    
-    if (fileNum > 0 && board[captureLeft] && board[captureLeft].startsWith(color === 'white' ? 'b' : 'w')) {
-      moves.push({
-        from: square,
-        to: captureLeft,
-        piece: color === 'white' ? 'wp' : 'bp',
-        captured: board[captureLeft],
-        san: file + 'x' + captureLeft
-      });
-    }
-    
-    if (fileNum < 7 && board[captureRight] && board[captureRight].startsWith(color === 'white' ? 'b' : 'w')) {
-      moves.push({
-        from: square,
-        to: captureRight,
-        piece: color === 'white' ? 'wp' : 'bp',
-        captured: board[captureRight],
-        san: file + 'x' + captureRight
-      });
-    }
-    
-    return moves;
-  },
-
-  getKnightMoves(square: string, board: any): any[] {
-    const moves = [];
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
-    
-    for (const [fileOffset, rankOffset] of knightMoves) {
-      const newFile = String.fromCharCode(fileNum + fileOffset + 97);
-      const newRank = rankNum + rankOffset;
-      
-      if (newFile >= 'a' && newFile <= 'h' && newRank >= 1 && newRank <= 8) {
-        const newSquare = newFile + newRank;
-        const targetPiece = board[newSquare];
-        const currentPiece = board[square];
-        const currentPieceColor = currentPiece.charAt(0);
-        
-        if (!targetPiece || targetPiece.startsWith(currentPieceColor === 'w' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: targetPiece,
-            san: 'N' + newSquare
-          });
-        }
-      }
-    }
-    
-    return moves;
-  },
-
-  getBishopMoves(square: string, board: any): any[] {
-    const moves = [];
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    const directions = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-    
-    for (const [fileDir, rankDir] of directions) {
-      for (let i = 1; i < 8; i++) {
-        const newFile = String.fromCharCode(fileNum + (fileDir * i) + 97);
-        const newRank = rankNum + (rankDir * i);
-        
-        if (newFile < 'a' || newFile > 'h' || newRank < 1 || newRank > 8) break;
-        
-        const newSquare = newFile + newRank;
-        const targetPiece = board[newSquare];
-        const currentPiece = board[square];
-        const currentPieceColor = currentPiece.charAt(0);
-        
-        if (!targetPiece) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: null,
-            san: 'B' + newSquare
-          });
-        } else if (targetPiece.startsWith(currentPieceColor === 'w' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: targetPiece,
-            san: 'Bx' + newSquare
-          });
-          break;
-        } else {
-          break;
-        }
-      }
-    }
-    
-    return moves;
-  },
-
-  getRookMoves(square: string, board: any): any[] {
-    const moves = [];
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-    
-    for (const [fileDir, rankDir] of directions) {
-      for (let i = 1; i < 8; i++) {
-        const newFile = String.fromCharCode(fileNum + (fileDir * i) + 97);
-        const newRank = rankNum + (rankDir * i);
-        
-        if (newFile < 'a' || newFile > 'h' || newRank < 1 || newRank > 8) break;
-        
-        const newSquare = newFile + newRank;
-        const targetPiece = board[newSquare];
-        const currentPiece = board[square];
-        const currentPieceColor = currentPiece.charAt(0);
-        
-        if (!targetPiece) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: null,
-            san: 'R' + newSquare
-          });
-        } else if (targetPiece.startsWith(currentPieceColor === 'w' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: targetPiece,
-            san: 'Rx' + newSquare
-          });
-          break;
-        } else {
-          break;
-        }
-      }
-    }
-    
-    return moves;
-  },
-
-  getQueenMoves(square: string, board: any): any[] {
-    return [...this.getBishopMoves(square, board), ...this.getRookMoves(square, board)];
-  },
-
-  getKingMoves(square: string, board: any): any[] {
-    const moves = [];
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    const directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-    
-    for (const [fileDir, rankDir] of directions) {
-      const newFile = String.fromCharCode(fileNum + fileDir + 97);
-      const newRank = rankNum + rankDir;
-      
-      if (newFile >= 'a' && newFile <= 'h' && newRank >= 1 && newRank <= 8) {
-        const newSquare = newFile + newRank;
-        const targetPiece = board[newSquare];
-        const currentPiece = board[square];
-        const currentPieceColor = currentPiece.charAt(0);
-        
-        if (!targetPiece || targetPiece.startsWith(currentPieceColor === 'w' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: newSquare,
-            piece: currentPiece,
-            captured: targetPiece,
-            san: 'K' + newSquare
-          });
-        }
-      }
-    }
-    
-    return moves;
-  },
-
-  isCenterSquare(square: string): boolean {
-    const [file, rank] = square.split('');
-    const fileNum = file.charCodeAt(0) - 97;
-    const rankNum = parseInt(rank);
-    
-    return fileNum >= 2 && fileNum <= 5 && rankNum >= 3 && rankNum <= 6;
-  },
-
-  isValidMove(boardState: any, move: any): boolean {
-    if (!move || !move.from || !move.to || !move.piece) {
-      return false;
-    }
-    
-    let board = boardState;
-    
-    if (!board) {
-      board = this.getInitialBoardState();
-    }
-    
-    if (typeof board === 'string') {
-      board = this.fenToBoard(board);
-    }
-    
-    if (!board[move.from] || board[move.from] !== move.piece) {
-      return false;
-    }
-    
-    const targetPiece = board[move.to];
-    if (targetPiece && targetPiece.startsWith(move.piece.charAt(0))) {
-      return false;
-    }
-    
-    return true;
-  },
-
   reconstructBoardFromMoves(roomId: string, moves: any[]): any {
     const board = this.getInitialBoardState();
     
     for (const move of moves) {
       if (move.from_square && move.to_square && move.piece) {
+        // Move the piece
         board[move.to_square] = move.piece;
         board[move.from_square] = null;
       }
     }
     
     return board;
+  },
+
+  validateBoardState(boardState: any): boolean {
+    return true;
   }
 };
