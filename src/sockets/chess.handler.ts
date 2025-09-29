@@ -281,6 +281,19 @@ export const registerChessHandlers = (io: Server) => {
           game_state: payload.game_state
         });
 
+        // Check if this is an AI game and prevent processing
+        const { data: gameRoom } = await supabase
+          .from('chess_games')
+          .select('is_ai_game')
+          .eq('room_id', payload.room_id)
+          .single();
+
+        if (gameRoom?.is_ai_game) {
+          console.log('❌ Player move in AI game - ignoring');
+          socket.emit('chess_move_error', { message: 'This is an AI game - use AI handlers' });
+          return;
+        }
+
         const { error: moveError } = await supabase
           .from('chess_moves')
           .insert([{
@@ -303,7 +316,7 @@ export const registerChessHandlers = (io: Server) => {
         const { error: gameError } = await supabase
           .from('chess_games')
           .update({
-            current_turn: payload.game_state.current_turn,
+            current_turn: payload.game_state?.current_turn || 'white',
             game_state: JSON.stringify(payload.game_state),
             updated_at: new Date().toISOString()
           })
@@ -314,7 +327,7 @@ export const registerChessHandlers = (io: Server) => {
         }
 
         // Check for checkmate after move
-        if (payload.game_state.is_checkmate) {
+        if (payload.game_state?.is_checkmate) {
           const winner = payload.game_state.current_turn === 'white' ? 'black' : 'white';
           
           // Get winner name from database
