@@ -40,8 +40,7 @@ import gameRoutes from './routes/game.routes';
 import { collectDailyStats, collectMonthlyProviderStats, initializeStats } from './services/dailymarketplacestats.service';
 import PaymentRoute from './routes/payment.routes'
 import anamfamilyRoutes from './routes/anamfamily.routes'
-
-
+import { sendMail } from './services/mail.service';
 
 dotenv.config();
 
@@ -209,6 +208,7 @@ streamIo.on('connection', (socket) => {
 
 registerSocketHandlers(io);
 registerStreamingHandlers(streamIo);
+sendMail()
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
