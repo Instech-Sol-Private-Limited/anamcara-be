@@ -791,6 +791,7 @@ const getUserCampaigns = async (req: Request, res: Response): Promise<any> => {
         });
     }
 };
+
 const getCampaignDetails = async (req: Request, res: Response): Promise<any> => {
     try {
         const { id } = req.params;
@@ -903,8 +904,8 @@ const approveCampaign = async (req: Request, res: Response): Promise<any> => {
             .from('hope_campaigns')
             .update({
                 is_approved: true,
-                approved_at: new Date().toISOString(),
-                approved_by: adminId
+                status: 'active',
+                updated_at: new Date().toISOString()
             })
             .eq('id', id)
             .select()

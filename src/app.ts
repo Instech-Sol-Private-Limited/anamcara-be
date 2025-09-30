@@ -111,7 +111,7 @@ app.use('/api/friends', friendsRoutes);
 app.use('/api/chat-messages', chatMessageRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/courses', courseRouter);
-app.use('/api/anamfamily', anamfamilyRoutes)  // Add space after comma
+app.use('/api/anamfamily', anamfamilyRoutes)
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
@@ -121,7 +121,7 @@ app.use('/api/boostcampaign',authMiddleware,  campaignRoutes);
 app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
-app.use('/api/campaigns', authMiddleware, campaignRoutes);
+app.use('/api/campaigns', campaignRoutes);
 app.use('/api/stripe', PaymentRoute);
 app.use('/api/games', authMiddleware, gameRoutes);
 
