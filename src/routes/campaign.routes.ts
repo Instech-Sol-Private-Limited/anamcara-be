@@ -2,51 +2,52 @@ import express from 'express';
 
 import { activateCampaign, adminCloseCampaign, approveCampaign, claimDonations, closeCampaign, createBid, createCampaign, createDonation, generateCampaignDesc, getAllCampaigns, getApprovedCampaigns, getCampaignBids, getCampaignDetails, getCampaignDonations, getPendingApprovalCampaigns, getUserCampaigns, getOverallTotals, pauseCampaign, updateCampaign, createBoost } from '../controllers/campaign.controller';
 import { getActiveFeaturedProducts } from '../controllers/products.controller';
+import { authMiddleware } from '../middleware/auth.middleware';
 const router = express.Router();
 
-router.post('/create-campaign', createCampaign);
+router.post('/create-campaign', authMiddleware, createCampaign);
 
-router.post('/generate-description', generateCampaignDesc);
+router.post('/generate-description', authMiddleware, generateCampaignDesc);
 
-router.get('/pending-approvals', getPendingApprovalCampaigns);
+router.get('/pending-approvals', authMiddleware, getPendingApprovalCampaigns);
 
-router.get('/get-all-campaigns', getAllCampaigns);
+router.get('/get-all-campaigns', authMiddleware, getAllCampaigns);
 
 router.get('/get-hope-campaigns', getApprovedCampaigns);
 
-router.get('/get-user-campaigns/:id', getUserCampaigns);
+router.get('/get-user-campaigns/:id', authMiddleware, getUserCampaigns);
 
 router.get('/get-campaign/:id', getCampaignDetails);
 
-router.patch('/:id/approve', approveCampaign);
+router.patch('/:id/approve', authMiddleware, approveCampaign);
 
-router.put('/:id', updateCampaign);
+router.put('/:id', authMiddleware, updateCampaign);
 
-router.patch('/:id/pause', pauseCampaign);
+router.patch('/:id/pause', authMiddleware, pauseCampaign);
 
-router.patch('/:id/activate', activateCampaign);
+router.patch('/:id/activate', authMiddleware, activateCampaign);
 
-router.patch('/:id/close', closeCampaign);
+router.patch('/:id/close', authMiddleware, closeCampaign);
 
-router.patch('/:id/admin-close', adminCloseCampaign);
+router.patch('/:id/admin-close', authMiddleware, adminCloseCampaign);
 
 // Bidding routes
 router.get('/bids/:campaign_id', getCampaignBids);
 
-router.post('/bids', createBid);
+router.post('/bids', authMiddleware, createBid);
 
 // Donation routes
 router.get('/donations/:campaign_id', getCampaignDonations);
 
-router.post('/donations', createDonation);
+router.post('/donations', authMiddleware, createDonation);
 
 router.get('/get-total-donations', getOverallTotals);
 
-router.post('/:id/claim', claimDonations);
+router.post('/:id/claim', authMiddleware, claimDonations);
 
 
 // -------------- Campaign boost and promotion Route --------------
-router.post('/boost/create', createBoost);
+router.post('/boost/create', authMiddleware, createBoost);
 
 router.get('/get-featured-products', getActiveFeaturedProducts);
 

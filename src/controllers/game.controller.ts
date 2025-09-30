@@ -5,6 +5,7 @@ import { connectedUsers } from '../sockets';
 import { getUserEmailFromId } from '../sockets/getUserFriends';
 import { sendNotification } from '../sockets/emitNotification';
 import { chessAIService } from '../services/chess-ai.service';
+
 export const createAIGame = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -76,7 +77,9 @@ export const requestAIMove = async (req: Request, res: Response): Promise<void> 
       message: 'Failed to generate AI move',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
-  }}
+  }
+}
+
 export const sendChessInvite = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -89,11 +92,11 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     // Determine the invitee - prioritize friend_id for backward compatibility
     const targetUserId = friend_id || invitee_id;
-    
+
     if (!targetUserId || !game_settings) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Missing required fields: friend_id/invitee_id, game_settings' 
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: friend_id/invitee_id, game_settings'
       });
       return;
     }
@@ -151,7 +154,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
     // If no chat_id provided, check if chat exists or create one
     if (!finalChatId) {
       console.log('🔍 No chat_id provided, checking for existing chat...');
-      
+
       const { data: existingChat, error: chatCheckError } = await supabase
         .from('chats')
         .select('id')
@@ -238,7 +241,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
     // Send real-time notification
     const targetEmail = targetProfile.email;
     console.log('📡 Sending real-time notification to:', targetEmail);
-    
+
     if (targetEmail) {
       const targetSockets = connectedUsers.get(targetEmail);
       if (targetSockets) {
@@ -263,14 +266,14 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
     // Send chat message about the invitation
     // Only send message if no chat_id was provided (new chat created) or if custom message is provided
     const shouldSendMessage = !chat_id || message;
-    
+
     if (shouldSendMessage) {
       console.log('💬 Sending chat message...');
-      
+
       // Use the structured format like the working invitations
-      const messageContent = message || 
+      const messageContent = message ||
         `Room ID: chess?\nroom=${invitation.room_id}\nClick to join the chess game`;
-      
+
       const messageData = {
         chat_id: finalChatId,
         sender: userId,
@@ -295,13 +298,13 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
         console.error('❌ Error sending chat message:', messageError);
       } else {
         console.log('✅ Chat message sent successfully');
-        
+
         // Update chat timestamp
         await supabase
           .from('chats')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', finalChatId);
-        
+
         // Send real-time message notification
         const targetEmail = targetProfile.email;
         if (targetEmail) {
