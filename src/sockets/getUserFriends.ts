@@ -1,4 +1,5 @@
-import { supabase } from "../app";
+import { connectedUsers } from ".";
+import { io, supabase } from "../app";
 
 export const getUserFriends = async (email: string): Promise<string[]> => {
     const { data: userProfile, error: profileError } = await supabase
@@ -82,10 +83,66 @@ export const getUserIdFromEmail = async (userEmail: string): Promise<string | nu
 };
 
 export async function getChatParticipants(chatId: string): Promise<string[]> {
-  const { data: participants } = await supabase
-    .from('chat_participants')
-    .select('user_id')
-    .eq('chat_id', chatId);
+    const { data: chat } = await supabase
+        .from('chats')
+        .select('user_1, user_2')
+        .eq('id', chatId)
+        .single();
 
-  return participants?.map(p => p.user_id) || [];
+    if (!chat) {
+        return [];
+    }
+
+    return [chat.user_1, chat.user_2];
+}
+
+export async function getUnseenMessagesCount(userId: string): Promise<number> {
+    const { count, error } = await supabase
+        .from('chatmessages')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'delivered')
+        .neq('sender', userId);
+
+    if (error) throw error;
+    return count || 0;
+}
+
+export async function updateUnseenCountForUser(userEmail: string) {
+    try {
+        const userId = await getUserIdFromEmail(userEmail);
+        if (userId) {
+            const unseenCount = await getUnseenMessagesCount(userId);
+
+            if (connectedUsers.has(userEmail)) {
+                connectedUsers.get(userEmail)!.forEach(socketId => {
+                    io.to(socketId).emit('unseen_count_update', { count: unseenCount });
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Update unseen count for user error:', error);
+    }
+}
+
+export async function updateUnseenCountForChatParticipants(chatId: string) {
+  try {
+    const { data: chat } = await supabase
+      .from('chats')
+      .select('user_1, user_2')
+      .eq('id', chatId)
+      .single();
+
+    if (chat) {
+      const [user1Email, user2Email] = await Promise.all([
+        getUserEmailFromId(chat.user_1),
+        getUserEmailFromId(chat.user_2)
+      ]);
+
+      // Update count for both users
+      if (user1Email) await updateUnseenCountForUser(user1Email);
+      if (user2Email) await updateUnseenCountForUser(user2Email);
+    }
+  } catch (error) {
+    console.error('Update unseen count for chat participants error:', error);
+  }
 }
