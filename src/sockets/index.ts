@@ -375,7 +375,9 @@ export const registerSocketHandlers = (io: Server) => {
     // Get unseen messages count
     socket.on('get_unseen_count', async (userId: string) => {
       try {
+        console.log('userId',userId)
         const unseenCount = await getUnseenMessagesCount(userId);
+        console.log(unseenCount)
         socket.emit('unseen_count_update', { count: unseenCount });
       } catch (error) {
         console.error('Unseen count error:', error);

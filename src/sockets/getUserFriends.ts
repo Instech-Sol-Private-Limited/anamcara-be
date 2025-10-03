@@ -61,7 +61,6 @@ export const getUserEmailFromId = async (userId: string): Promise<string | null>
     }
 };
 
-
 export const getUserIdFromEmail = async (userEmail: string): Promise<string | null> => {
     try {
         const { data, error } = await supabase
@@ -97,14 +96,45 @@ export async function getChatParticipants(chatId: string): Promise<string[]> {
 }
 
 export async function getUnseenMessagesCount(userId: string): Promise<number> {
-    const { count, error } = await supabase
-        .from('chatmessages')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'delivered')
-        .neq('sender', userId);
+    try {
+        const { data: userChats, error: chatsError } = await supabase
+            .from('chats')
+            .select('id')
+            .or(`user_1.eq.${userId},user_2.eq.${userId}`);
 
-    if (error) throw error;
-    return count || 0;
+        if (chatsError) {
+            console.error('Error fetching user chats:', chatsError);
+            throw chatsError;
+        }
+
+        if (!userChats || userChats.length === 0) {
+            console.log('No chats found for user');
+            return 0;
+        }
+
+        const chatIds = userChats.map(chat => chat.id);
+
+        const { count, error } = await supabase
+            .from('chatmessages')
+            .select('*', {
+                count: 'exact',
+                head: true
+            })
+            .in('chat_id', chatIds)
+            .neq('sender', userId)
+            .neq('status', 'seen');
+
+        if (error) {
+            console.error('Error counting unseen messages:', error);
+            throw error;
+        }
+
+        return count || 0;
+
+    } catch (error: any) {
+        console.error('Unseen count error:', error);
+        throw error;
+    }
 }
 
 export async function updateUnseenCountForUser(userEmail: string) {
@@ -125,24 +155,25 @@ export async function updateUnseenCountForUser(userEmail: string) {
 }
 
 export async function updateUnseenCountForChatParticipants(chatId: string) {
-  try {
-    const { data: chat } = await supabase
-      .from('chats')
-      .select('user_1, user_2')
-      .eq('id', chatId)
-      .single();
+    try {
+        const { data: chat } = await supabase
+            .from('chats')
+            .select('user_1, user_2')
+            .eq('id', chatId)
+            .single();
 
-    if (chat) {
-      const [user1Email, user2Email] = await Promise.all([
-        getUserEmailFromId(chat.user_1),
-        getUserEmailFromId(chat.user_2)
-      ]);
+        if (chat) {
+            const [user1Email, user2Email] = await Promise.all([
+                getUserEmailFromId(chat.user_1),
+                getUserEmailFromId(chat.user_2)
+            ]);
 
-      // Update count for both users
-      if (user1Email) await updateUnseenCountForUser(user1Email);
-      if (user2Email) await updateUnseenCountForUser(user2Email);
+            // Update count for both users
+            if (user1Email) await updateUnseenCountForUser(user1Email);
+            if (user2Email) await updateUnseenCountForUser(user2Email);
+        }
+    } catch (error) {
+        console.error('Update unseen count for chat participants error:', error);
     }
-  } catch (error) {
-    console.error('Update unseen count for chat participants error:', error);
-  }
 }
+
