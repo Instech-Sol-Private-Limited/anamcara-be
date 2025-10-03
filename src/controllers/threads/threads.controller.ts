@@ -28,6 +28,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       category_id,
       keywords = [],
       whisper_mode = false,
+      disclaimers = []
     } = req.body;
 
     const { id: author_id, first_name, last_name, email } = req.user!;
@@ -46,6 +47,14 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
         return res.status(400).json({ error: `${formattedKey} is required!` });
       }
     }
+
+    if (disclaimers && !Array.isArray(disclaimers)) {
+      return res.status(400).json({ error: 'Disclaimers must be an array' });
+    }
+
+    const enabledDisclaimers = disclaimers 
+      ? disclaimers.filter((d: any) => d.enabled === true)
+      : null;
 
     const { data: categoryData, error: categoryError } = await supabase
       .from('threadcategory')
@@ -70,7 +79,8 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
         author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
         author_id,
         keywords,
-        whisper_mode
+        whisper_mode,
+        disclaimers: enabledDisclaimers
       }])
       .select();
 
@@ -86,7 +96,6 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
     if (!data || data.length === 0) {
       return res.status(500).json({ error: 'Thread creation failed. No data returned.' });
     }
-
 
     const threadId = data[0].id;
 

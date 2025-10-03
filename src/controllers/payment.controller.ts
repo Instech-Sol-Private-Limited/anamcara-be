@@ -20,12 +20,11 @@ interface SessionMetadata {
   userEmail?: string;
   userName?: string;
 }
+
 //========================Exchange==========================================//
 export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   try {
     const { amount, fromCurrency, toCurrency, metadata } = req.body;
-
-    console.log('🔄 Creating checkout session:', { amount, fromCurrency, toCurrency, userId: metadata?.userId });
 
     if (!amount || amount <= 0) {
       res.status(400).json({ error: "Invalid amount" });
@@ -76,7 +75,6 @@ export const createCheckoutSession = async (req: Request, res: Response): Promis
       ...(metadata?.userEmail && { customer_email: metadata.userEmail }),
     });
 
-    console.log('✅ Checkout session created:', session.id);
     res.json({ url: session.url, sessionId: session.id });
   } catch (error: any) {
     console.error("❌ Stripe error:", error);
@@ -88,22 +86,13 @@ export const processsuccess = async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
 
-    console.log('🔄 Processing success for session:', sessionId);
-
     if (!sessionId) {
       res.status(400).json({ error: "Session ID required" });
       return;
     }
 
-    // Retrieve session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ['payment_intent']
-    });
-
-    console.log('📡 Session retrieved:', {
-      id: session.id,
-      payment_status: session.payment_status,
-      metadata: session.metadata
     });
 
     if (session.payment_status !== 'paid') {
@@ -118,7 +107,6 @@ export const processsuccess = async (req: Request, res: Response) => {
       return;
     }
 
-    // Extract metadata with proper null checks and defaults
     const userId = metadata['userId'] || 'anonymous';
     const fromCurrency = metadata['fromCurrency'] || 'USD';
     const toCurrency = metadata['toCurrency'] || 'AC';
@@ -135,7 +123,6 @@ export const processsuccess = async (req: Request, res: Response) => {
       conversionRate
     });
 
-    // Check if transaction already exists to prevent duplicates
     const { data: existingTransaction, error: checkError } = await supabase
       .from('exchange_transactions')
       .select('*')
@@ -143,7 +130,6 @@ export const processsuccess = async (req: Request, res: Response) => {
       .single();
 
     if (existingTransaction) {
-      console.log('✅ Transaction already processed:', sessionId);
       res.json({
         success: true,
         transaction: existingTransaction,
@@ -157,7 +143,6 @@ export const processsuccess = async (req: Request, res: Response) => {
       return;
     }
 
-    // Save transaction to exchange_transactions table
     const transactionData = {
       transaction_id: sessionId,
       user_id: userId,
@@ -172,8 +157,6 @@ export const processsuccess = async (req: Request, res: Response) => {
       metadata: metadata
     };
 
-    console.log('💾 Saving transaction data:', transactionData);
-
     const { data: transaction, error: transactionError } = await supabase
       .from('exchange_transactions')
       .insert([transactionData])
@@ -186,34 +169,17 @@ export const processsuccess = async (req: Request, res: Response) => {
       return;
     }
 
-    console.log('✅ Transaction saved to database:', transaction.transaction_id);
-
-    // FIXED: Enhanced AnamCoins system update for AC conversion
     if (toCurrency === 'AC') {
-      console.log('🪙 Processing AnamCoins update...');
-
       try {
-        // First, check if user already has AnamCoins record
         const { data: existingAnamCoins, error: fetchError } = await supabase
           .from('anamcoins')
           .select('*')
           .eq('user_id', userId)
-          .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no record exists
-
-        console.log('🔍 Existing AnamCoins:', existingAnamCoins, 'Error:', fetchError);
+          .maybeSingle();
 
         if (existingAnamCoins) {
-          // Update existing AnamCoins record
           const newTotalCoins = (existingAnamCoins.total_coins || 0) + convertedAmount;
           const newAvailableCoins = (existingAnamCoins.available_coins || 0) + convertedAmount;
-
-          console.log('📈 Updating AnamCoins:', {
-            oldTotal: existingAnamCoins.total_coins,
-            oldAvailable: existingAnamCoins.available_coins,
-            adding: convertedAmount,
-            newTotal: newTotalCoins,
-            newAvailable: newAvailableCoins
-          });
 
           const { data: updatedAnamCoins, error: updateError } = await supabase
             .from('anamcoins')
@@ -228,13 +194,8 @@ export const processsuccess = async (req: Request, res: Response) => {
 
           if (updateError) {
             console.error('❌ Error updating AnamCoins:', updateError);
-          } else {
-            console.log(`✅ Updated AnamCoins for user ${userId}:`, updatedAnamCoins);
           }
         } else {
-          // Create new AnamCoins record
-          console.log('🆕 Creating new AnamCoins record...');
-
           const newAnamCoinsData = {
             user_id: userId,
             total_coins: convertedAmount,
@@ -244,23 +205,12 @@ export const processsuccess = async (req: Request, res: Response) => {
             updated_at: new Date().toISOString()
           };
 
-          console.log('📝 New AnamCoins data:', newAnamCoinsData);
-
           const { data: newAnamCoins, error: insertError } = await supabase
             .from('anamcoins')
             .insert([newAnamCoinsData])
             .select()
             .single();
-
-          if (insertError) {
-            console.error('❌ Error creating AnamCoins record:', insertError);
-          } else {
-            console.log(`✅ Created new AnamCoins record for user ${userId}:`, newAnamCoins);
-          }
         }
-
-        // Add transaction to AnamCoins history
-        console.log('📝 Adding AnamCoins history...');
 
         const historyData = {
           user_id: userId,
@@ -287,9 +237,6 @@ export const processsuccess = async (req: Request, res: Response) => {
         console.error('❌ Error in AnamCoins processing:', anamCoinsError);
       }
     } else {
-      // Update user_balances for non-AC currencies
-      console.log('💰 Updating user balance for:', toCurrency);
-
       const { data: existingBalance } = await supabase
         .from('user_balances')
         .select('amount')
@@ -308,7 +255,6 @@ export const processsuccess = async (req: Request, res: Response) => {
         }, { onConflict: 'user_id,currency_type' });
     }
 
-    console.log('🎉 Payment processing completed successfully');
 
     res.json({
       success: true,
@@ -333,9 +279,7 @@ export const processsuccess = async (req: Request, res: Response) => {
 export const transactionuserid = async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
-    const { page = 1, limit = 20 } = req.query; // Increased default limit to match frontend
-
-    console.log('🔄 Fetching transactions for user:', userId);
+    const { page = 1, limit = 20 } = req.query;
 
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
 
@@ -352,21 +296,9 @@ export const transactionuserid = async (req: Request, res: Response) => {
       return;
     }
 
-    console.log('📊 Raw transactions from DB:', transactions?.length || 0, 'items');
-
-    // Format transactions for frontend - FIXED to match expected structure
     const formattedTransactions = (transactions || []).map((tx, index) => {
-      console.log(`📋 Formatting transaction ${index + 1}:`, {
-        id: tx.transaction_id,
-        from: tx.from_currency,
-        to: tx.to_currency,
-        original_amount: tx.original_amount,
-        converted_amount: tx.converted_amount,
-        status: tx.payment_status
-      });
-
       return {
-        id: tx.transaction_id, // Use transaction_id as id
+        id: tx.transaction_id,
         transaction_id: tx.transaction_id,
         date: new Date(tx.created_at).toLocaleDateString('en-US', {
           year: 'numeric',
@@ -387,8 +319,6 @@ export const transactionuserid = async (req: Request, res: Response) => {
       };
     });
 
-    console.log('✅ Formatted transactions:', formattedTransactions.length, 'items');
-
     const response = {
       transactions: formattedTransactions,
       total: count || 0,
@@ -396,12 +326,6 @@ export const transactionuserid = async (req: Request, res: Response) => {
       limit: parseInt(limit as string),
       totalPages: Math.ceil((count || 0) / parseInt(limit as string))
     };
-
-    console.log('📤 Sending response:', {
-      transactionCount: response.transactions.length,
-      total: response.total,
-      page: response.page
-    });
 
     res.json(response);
 
@@ -415,24 +339,16 @@ export const balanceuserid = async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
 
-    console.log('🔄 Fetching balances for user:', userId);
-
-    // Get AnamCoins data - FIXED to handle both cases properly
     const { data: anamCoinsData, error: acError } = await supabase
       .from('anamcoins')
       .select('*')
       .eq('user_id', userId)
-      .maybeSingle(); // Use maybeSingle to avoid error if no record
+      .maybeSingle();
 
-    console.log('🪙 AnamCoins query result:', { data: anamCoinsData, error: acError });
-
-    // Get other currency balances
     const { data: balances, error: balanceError } = await supabase
       .from('user_balances')
       .select('*')
       .eq('user_id', userId);
-
-    console.log('💰 User balances query result:', { data: balances, error: balanceError });
 
     if (balanceError) {
       console.error('❌ Error fetching balances:', balanceError);
@@ -440,17 +356,15 @@ export const balanceuserid = async (req: Request, res: Response) => {
       return;
     }
 
-    // Convert to a more usable format
     const balanceMap = (balances || []).reduce((acc: any, balance: any) => {
       acc[balance.currency_type] = balance.amount;
       return acc;
     }, {});
 
-    // Add AnamCoins data if available
     if (anamCoinsData && !acError) {
       balanceMap['AC'] = anamCoinsData.available_coins || 0;
     } else {
-      balanceMap['AC'] = 0; // Default to 0 if no AnamCoins record
+      balanceMap['AC'] = 0;
     }
 
     const responseData = {
@@ -463,10 +377,7 @@ export const balanceuserid = async (req: Request, res: Response) => {
       }
     };
 
-    console.log('✅ Sending balance response:', responseData);
-
     res.json(responseData);
-
   } catch (error: any) {
     console.error("❌ Error fetching balances:", error);
     res.status(500).json({ error: error.message });

@@ -208,7 +208,7 @@ streamIo.on('connection', (socket) => {
 
 registerSocketHandlers(io);
 registerStreamingHandlers(streamIo);
-sendMail()
+// sendMail()
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

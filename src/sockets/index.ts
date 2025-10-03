@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
-import { getChatParticipants, getUserEmailFromId, getUserFriends, getUserIdFromEmail } from './getUserFriends';
+import { getChatParticipants, getUnseenMessagesCount, getUserEmailFromId, getUserFriends, getUserIdFromEmail, updateUnseenCountForChatParticipants, updateUnseenCountForUser } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
 import { registerChessHandlers } from './chess.handler';
 import { registerChessAIHandlers } from './chess-ai.handler';
@@ -331,6 +331,8 @@ export const registerSocketHandlers = (io: Server) => {
 
         socket.emit('message_sent', insertedMessage);
 
+        await updateUnseenCountForUser(receiver_email);
+
       } catch (error) {
         console.error('Message send error:', error);
         socket.emit('message_error', {
@@ -370,34 +372,55 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
 
+    // Get unseen messages count
+    socket.on('get_unseen_count', async (userId: string) => {
+      try {
+        console.log('userId',userId)
+        const unseenCount = await getUnseenMessagesCount(userId);
+        console.log(unseenCount)
+        socket.emit('unseen_count_update', { count: unseenCount });
+      } catch (error) {
+        console.error('Unseen count error:', error);
+        socket.emit('unseen_count_error', {
+          error: error instanceof Error ? error.message : 'Failed to get unseen count'
+        });
+      }
+    });
+
     // Message seen
     socket.on('message_seen', async ({ messageId, userId }: { messageId: number, userId: string }) => {
-      const { error } = await supabase
-        .from('chatmessages')
-        .update({ status: 'seen' })
-        .eq('id', messageId);
+      try {
+        const { error } = await supabase
+          .from('chatmessages')
+          .update({ status: 'seen' })
+          .eq('id', messageId);
 
-      if (error) {
-        console.error('Seen update error:', error.message);
-        return;
-      }
-
-      const { data: message } = await supabase
-        .from('chatmessages')
-        .select('sender, chat_id')
-        .eq('id', messageId)
-        .single();
-
-      if (message) {
-        const senderEmail = await getUserEmailFromId(message.sender);
-        if (senderEmail && connectedUsers.has(senderEmail)) {
-          connectedUsers.get(senderEmail)!.forEach(socketId => {
-            io.to(socketId).emit('message_status_update', {
-              messageId,
-              status: 'seen'
-            });
-          });
+        if (error) {
+          console.error('Seen update error:', error.message);
+          return;
         }
+
+        const { data: message } = await supabase
+          .from('chatmessages')
+          .select('sender, chat_id')
+          .eq('id', messageId)
+          .single();
+
+        if (message) {
+          const senderEmail = await getUserEmailFromId(message.sender);
+          if (senderEmail && connectedUsers.has(senderEmail)) {
+            connectedUsers.get(senderEmail)!.forEach(socketId => {
+              io.to(socketId).emit('message_status_update', {
+                messageId,
+                status: 'seen'
+              });
+            });
+          }
+
+          await updateUnseenCountForChatParticipants(message.chat_id);
+        }
+      } catch (error) {
+        console.error('Message seen error:', error);
       }
     });
 
@@ -564,6 +587,8 @@ export const registerSocketHandlers = (io: Server) => {
           .eq('type', emoji)
           .maybeSingle();
 
+        let action: 'add' | 'remove' = 'add';
+
         if (existingReaction) {
           const { error: deleteError } = await supabase
             .from('chat_reactions')
@@ -571,6 +596,7 @@ export const registerSocketHandlers = (io: Server) => {
             .eq('id', existingReaction.id);
 
           if (deleteError) throw deleteError;
+          action = 'remove';
         } else {
           const { error: insertError } = await supabase
             .from('chat_reactions')
@@ -582,6 +608,7 @@ export const registerSocketHandlers = (io: Server) => {
             }]);
 
           if (insertError) throw insertError;
+          action = 'add';
         }
 
         const { data: reactions } = await supabase
@@ -595,7 +622,6 @@ export const registerSocketHandlers = (io: Server) => {
           return acc;
         }, {} as Record<string, string[]>);
 
-        // Get message details
         const { data: message } = await supabase
           .from('chatmessages')
           .select('chat_id, sender')
@@ -604,19 +630,32 @@ export const registerSocketHandlers = (io: Server) => {
 
         if (!message) throw new Error('Message not found');
 
-        // Emit to all participants in the chat
-        const participants = await getChatParticipants(message.chat_id);
+        const { data: chat } = await supabase
+          .from('chats')
+          .select('user_1, user_2')
+          .eq('id', message.chat_id)
+          .single();
+
+        const participants = chat ? [chat.user_1, chat.user_2] : [];
+
+        const reactionPayload = {
+          messageId,
+          emoji,
+          userId,
+          action,
+          reactions: reactionMap || {}
+        };
+
         participants.forEach(async (participantId: string) => {
           const email = await getUserEmailFromId(participantId);
           if (email && connectedUsers.has(email)) {
             connectedUsers.get(email)!.forEach(socketId => {
-              io.to(socketId).emit('reaction_update', {
-                messageId,
-                reactions: reactionMap || {}
-              });
+              io.to(socketId).emit('reaction_update', reactionPayload);
             });
           }
         });
+
+        socket.emit('reaction_update', reactionPayload);
 
       } catch (error) {
         console.error('Reaction error:', error);
@@ -2245,7 +2284,7 @@ export const registerSocketHandlers = (io: Server) => {
       }
     });
   });
-  
+
   // Register chess handlers separately
   registerChessHandlers(io);
   registerChessAIHandlers(io);

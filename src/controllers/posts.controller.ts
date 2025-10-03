@@ -268,7 +268,8 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       poll_options,
       embedded_items,
       is_chamber_post = false,
-      chamber_id
+      chamber_id,
+      disclaimers
     } = req.body;
 
     const validationErrors = validatePostRequest(req.body);
@@ -279,6 +280,29 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
         errors: validationErrors
       });
       return;
+    }
+
+    if (disclaimers && !Array.isArray(disclaimers)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid disclaimers format. Must be an array.'
+      });
+      return;
+    }
+
+    if (disclaimers && disclaimers.length > 0) {
+      const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids'];
+      const invalidDisclaimers = disclaimers.filter(
+        (d: any) => !validDisclaimerTypes.includes(d.type) || typeof d.enabled !== 'boolean'
+      );
+      
+      if (invalidDisclaimers.length > 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid disclaimer format. Each disclaimer must have valid type and enabled status.'
+        });
+        return;
+      }
     }
 
     if (is_chamber_post && chamber_id) {
@@ -298,6 +322,10 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       embedded_items
     });
 
+    const enabledDisclaimers = disclaimers 
+      ? disclaimers.filter((d: any) => d.enabled === true)
+      : null;
+
     const postData = {
       user_id: userId,
       content: content?.trim() || null,
@@ -314,7 +342,8 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       poll_options: poll_options || null,
       embedded_items: embedded_items || null,
       is_chamber_post,
-      chamber_id: is_chamber_post ? chamber_id : null
+      chamber_id: is_chamber_post ? chamber_id : null,
+      disclaimers: enabledDisclaimers && enabledDisclaimers.length > 0 ? enabledDisclaimers : null
     };
 
     const { data: post, error } = await createPostInDatabase(postData);
@@ -363,7 +392,8 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
         ...post,
         allocated_soulpoints: allocatedPoints,
         is_chamber_post: is_chamber_post,
-        chamber_name: chamberName || undefined
+        chamber_name: chamberName || undefined,
+        disclaimers: enabledDisclaimers
       }
     });
 
