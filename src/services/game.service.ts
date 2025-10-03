@@ -520,5 +520,258 @@ export const gameService = {
       losses: player.losses,
       draws: player.draws || 0
     }));
+  },
+
+  // NEW: Create public chess invitation
+  async createPublicChessInvitation(data: {
+    inviter_id: string;
+    game_settings: {
+      time_control: 'blitz' | 'rapid' | 'classical';
+      difficulty?: 'easy' | 'medium' | 'hard';
+    };
+  }) {
+    console.log('🎮 Creating public chess invitation with data:', data);
+    
+    const roomId = `public_chess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    console.log('🏠 Generated public room ID:', roomId);
+    
+    const invitationData = {
+      room_id: roomId,
+      inviter_id: data.inviter_id,
+      invitee_id: null, // No specific invitee for public invitations
+      chat_id: null, // No chat required for public invitations
+      game_settings: data.game_settings,
+      status: 'pending',
+      is_public: true, // Mark as public invitation
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    console.log('📋 Public invitation data to insert:', invitationData);
+
+    // Create public invitation
+    const { data: invitation, error: inviteError } = await supabase
+      .from('chess_invitations')
+      .insert([invitationData])
+      .select(`
+        *,
+        inviter:profiles!chess_invitations_inviter_id_fkey(first_name, last_name)
+      `)
+      .single();
+
+    if (inviteError) {
+      console.error('❌ Error creating public invitation:', inviteError);
+      throw inviteError;
+    }
+
+    console.log('✅ Public invitation created successfully:', invitation);
+
+    // Create room with WAITING status (not active)
+    const gameRoomData = {
+      room_id: roomId,
+      white_player_id: data.inviter_id,
+      black_player_id: null, // Will be set when someone joins
+      current_turn: 'white',
+      game_status: 'waiting', // Keep as waiting, not active
+      game_state: this.getInitialChessPosition(),
+      game_settings: data.game_settings,
+      is_public: true, // Mark as public game
+      created_at: new Date().toISOString()
+    };
+
+    console.log('🏠 Creating public game room (waiting for player):', gameRoomData);
+
+    const { data: gameRoom, error: roomError } = await supabase
+      .from('chess_games')
+      .insert([gameRoomData])
+      .select()
+      .single();
+
+    if (roomError) {
+      console.error('❌ Error creating public game room:', roomError);
+      throw roomError;
+    }
+
+    console.log('✅ Public game room created successfully (waiting for player):', gameRoom);
+
+    return {
+      id: invitation.id,
+      room_id: invitation.room_id,
+      inviter_id: invitation.inviter_id,
+      inviter_name: `${invitation.inviter.first_name} ${invitation.inviter.last_name || ''}`.trim(),
+      status: invitation.status,
+      is_public: true,
+      created_at: invitation.created_at,
+      expires_at: invitation.expires_at,
+      game_settings: invitation.game_settings
+    };
+  },
+
+  // NEW: Join public chess invitation
+  async joinPublicChessInvitation(roomId: string, userId: string) {
+    console.log('🎮 Joining public chess invitation:', { roomId, userId });
+
+    // Find the public invitation
+    const { data: invitation, error: inviteError } = await supabase
+      .from('chess_invitations')
+      .select('*')
+      .eq('room_id', roomId)
+      .eq('is_public', true)
+      .eq('status', 'pending')
+      .single();
+
+    if (inviteError || !invitation) {
+      console.error('❌ Public invitation not found:', inviteError);
+      throw new Error('Public invitation not found or expired');
+    }
+
+    // // Check if user is trying to join their own invitation
+    // if (invitation.inviter_id === userId) {
+    //   throw new Error('Cannot join your own invitation');
+    // }
+
+    // console.log('✅ Found public invitation:', invitation);
+
+    // Update invitation status to accepted
+    const { error: updateInviteError } = await supabase
+      .from('chess_invitations')
+      .update({ 
+        status: 'accepted',
+        invitee_id: userId
+      })
+      .eq('id', invitation.id);
+
+    if (updateInviteError) {
+      console.error('❌ Error updating invitation:', updateInviteError);
+      throw updateInviteError;
+    }
+
+    // Update game room with the joining player
+    const { data: gameRoom, error: gameError } = await supabase
+      .from('chess_games')
+      .update({
+        black_player_id: userId,
+        game_status: 'active',
+        updated_at: new Date().toISOString()
+      })
+      .eq('room_id', roomId)
+      .select(`
+        *,
+        white_player:profiles!chess_games_white_player_id_fkey(id, first_name, last_name, avatar_url),
+        black_player:profiles!chess_games_black_player_id_fkey(id, first_name, last_name, avatar_url)
+      `)
+      .single();
+
+    if (gameError) {
+      console.error('❌ Error updating public game room:', gameError);
+      throw gameError;
+    }
+
+    console.log('✅ Public game room updated successfully:', gameRoom);
+
+    return {
+      id: gameRoom.id,
+      room_id: gameRoom.room_id,
+      inviter_id: invitation.inviter_id,
+      white_player: {
+        id: gameRoom.white_player.id,
+        name: `${gameRoom.white_player.first_name} ${gameRoom.white_player.last_name || ''}`.trim(),
+        avatar_url: gameRoom.white_player.avatar_url
+      },
+      black_player: {
+        id: gameRoom.black_player.id,
+        name: `${gameRoom.black_player.first_name} ${gameRoom.black_player.last_name || ''}`.trim(),
+        avatar_url: gameRoom.black_player.avatar_url
+      },
+      current_turn: gameRoom.current_turn,
+      game_status: gameRoom.game_status,
+      is_public: true,
+      created_at: gameRoom.created_at,
+      moves: []
+    };
+  },
+
+  // NEW: Get available public chess invitations
+  async getAvailablePublicInvitations(limit: number = 10) {
+    console.log('🔍 Fetching available public chess invitations');
+
+    const { data: invitations, error } = await supabase
+      .from('chess_invitations')
+      .select(`
+        *,
+        inviter:profiles!chess_invitations_inviter_id_fkey(first_name, last_name, avatar_url)
+      `)
+      .eq('is_public', true)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('❌ Error fetching public invitations:', error);
+      throw error;
+    }
+
+    console.log(`✅ Found ${invitations?.length || 0} public invitations`);
+
+    return invitations?.map(invitation => ({
+      id: invitation.id,
+      room_id: invitation.room_id,
+      inviter_id: invitation.inviter_id,
+      inviter_name: `${invitation.inviter.first_name} ${invitation.inviter.last_name || ''}`.trim(),
+      inviter_avatar: invitation.inviter.avatar_url,
+      game_settings: invitation.game_settings,
+      status: invitation.status,
+      is_public: true,
+      created_at: invitation.created_at,
+      expires_at: invitation.expires_at
+    })) || [];
+  },
+
+  // NEW: Clean up expired public invitations
+  async cleanupExpiredPublicInvitations() {
+    console.log('🧹 Cleaning up expired public invitations');
+
+    const { data: expiredInvitations, error: fetchError } = await supabase
+      .from('chess_invitations')
+      .select('id, room_id')
+      .eq('is_public', true)
+      .eq('status', 'pending')
+      .lt('expires_at', new Date().toISOString());
+
+    if (fetchError) {
+      console.error('❌ Error fetching expired invitations:', fetchError);
+      return;
+    }
+
+    if (!expiredInvitations || expiredInvitations.length === 0) {
+      console.log('✅ No expired public invitations found');
+      return;
+    }
+
+    console.log(`🗑️ Found ${expiredInvitations.length} expired invitations to clean up`);
+
+    // Delete expired invitations
+    const { error: deleteInviteError } = await supabase
+      .from('chess_invitations')
+      .delete()
+      .in('id', expiredInvitations.map(inv => inv.id));
+
+    if (deleteInviteError) {
+      console.error('❌ Error deleting expired invitations:', deleteInviteError);
+      return;
+    }
+
+    // Delete associated game rooms
+    const roomIds = expiredInvitations.map(inv => inv.room_id);
+    const { error: deleteRoomError } = await supabase
+      .from('chess_games')
+      .delete()
+      .in('room_id', roomIds);
+
+    if (deleteRoomError) {
+      console.error('❌ Error deleting expired game rooms:', deleteRoomError);
+    }
+
+    console.log(`✅ Cleaned up ${expiredInvitations.length} expired public invitations`);
   }
 };

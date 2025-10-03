@@ -113,6 +113,54 @@ export const registerChessHandlers = (io: Server) => {
           socket_id: socket.id
         });
 
+        // FIRST: Check for public invitation (new logic)
+        const { data: publicInvitation, error: publicInviteError } = await supabase
+          .from('chess_invitations')
+          .select('*')
+          .eq('room_id', payload.room_id)
+          .eq('is_public', true)
+          .eq('status', 'pending')
+          .single();
+
+        if (publicInvitation && !publicInviteError) {
+          console.log('✅ Found public invitation, joining as multiplayer...', {
+            invitation_id: publicInvitation.id,
+            inviter_id: publicInvitation.inviter_id,
+            is_public: publicInvitation.is_public
+          });
+          
+          const gameRoom = await gameService.joinPublicChessInvitation(payload.room_id, userId);
+          console.log('✅ Joined public game:', {
+            room_id: gameRoom.room_id,
+            white_player: gameRoom.white_player?.name,
+            black_player: gameRoom.black_player?.name,
+            game_status: gameRoom.game_status
+          });
+
+          socket.join(`chess_room_${payload.room_id}`);
+          socket.data.currentChessRoom = payload.room_id;
+
+          io.to(`chess_room_${payload.room_id}`).emit('chess_game_joined', {
+            room_id: payload.room_id,
+            game_room: gameRoom,
+            player_count: 2,
+            is_public: true
+          });
+
+          // Auto-start for public games
+          console.log('🎯 Starting public chess game...');
+          io.to(`chess_room_${payload.room_id}`).emit('chess_game_start', {
+            room_id: payload.room_id,
+            game_state: gameRoom.game_status,
+            white_player: gameRoom.white_player,
+            black_player: gameRoom.black_player
+          });
+          console.log('✅ Public chess game started successfully');
+
+          return;
+        }
+
+        // SECOND: Check for private invitation (existing logic - unchanged)
         const { data: invitation, error: inviteError } = await supabase
           .from('chess_invitations')
           .select('*')
@@ -122,14 +170,14 @@ export const registerChessHandlers = (io: Server) => {
           .single();
 
         if (invitation && !inviteError) {
-          console.log('✅ Found pending invitation, auto-accepting...', {
+          console.log('✅ Found pending private invitation, auto-accepting...', {
             invitation_id: invitation.id,
             inviter_id: invitation.inviter_id,
             invitee_id: invitation.invitee_id
           });
           
           const gameRoom = await gameService.acceptChessInvitation(invitation.id, userId);
-          console.log('✅ Invitation accepted, game room created:', {
+          console.log('✅ Private invitation accepted, game room created:', {
             room_id: gameRoom.room_id,
             white_player: gameRoom.white_player?.name,
             black_player: gameRoom.black_player?.name,
@@ -178,6 +226,7 @@ export const registerChessHandlers = (io: Server) => {
           return;
         }
 
+        // THIRD: Join existing room (existing logic - unchanged)
         console.log('🔍 No pending invitation found, joining existing room...');
         let gameRoom = await gameService.getChessGameRoom(payload.room_id);
         

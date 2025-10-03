@@ -12,7 +12,10 @@ import {
   requestAIMove,
   getAIGameStatus,           // Add this
   generateAIMoveWithBoard,   // Add this
-  getChessLeaderboard        // Add this
+  getChessLeaderboard,
+  createPublicChessInvite,    // Add this
+  joinPublicChessInvite,
+  getAvailablePublicInvitations  // Add this
 } from '../controllers/game.controller';
 
 const router = Router();
@@ -42,5 +45,10 @@ router.post('/chess/ai/move/:room_id', requestAIMove);
 router.get('/chess/ai/status/:room_id', getAIGameStatus);
 router.post('/chess/ai/generate-move/:room_id', generateAIMoveWithBoard);
 router.get('/chess/leaderboard', getChessLeaderboard);
+
+// Public chess invitation routes
+router.post('/chess/public/invite', createPublicChessInvite);
+router.post('/chess/public/join/:room_id', joinPublicChessInvite);
+router.get('/chess/public/invitations', getAvailablePublicInvitations);
 
 export default router;
