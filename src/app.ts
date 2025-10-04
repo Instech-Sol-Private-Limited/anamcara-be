@@ -117,7 +117,7 @@ app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 app.use('/api/slots', authMiddleware, availableSlotsRoutes);
 app.use('/api/products', authMiddleware, productsRoutes);
-app.use('/api/boostcampaign',authMiddleware,  campaignRoutes);
+app.use('/api/boostcampaign', authMiddleware, campaignRoutes);
 app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
 app.use('/api/admin/marketplace-analytics', authMiddleware, analyticsRoutes);
@@ -129,23 +129,23 @@ cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron();
 
 cron.schedule('0 2 * * *', async () => {
-    console.log('🔄 Running daily marketplace stats collection...');
-    try {
-        await collectDailyStats();
-        console.log('✅ Daily marketplace stats collection completed successfully.');
-    } catch (error) {
-        console.error('❌ Daily stats collection failed:', error);
-    }
+  console.log('🔄 Running daily marketplace stats collection...');
+  try {
+    await collectDailyStats();
+    console.log('✅ Daily marketplace stats collection completed successfully.');
+  } catch (error) {
+    console.error('❌ Daily stats collection failed:', error);
+  }
 });
 
 cron.schedule('0 3 1 * *', async () => {
-    console.log('🔄 Running monthly provider stats collection...');
-    try {
-        await collectMonthlyProviderStats();
-        console.log('✅ Monthly provider stats collection completed successfully.');
-    } catch (error) {
-        console.error('❌ Monthly provider stats collection failed:', error);
-    }
+  console.log('🔄 Running monthly provider stats collection...');
+  try {
+    await collectMonthlyProviderStats();
+    console.log('✅ Monthly provider stats collection completed successfully.');
+  } catch (error) {
+    console.error('❌ Monthly provider stats collection failed:', error);
+  }
 });
 
 initializeStats();
@@ -174,7 +174,7 @@ export const streamIo = new Server(server, {
   path: '/stream-socket',
   cors: {
     origin: [
- 
+
       'http://localhost:5173',
       'http://localhost:5174',
       'https://anamcara.ai',
