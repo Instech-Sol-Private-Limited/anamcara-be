@@ -1,215 +1,142 @@
-import { Request, Response } from 'express';
-import { supabase } from '../app';
-
-interface MessageSender {
-    id: string;
-    first_name: string;
-    last_name: string;
-    user_name: string;
-    avatar_img: string;
-}
-
-interface RepliedMessage {
-    id: string;
-    message: string;
-    sender_id: string;
-    sender: MessageSender;
-}
-
-interface ChamberMessage {
-    id: string;
-    chamber_id: string;
-    sender_id: string;
-    message: string;
-    has_media: boolean;
-    media: string[] | null;
-    message_type: string;
-    reply_to: string | null;
-    is_edited: boolean;
-    is_deleted: boolean;
-    created_at: string;
-    updated_at: string;
-    deleted_at: string | null;
-    sender: MessageSender;
-    replied_message: RepliedMessage | null;
-}
-
-interface PaginatedResponse {
-    success: boolean;
-    data?: ChamberMessage[];
-    pagination?: {
-        total: number;
-        page: number;
-        pages: number;
-        hasMore: boolean;
-    };
-    error?: string;
-}
-
+"use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getChamberMessages = exports.getTravelMessages = exports.getPublicMessages = exports.getDirectMessages = exports.getChamberMembers = exports.getUserChambers = exports.getAllChambers = exports.deleteChamber = exports.updateChamber = exports.joinChamberByInvite = exports.createChamber = exports.getUserConversations = exports.getUserFriends = void 0;
+const app_1 = require("../app");
 // ----------------------- friends ----------------------
 // user frineds
-export const getUserFriends = async (req: Request, res: Response): Promise<any> => {
+const getUserFriends = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId } = req.params;
-
     try {
-        const { data: friendships, error } = await supabase
+        const { data: friendships, error } = yield app_1.supabase
             .from('friendships')
             .select('id, sender_id, receiver_id, status')
             .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
             .eq('status', 'accepted');
-
-        if (error) return res.status(500).json({ success: false, error: error.message });
-
-        const friendIds = friendships.map((entry) =>
-            entry.sender_id === userId ? entry.receiver_id : entry.sender_id
-        );
-
+        if (error)
+            return res.status(500).json({ success: false, error: error.message });
+        const friendIds = friendships.map((entry) => entry.sender_id === userId ? entry.receiver_id : entry.sender_id);
         if (friendIds.length === 0) {
             return res.status(200).json({ success: true, data: [] });
         }
-
-        const friendsWithChats: {
-            friendId: string;
-            chatId: string;
-        }[] = [];
-
+        const friendsWithChats = [];
         for (const friendId of friendIds) {
-            const { data: existingChat, error: chatCheckError } = await supabase
+            const { data: existingChat, error: chatCheckError } = yield app_1.supabase
                 .from('chats')
                 .select('id')
                 .or(`and(user_1.eq.${userId},user_2.eq.${friendId}),and(user_1.eq.${friendId},user_2.eq.${userId})`)
                 .maybeSingle();
-
-            let chatId = existingChat?.id;
-
+            let chatId = existingChat === null || existingChat === void 0 ? void 0 : existingChat.id;
             if (!existingChat && !chatCheckError) {
-                const { data: newChat, error: insertError } = await supabase
+                const { data: newChat, error: insertError } = yield app_1.supabase
                     .from('chats')
                     .insert([
-                        {
-                            user_1: userId,
-                            user_2: friendId
-                        }
-                    ])
+                    {
+                        user_1: userId,
+                        user_2: friendId
+                    }
+                ])
                     .select('id')
                     .single();
-
                 if (insertError) {
                     console.error('Error creating chat:', insertError);
                     continue;
                 }
-
                 chatId = newChat.id;
             }
-
             if (chatId) {
                 friendsWithChats.push({ friendId, chatId });
             }
         }
-
-        const { data: friendsData, error: profileError } = await supabase
+        const { data: friendsData, error: profileError } = yield app_1.supabase
             .from('profiles')
             .select('id, first_name, last_name, avatar_url, email')
             .in('id', friendIds);
-
         if (profileError) {
             return res.status(500).json({ success: false, error: profileError.message });
         }
-
         const formatted = friendsData.map(profile => {
             const chatInfo = friendsWithChats.find(f => f.friendId === profile.id);
-
             return {
                 id: profile.id,
                 user_name: `${profile.first_name} ${profile.last_name}`,
                 avatar_img: profile.avatar_url,
                 email: profile.email,
-                chat_id: chatInfo?.chatId || null
+                chat_id: (chatInfo === null || chatInfo === void 0 ? void 0 : chatInfo.chatId) || null
             };
         });
-
         return res.status(200).json({ success: true, data: formatted });
-
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error in getUserFriends:', err);
         return res.status(500).json({ success: false, error: 'Something went wrong.' });
     }
-};
-
-
+});
+exports.getUserFriends = getUserFriends;
 // ----------------------- chambers & chats ----------------------
 // get conversion
-export const getUserConversations = async (req: Request, res: Response): Promise<any> => {
+const getUserConversations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId } = req.params;
-
     try {
-        const { data: friendships, error: friendshipsError } = await supabase
+        const { data: friendships, error: friendshipsError } = yield app_1.supabase
             .from('friendships')
             .select('sender_id, receiver_id')
             .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
             .eq('status', 'accepted');
-
-        if (friendshipsError) throw friendshipsError;
-
-        const friendIds = friendships?.map(friendship =>
-            friendship.sender_id === userId ? friendship.receiver_id : friendship.sender_id
-        ) || [];
-
+        if (friendshipsError)
+            throw friendshipsError;
+        const friendIds = (friendships === null || friendships === void 0 ? void 0 : friendships.map(friendship => friendship.sender_id === userId ? friendship.receiver_id : friendship.sender_id)) || [];
         if (friendIds.length === 0) {
             return res.json({ success: true, data: [] });
         }
-
-        const { data: chats, error: chatsError } = await supabase
+        const { data: chats, error: chatsError } = yield app_1.supabase
             .from('chats')
             .select('id, user_1, user_2, created_at, updated_at')
             .or(`and(user_1.eq.${userId},user_2.in.(${friendIds.join(',')})),and(user_2.eq.${userId},user_1.in.(${friendIds.join(',')}))`)
             .order('updated_at', { ascending: false });
-
-        if (chatsError) throw chatsError;
+        if (chatsError)
+            throw chatsError;
         if (!chats || chats.length === 0) {
             return res.json({ success: true, data: [] });
         }
-
         const chatIds = chats.map(chat => chat.id);
-
-        const { data: messages, error: messagesError } = await supabase
+        const { data: messages, error: messagesError } = yield app_1.supabase
             .from('chatmessages')
             .select('id, chat_id, sender, message, created_at, has_media, media')
             .in('chat_id', chatIds)
             .order('created_at', { ascending: false });
-
-        if (messagesError) throw messagesError;
-
-        const chatsWithMessages = chats.filter(chat =>
-            messages?.some(msg => msg.chat_id === chat.id)
-        );
-
+        if (messagesError)
+            throw messagesError;
+        const chatsWithMessages = chats.filter(chat => messages === null || messages === void 0 ? void 0 : messages.some(msg => msg.chat_id === chat.id));
         if (chatsWithMessages.length === 0) {
             return res.json({ success: true, data: [] });
         }
-
-        const recentMessageMap = new Map<string, any>();
-        messages?.forEach(msg => {
+        const recentMessageMap = new Map();
+        messages === null || messages === void 0 ? void 0 : messages.forEach(msg => {
             if (!recentMessageMap.has(msg.chat_id) ||
                 new Date(msg.created_at) > new Date(recentMessageMap.get(msg.chat_id).created_at)) {
                 recentMessageMap.set(msg.chat_id, msg);
             }
         });
-
-        const { data: profiles, error: profilesError } = await supabase
+        const { data: profiles, error: profilesError } = yield app_1.supabase
             .from('profiles')
             .select('id, first_name, last_name, avatar_url')
             .in('id', friendIds);
-
-        if (profilesError) throw profilesError;
-
-        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-
+        if (profilesError)
+            throw profilesError;
+        const profileMap = new Map((profiles === null || profiles === void 0 ? void 0 : profiles.map(p => [p.id, p])) || []);
         const formatted = chatsWithMessages.map(chat => {
             const otherUserId = chat.user_1 === userId ? chat.user_2 : chat.user_1;
             const profile = profileMap.get(otherUserId);
             const lastMessage = recentMessageMap.get(chat.id);
-
             return {
                 chat_id: chat.id,
                 updated_at: chat.updated_at,
@@ -225,50 +152,35 @@ export const getUserConversations = async (req: Request, res: Response): Promise
                     user_name: profile
                         ? `${profile.first_name} ${profile.last_name}`
                         : 'Unknown User',
-                    avatar_img: profile?.avatar_url || ''
+                    avatar_img: (profile === null || profile === void 0 ? void 0 : profile.avatar_url) || ''
                 }
             };
         }).sort((a, b) => {
-            const aTime = a.last_message?.created_at || a.updated_at;
-            const bTime = b.last_message?.created_at || b.updated_at;
+            var _a, _b;
+            const aTime = ((_a = a.last_message) === null || _a === void 0 ? void 0 : _a.created_at) || a.updated_at;
+            const bTime = ((_b = b.last_message) === null || _b === void 0 ? void 0 : _b.created_at) || b.updated_at;
             return new Date(bTime).getTime() - new Date(aTime).getTime();
         });
-
         return res.json({ success: true, data: formatted });
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error fetching conversations:', error);
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch conversations'
         });
     }
-};
-
+});
+exports.getUserConversations = getUserConversations;
 // create custom chamber
-export const createChamber = async (req: Request, res: Response): Promise<any> => {
+const createChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const {
-            name,
-            description = '',
-            custom_url,
-            category,
-            color_theme = '#6366f1',
-            rules = [],
-            policies = '',
-            monetization = { enabled: false },
-            logo = null,
-            cover_img = null,
-            tags = [],
-            members = [],
-            is_public = false
-        } = req.body;
-        console.log(req.body)
-        const { id: userId } = req.user!;
-
+        const { name, description = '', custom_url, category, color_theme = '#6366f1', rules = [], policies = '', monetization = { enabled: false }, logo = null, cover_img = null, tags = [], members = [], is_public = false } = req.body;
+        console.log(req.body);
+        const { id: userId } = req.user;
         if (!name || !userId) {
             return res.status(400).json({ error: 'Missing chamber name or userId' });
         }
-
         // Generate a unique invite code (8 character alphanumeric)
         const generateInviteCode = () => {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -278,39 +190,35 @@ export const createChamber = async (req: Request, res: Response): Promise<any> =
             }
             return result;
         };
-
         const invite_code = generateInviteCode();
-
-        const { data: chamber, error: chamberError } = await supabase
+        const { data: chamber, error: chamberError } = yield app_1.supabase
             .from('custom_chambers')
             .insert([
-                {
-                    name,
-                    description,
-                    custom_url,
-                    category,
-                    color_theme,
-                    rules,
-                    policies,
-                    monetization,
-                    logo,
-                    cover_img,
-                    tags,
-                    is_public,
-                    is_active: true,
-                    creator_id: userId,
-                    member_count: members.length + 1,
-                    invite_code,
-                    chamber_img: logo
-                },
-            ])
+            {
+                name,
+                description,
+                custom_url,
+                category,
+                color_theme,
+                rules,
+                policies,
+                monetization,
+                logo,
+                cover_img,
+                tags,
+                is_public,
+                is_active: true,
+                creator_id: userId,
+                member_count: members.length + 1,
+                invite_code,
+                chamber_img: logo
+            },
+        ])
             .select()
             .single();
-
-        if (chamberError) throw chamberError;
-
+        if (chamberError)
+            throw chamberError;
         const chamberId = chamber.id;
-
         // Insert chamber members
         // Insert chamber members
         const memberInserts = [
@@ -320,129 +228,103 @@ export const createChamber = async (req: Request, res: Response): Promise<any> =
                 joined_at: new Date().toISOString(),
                 role: "admin"
             },
-            ...members.map((member: any) => ({
+            ...members.map((member) => ({
                 chamber_id: chamberId,
                 user_id: member.value,
                 joined_at: new Date().toISOString(),
                 role: "member"
             })),
         ];
-
-        const { error: membersError } = await supabase.from('chamber_members').insert(memberInserts);
-        if (membersError) throw membersError;
-
+        const { error: membersError } = yield app_1.supabase.from('chamber_members').insert(memberInserts);
+        if (membersError)
+            throw membersError;
         const inviteLink = `${process.env.FRONTEND_URL || 'https://yourdomain.com'}/join/${invite_code}`;
-
         res.status(201).json({
             message: 'Chamber created successfully',
-            chamber: {
-                ...chamber,
-                invite_link: inviteLink
-            }
+            chamber: Object.assign(Object.assign({}, chamber), { invite_link: inviteLink })
         });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error creating chamber:', err);
         res.status(500).json({ error: 'Failed to create chamber' });
     }
-};
-
+});
+exports.createChamber = createChamber;
 // Join chamber by invite code
-export const joinChamberByInvite = async (req: Request, res: Response): Promise<any> => {
+const joinChamberByInvite = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { invite_code } = req.params;
-        const { id: userId } = req.user!;
-
+        const { id: userId } = req.user;
         // Find chamber by invite code
-        const { data: chamber, error: chamberError } = await supabase
+        const { data: chamber, error: chamberError } = yield app_1.supabase
             .from('custom_chambers')
             .select('id, is_public')
             .eq('invite_code', invite_code)
             .single();
-
         if (chamberError || !chamber) {
             return res.status(404).json({ error: 'Invalid invite code' });
         }
-
         // Check if user is already a member
-        const { data: existingMember } = await supabase
+        const { data: existingMember } = yield app_1.supabase
             .from('chamber_members')
             .select('user_id')
             .eq('chamber_id', chamber.id)
             .eq('user_id', userId)
             .single();
-
         if (existingMember) {
             return res.status(400).json({ error: 'You are already a member of this chamber' });
         }
-
         // Add user to chamber
-        const { error: joinError } = await supabase
+        const { error: joinError } = yield app_1.supabase
             .from('chamber_members')
             .insert({
-                chamber_id: chamber.id,
-                user_id: userId,
-                joined_at: new Date().toISOString(),
-                is_moderator: false,
-            });
-
-        if (joinError) throw joinError;
-
+            chamber_id: chamber.id,
+            user_id: userId,
+            joined_at: new Date().toISOString(),
+            is_moderator: false,
+        });
+        if (joinError)
+            throw joinError;
         // Increment member count
-        await supabase.rpc('increment_member_count', {
+        yield app_1.supabase.rpc('increment_member_count', {
             chamber_id: chamber.id,
         });
-
         res.status(200).json({ message: 'Successfully joined chamber' });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error joining chamber:', err);
         res.status(500).json({ error: 'Failed to join chamber' });
     }
-};
-
-export const updateChamber = async (req: Request, res: Response): Promise<any> => {
+});
+exports.joinChamberByInvite = joinChamberByInvite;
+const updateChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
-        const { id: userId } = req.user!;
+        const { id: userId } = req.user;
         const chamberId = req.params.id;
-
-        const {
-            name,
-            description = '',
-            custom_url,
-            category,
-            color_theme = '#6366f1',
-            rules = [],
-            policies = '',
-            monetization = { enabled: false },
-            logo = null,
-            cover_img = null,
-            is_public = false
-        } = req.body;
-
+        const { name, description = '', custom_url, category, color_theme = '#6366f1', rules = [], policies = '', monetization = { enabled: false }, logo = null, cover_img = null, is_public = false } = req.body;
         if (!userId) {
             return res.status(400).json({ error: 'Missing userId' });
         }
-
         if (!chamberId) {
             return res.status(400).json({ error: 'Missing chamberId' });
         }
-
         // Validate ownership
-        const { data: existingChamber, error: fetchError } = await supabase
+        const { data: existingChamber, error: fetchError } = yield app_1.supabase
             .from('custom_chambers')
             .select('creator_id')
             .eq('id', chamberId)
             .single();
-
-        if (fetchError) throw fetchError;
+        if (fetchError)
+            throw fetchError;
         if (!existingChamber) {
             return res.status(404).json({ error: 'Chamber not found' });
         }
         if (existingChamber.creator_id !== userId) {
             return res.status(403).json({ error: 'Unauthorized to update this chamber' });
         }
-
         // Prepare update payload
-        const updateData: any = {
+        const updateData = {
             name,
             description,
             custom_url,
@@ -457,9 +339,8 @@ export const updateChamber = async (req: Request, res: Response): Promise<any> =
             is_public,
             updated_at: new Date().toISOString()
         };
-
         // Update chamber
-        const { data: updatedChamber, error: updateError } = await supabase
+        const { data: updatedChamber, error: updateError } = yield app_1.supabase
             .from('custom_chambers')
             .update(updateData)
             .eq('id', chamberId)
@@ -472,9 +353,8 @@ export const updateChamber = async (req: Request, res: Response): Promise<any> =
                     avatar_url
                 )
             `);
-
-        if (updateError) throw updateError;
-
+        if (updateError)
+            throw updateError;
         const chamber = updatedChamber[0];
         const formattedChamber = {
             id: chamber.id,
@@ -495,85 +375,75 @@ export const updateChamber = async (req: Request, res: Response): Promise<any> =
             updated_at: chamber.updated_at,
             creator: {
                 id: chamber.creator_id,
-                user_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim() || 'Creator Name',
-                avatar_url: chamber.creator?.avatar_url || '',
+                user_name: `${((_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name) || ''} ${((_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name) || ''}`.trim() || 'Creator Name',
+                avatar_url: ((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.avatar_url) || '',
             }
         };
-
         res.status(200).json({
             success: true,
             data: formattedChamber
         });
-
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error updating chamber:', err);
         res.status(500).json({
             success: false,
             error: 'Failed to update chamber'
         });
     }
-};
-
-export const deleteChamber = async (req: Request, res: Response): Promise<any> => {
+});
+exports.updateChamber = updateChamber;
+const deleteChamber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { id: userId } = req.user!;
+        const { id: userId } = req.user;
         const { chamberId } = req.params;
-
         if (!userId) {
             return res.status(400).json({ error: "Missing userId" });
         }
-
         if (!chamberId) {
             return res.status(400).json({ error: "Missing chamberId" });
         }
-
-        const { data: chamber, error: chamberError } = await supabase
+        const { data: chamber, error: chamberError } = yield app_1.supabase
             .from("custom_chambers")
             .select("id, creator_id")
             .eq("id", chamberId)
             .single();
-
-        if (chamberError) throw chamberError;
-
+        if (chamberError)
+            throw chamberError;
         if (!chamber) {
             return res.status(404).json({ error: "Chamber not found" });
         }
-
         if (chamber.creator_id !== userId) {
             return res
                 .status(403)
                 .json({ error: "Unauthorized: only creator can delete chamber" });
         }
-
-        await supabase.from("chamber_members").delete().eq("chamber_id", chamberId);
-
-        const { error: deleteError } = await supabase
+        yield app_1.supabase.from("chamber_members").delete().eq("chamber_id", chamberId);
+        const { error: deleteError } = yield app_1.supabase
             .from("custom_chambers")
             .delete()
             .eq("id", chamberId);
-
-        if (deleteError) throw deleteError;
-
+        if (deleteError)
+            throw deleteError;
         res.status(200).json({ success: true, message: "Chamber deleted successfully" });
-    } catch (err) {
+    }
+    catch (err) {
         console.error("Error deleting chamber:", err);
         res.status(500).json({ error: "Failed to delete chamber" });
     }
-};
-
+});
+exports.deleteChamber = deleteChamber;
 // get all chambers
-export const getAllChambers = async (req: Request, res: Response): Promise<any> => {
+const getAllChambers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const page = parseInt(req.query.page as string) || 1;
+        const page = parseInt(req.query.page) || 1;
         const limit = 12;
         const offset = (page - 1) * limit;
-
-        const { count: totalChambers } = await supabase
+        const { count: totalChambers } = yield app_1.supabase
             .from('custom_chambers')
             .select('*', { count: 'exact', head: true })
             .eq('is_active', true);
-
-        const { data: chamberslist, error: chambersError } = await supabase
+        const { data: chamberslist, error: chambersError } = yield app_1.supabase
             .from('custom_chambers')
             .select(`
                 *,
@@ -588,14 +458,12 @@ export const getAllChambers = async (req: Request, res: Response): Promise<any> 
             .eq('is_active', true)
             .range(offset, offset + limit - 1)
             .order('updated_at', { ascending: false });
-
-        if (chambersError) throw chambersError;
-
-        const chamberIds = chamberslist.map((c: any) => c.id);
-
-        let membersByChamber: Record<string, any[]> = {};
+        if (chambersError)
+            throw chambersError;
+        const chamberIds = chamberslist.map((c) => c.id);
+        let membersByChamber = {};
         if (chamberIds.length > 0) {
-            const { data: membersList, error: membersError } = await supabase
+            const { data: membersList, error: membersError } = yield app_1.supabase
                 .from('chamber_members')
                 .select(`
                     *,
@@ -610,12 +478,12 @@ export const getAllChambers = async (req: Request, res: Response): Promise<any> 
                     )
                 `)
                 .in('chamber_id', chamberIds);
-
-            if (membersError) throw membersError;
-
-            membersByChamber = membersList.reduce((acc: any, member: any) => {
-                if (!acc[member.chamber_id]) acc[member.chamber_id] = [];
-
+            if (membersError)
+                throw membersError;
+            membersByChamber = membersList.reduce((acc, member) => {
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+                if (!acc[member.chamber_id])
+                    acc[member.chamber_id] = [];
                 // Map all chamber_members columns to the response
                 acc[member.chamber_id].push({
                     id: member.id,
@@ -635,48 +503,36 @@ export const getAllChambers = async (req: Request, res: Response): Promise<any> 
                     last_payment_at: member.last_payment_at,
                     next_payment_due: member.next_payment_due,
                     payment_status: member.payment_status,
-
                     // Profile information
-                    email: member.profile?.email,
-                    first_name: member.profile?.first_name,
-                    username: member.profile?.username,
-                    last_name: member.profile?.last_name,
-                    avatar_url: member.profile?.avatar_url,
-                    is_active: member.profile?.is_active,
-
+                    email: (_a = member.profile) === null || _a === void 0 ? void 0 : _a.email,
+                    first_name: (_b = member.profile) === null || _b === void 0 ? void 0 : _b.first_name,
+                    username: (_c = member.profile) === null || _c === void 0 ? void 0 : _c.username,
+                    last_name: (_d = member.profile) === null || _d === void 0 ? void 0 : _d.last_name,
+                    avatar_url: (_e = member.profile) === null || _e === void 0 ? void 0 : _e.avatar_url,
+                    is_active: (_f = member.profile) === null || _f === void 0 ? void 0 : _f.is_active,
                     // Computed fields for convenience - using full_name instead of user_name
-                    full_name: `${member.profile?.first_name || ''} ${member.profile?.last_name || ''}`.trim(),
+                    full_name: `${((_g = member.profile) === null || _g === void 0 ? void 0 : _g.first_name) || ''} ${((_h = member.profile) === null || _h === void 0 ? void 0 : _h.last_name) || ''}`.trim(),
                     is_creator: chamberIds.includes(member.chamber_id) &&
-                        chamberslist.find((c: any) => c.id === member.chamber_id)?.creator_id === member.user_id
+                        ((_j = chamberslist.find((c) => c.id === member.chamber_id)) === null || _j === void 0 ? void 0 : _j.creator_id) === member.user_id
                 });
                 return acc;
             }, {});
         }
-
         // Map to consistent format
-        const allChambers = chamberslist.map((chamber: any) => {
+        const allChambers = chamberslist.map((chamber) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h;
             const inviteLink = `${process.env.FRONTEND_URL || 'https://yourdomain.com'}/join/${chamber.invite_code}`;
-
-            return {
-                ...chamber,
-                chamber_id: chamber.id,
-                invite_link: inviteLink,
-                creator: {
+            return Object.assign(Object.assign({}, chamber), { chamber_id: chamber.id, invite_link: inviteLink, creator: {
                     id: chamber.creator_id,
-                    full_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim() || 'Creator Name',
-                    username: chamber.creator?.username || '',
-                    avatar_url: chamber.creator?.avatar_url || '',
-                    first_name: chamber.creator?.first_name,
-                    last_name: chamber.creator?.last_name,
-                    email: chamber.creator?.email
-                },
-                members: membersByChamber[chamber.id] || [],
-                member_count: membersByChamber[chamber.id]?.length || 0
-            };
+                    full_name: `${((_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name) || ''} ${((_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name) || ''}`.trim() || 'Creator Name',
+                    username: ((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.username) || '',
+                    avatar_url: ((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.avatar_url) || '',
+                    first_name: (_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.first_name,
+                    last_name: (_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.last_name,
+                    email: (_g = chamber.creator) === null || _g === void 0 ? void 0 : _g.email
+                }, members: membersByChamber[chamber.id] || [], member_count: ((_h = membersByChamber[chamber.id]) === null || _h === void 0 ? void 0 : _h.length) || 0 });
         });
-
         const totalPages = Math.ceil((totalChambers || 0) / limit);
-
         res.status(200).json({
             success: true,
             data: allChambers,
@@ -687,26 +543,25 @@ export const getAllChambers = async (req: Request, res: Response): Promise<any> 
                 hasMore: page < totalPages
             }
         });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error fetching user chambers:', err);
         res.status(500).json({
             success: false,
             error: 'Failed to fetch chambers'
         });
     }
-};
-
+});
+exports.getAllChambers = getAllChambers;
 // get user chambers
-export const getUserChambers = async (req: Request, res: Response): Promise<any> => {
+const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { userId } = req.params;
-
         if (!userId) {
             return res.status(400).json({ error: 'Missing userId' });
         }
-
         // First, fetch owned chambers with last message
-        const { data: ownedChambers, error: ownedError } = await supabase
+        const { data: ownedChambers, error: ownedError } = yield app_1.supabase
             .from('custom_chambers')
             .select(`
                 *,
@@ -728,11 +583,10 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
             .eq('is_active', true)
             .order('created_at', { foreignTable: 'last_message', ascending: false })
             .limit(1, { foreignTable: 'last_message' });
-
-        if (ownedError) throw ownedError;
-
+        if (ownedError)
+            throw ownedError;
         // Then fetch member chambers with last message and creator info
-        const { data: memberChambers, error: memberError } = await supabase
+        const { data: memberChambers, error: memberError } = yield app_1.supabase
             .from('chamber_members')
             .select(`
                 chamber_id, 
@@ -758,21 +612,18 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
             .eq('custom_chambers.is_active', true)
             .order('created_at', { foreignTable: 'chambers.last_message', ascending: false })
             .limit(1, { foreignTable: 'chambers.last_message' });
-
-        if (memberError) throw memberError;
-
+        if (memberError)
+            throw memberError;
         const joinedChambers = memberChambers
-            .map((item: any) => item.chambers)
-            .filter((chamber: any) => !!chamber);
-
+            .map((item) => item.chambers)
+            .filter((chamber) => !!chamber);
         // Combine all chambers
         const allChambers = [...ownedChambers, ...joinedChambers];
-        const chamberIds = allChambers.map((c: any) => c.id);
-
-        let membersByChamber: Record<string, any[]> = {};
+        const chamberIds = allChambers.map((c) => c.id);
+        let membersByChamber = {};
         if (chamberIds.length > 0) {
             // Fetch complete chamber_members data for all chambers
-            const { data: membersList, error: membersError } = await supabase
+            const { data: membersList, error: membersError } = yield app_1.supabase
                 .from('chamber_members')
                 .select(`
                     *,
@@ -787,12 +638,12 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
                     )
                 `)
                 .in('chamber_id', chamberIds);
-
-            if (membersError) throw membersError;
-
-            membersByChamber = membersList.reduce((acc: any, member: any) => {
-                if (!acc[member.chamber_id]) acc[member.chamber_id] = [];
-
+            if (membersError)
+                throw membersError;
+            membersByChamber = membersList.reduce((acc, member) => {
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+                if (!acc[member.chamber_id])
+                    acc[member.chamber_id] = [];
                 acc[member.chamber_id].push({
                     id: member.id,
                     chamber_id: member.chamber_id,
@@ -811,59 +662,58 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
                     last_payment_at: member.last_payment_at,
                     next_payment_due: member.next_payment_due,
                     payment_status: member.payment_status,
-
                     // Profile information
-                    email: member.profile?.email,
-                    first_name: member.profile?.first_name,
-                    last_name: member.profile?.last_name,
-                    username: member.profile?.username,
-                    avatar_url: member.profile?.avatar_url,
-                    is_active: member.profile?.is_active,
-
+                    email: (_a = member.profile) === null || _a === void 0 ? void 0 : _a.email,
+                    first_name: (_b = member.profile) === null || _b === void 0 ? void 0 : _b.first_name,
+                    last_name: (_c = member.profile) === null || _c === void 0 ? void 0 : _c.last_name,
+                    username: (_d = member.profile) === null || _d === void 0 ? void 0 : _d.username,
+                    avatar_url: (_e = member.profile) === null || _e === void 0 ? void 0 : _e.avatar_url,
+                    is_active: (_f = member.profile) === null || _f === void 0 ? void 0 : _f.is_active,
                     // Computed fields for convenience - using full_name instead of user_name
-                    full_name: `${member.profile?.first_name || ''} ${member.profile?.last_name || ''}`.trim(),
-                    is_creator: allChambers.find((c: any) => c.id === member.chamber_id)?.creator_id === member.user_id
+                    full_name: `${((_g = member.profile) === null || _g === void 0 ? void 0 : _g.first_name) || ''} ${((_h = member.profile) === null || _h === void 0 ? void 0 : _h.last_name) || ''}`.trim(),
+                    is_creator: ((_j = allChambers.find((c) => c.id === member.chamber_id)) === null || _j === void 0 ? void 0 : _j.creator_id) === member.user_id
                 });
                 return acc;
             }, {});
         }
-
         // Format the final response
-        const formattedChambers = allChambers.map((chamber: any) => ({
-            id: chamber.id,
-            chat_id: chamber.id,
-            chamber_id: chamber.id,
-            chamber_name: chamber.name,
-            name: chamber.name,
-            description: chamber.description,
-            is_public: chamber.is_public,
-            invite_code: chamber.invite_code,
-            chamber_img: chamber.chamber_img || '',
-            is_active: chamber.is_active,
-            is_chamber: true,
-            creator_id: chamber.creator_id,
-            custom_url: chamber.custom_url,
-            tags: chamber.tags || [],
-            member_count: membersByChamber[chamber.id]?.length || 0,
-            updated_at: chamber.updated_at,
-            last_message: chamber.last_message?.[0] ? {
-                id: chamber.last_message[0].id,
-                message: chamber.last_message[0].message,
-                created_at: chamber.last_message[0].created_at,
-                sender_id: chamber.last_message[0].sender_id
-            } : null,
-            creator: {
-                id: chamber.creator_id,
-                full_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim() || 'Creator Name',
-                username: chamber.creator?.username || '',
-                avatar_url: chamber.creator?.avatar_url || '',
-                first_name: chamber.creator?.first_name,
-                last_name: chamber.creator?.last_name
-            },
-            // Include complete members data
-            members: membersByChamber[chamber.id] || []
-        }));
-
+        const formattedChambers = allChambers.map((chamber) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h;
+            return ({
+                id: chamber.id,
+                chat_id: chamber.id,
+                chamber_id: chamber.id,
+                chamber_name: chamber.name,
+                name: chamber.name,
+                description: chamber.description,
+                is_public: chamber.is_public,
+                invite_code: chamber.invite_code,
+                chamber_img: chamber.chamber_img || '',
+                is_active: chamber.is_active,
+                is_chamber: true,
+                creator_id: chamber.creator_id,
+                custom_url: chamber.custom_url,
+                tags: chamber.tags || [],
+                member_count: ((_a = membersByChamber[chamber.id]) === null || _a === void 0 ? void 0 : _a.length) || 0,
+                updated_at: chamber.updated_at,
+                last_message: ((_b = chamber.last_message) === null || _b === void 0 ? void 0 : _b[0]) ? {
+                    id: chamber.last_message[0].id,
+                    message: chamber.last_message[0].message,
+                    created_at: chamber.last_message[0].created_at,
+                    sender_id: chamber.last_message[0].sender_id
+                } : null,
+                creator: {
+                    id: chamber.creator_id,
+                    full_name: `${((_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.first_name) || ''} ${((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.last_name) || ''}`.trim() || 'Creator Name',
+                    username: ((_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.username) || '',
+                    avatar_url: ((_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.avatar_url) || '',
+                    first_name: (_g = chamber.creator) === null || _g === void 0 ? void 0 : _g.first_name,
+                    last_name: (_h = chamber.creator) === null || _h === void 0 ? void 0 : _h.last_name
+                },
+                // Include complete members data
+                members: membersByChamber[chamber.id] || []
+            });
+        });
         res.status(200).json({
             success: true,
             data: formattedChambers,
@@ -874,26 +724,26 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
                 hasMore: false
             }
         });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error fetching user chambers:', err);
         res.status(500).json({
             success: false,
             error: 'Failed to fetch chambers'
         });
     }
-};
-
+});
+exports.getUserChambers = getUserChambers;
 // get chamber members
-export const getChamberMembers = async (req: Request, res: Response): Promise<any> => {
+const getChamberMembers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const { chamber_id } = req.params;
-        const { id: userId } = req.user!;
-
+        const { id: userId } = req.user;
         if (!chamber_id) {
             return res.status(400).json({ error: 'Missing chamber_id' });
         }
-
-        const { data: chamber, error: chamberError } = await supabase
+        const { data: chamber, error: chamberError } = yield app_1.supabase
             .from('custom_chambers')
             .select(`
                 *,
@@ -908,26 +758,22 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
             `)
             .eq('id', chamber_id)
             .single();
-
         if (chamberError || !chamber) {
             return res.status(404).json({ error: 'Chamber not found' });
         }
-
         if (!chamber.is_public) {
-            const { data: membership, error: membershipError } = await supabase
+            const { data: membership, error: membershipError } = yield app_1.supabase
                 .from('chamber_members')
                 .select('user_id, is_moderator')
                 .eq('chamber_id', chamber_id)
                 .eq('user_id', userId)
                 .single();
-
             if (membershipError || !membership) {
                 return res.status(403).json({ error: 'Not authorized to view this chamber' });
             }
         }
-
         // Get all members with their profile data and all chamber_members columns
-        const { data: members, error: membersError } = await supabase
+        const { data: members, error: membersError } = yield app_1.supabase
             .from('chamber_members')
             .select(`
                 *,
@@ -943,44 +789,43 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
             `)
             .eq('chamber_id', chamber_id)
             .order('joined_at', { ascending: true });
-
-        if (membersError) throw membersError;
-
+        if (membersError)
+            throw membersError;
         // Format the response to include all chamber_members data
-        const formattedMembers = members.map((member: any) => ({
-            // Chamber members table columns
-            id: member.id,
-            chamber_id: member.chamber_id,
-            user_id: member.user_id,
-            joined_at: member.joined_at,
-            is_moderator: member.is_moderator,
-            role: member.role,
-            is_banned: member.is_banned,
-            banned_until: member.banned_until,
-            ban_reason: member.ban_reason,
-            is_flagged: member.is_flagged,
-            flagged_count: member.flagged_count,
-            last_flagged_at: member.last_flagged_at,
-            is_paid: member.is_paid,
-            payment_type: member.payment_type,
-            last_payment_at: member.last_payment_at,
-            next_payment_due: member.next_payment_due,
-            payment_status: member.payment_status,
-
-            // Profile data
-            first_name: member.profiles?.first_name,
-            last_name: member.profiles?.last_name,
-            username: member.profiles?.username,
-            full_name: `${member.profiles?.first_name || ''} ${member.profiles?.last_name || ''}`.trim(),
-            avatar_url: member.profiles?.avatar_url,
-            email: member.profiles?.email,
-            is_active: member.profiles?.is_active,
-
-            // Additional computed fields
-            is_creator: member.user_id === chamber.creator_id,
-            online: false, // You might want to implement actual online status logic
-        }));
-
+        const formattedMembers = members.map((member) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h;
+            return ({
+                // Chamber members table columns
+                id: member.id,
+                chamber_id: member.chamber_id,
+                user_id: member.user_id,
+                joined_at: member.joined_at,
+                is_moderator: member.is_moderator,
+                role: member.role,
+                is_banned: member.is_banned,
+                banned_until: member.banned_until,
+                ban_reason: member.ban_reason,
+                is_flagged: member.is_flagged,
+                flagged_count: member.flagged_count,
+                last_flagged_at: member.last_flagged_at,
+                is_paid: member.is_paid,
+                payment_type: member.payment_type,
+                last_payment_at: member.last_payment_at,
+                next_payment_due: member.next_payment_due,
+                payment_status: member.payment_status,
+                // Profile data
+                first_name: (_a = member.profiles) === null || _a === void 0 ? void 0 : _a.first_name,
+                last_name: (_b = member.profiles) === null || _b === void 0 ? void 0 : _b.last_name,
+                username: (_c = member.profiles) === null || _c === void 0 ? void 0 : _c.username,
+                full_name: `${((_d = member.profiles) === null || _d === void 0 ? void 0 : _d.first_name) || ''} ${((_e = member.profiles) === null || _e === void 0 ? void 0 : _e.last_name) || ''}`.trim(),
+                avatar_url: (_f = member.profiles) === null || _f === void 0 ? void 0 : _f.avatar_url,
+                email: (_g = member.profiles) === null || _g === void 0 ? void 0 : _g.email,
+                is_active: (_h = member.profiles) === null || _h === void 0 ? void 0 : _h.is_active,
+                // Additional computed fields
+                is_creator: member.user_id === chamber.creator_id,
+                online: false, // You might want to implement actual online status logic
+            });
+        });
         res.status(200).json({
             success: true,
             data: {
@@ -989,12 +834,12 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
                 is_public: chamber.is_public,
                 creator: {
                     id: chamber.creator_id,
-                    first_name: chamber.creator?.first_name,
-                    last_name: chamber.creator?.last_name,
-                    username: chamber.creator?.username,
-                    full_name: `${chamber.creator?.first_name || ''} ${chamber.creator?.last_name || ''}`.trim(),
-                    avatar_url: chamber.creator?.avatar_url,
-                    email: chamber.creator?.email,
+                    first_name: (_a = chamber.creator) === null || _a === void 0 ? void 0 : _a.first_name,
+                    last_name: (_b = chamber.creator) === null || _b === void 0 ? void 0 : _b.last_name,
+                    username: (_c = chamber.creator) === null || _c === void 0 ? void 0 : _c.username,
+                    full_name: `${((_d = chamber.creator) === null || _d === void 0 ? void 0 : _d.first_name) || ''} ${((_e = chamber.creator) === null || _e === void 0 ? void 0 : _e.last_name) || ''}`.trim(),
+                    avatar_url: (_f = chamber.creator) === null || _f === void 0 ? void 0 : _f.avatar_url,
+                    email: (_g = chamber.creator) === null || _g === void 0 ? void 0 : _g.email,
                 },
                 chamber_info: {
                     id: chamber.id,
@@ -1006,87 +851,74 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
                 }
             }
         });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error fetching chamber members:', err);
         res.status(500).json({
             success: false,
             error: 'Failed to fetch chamber members'
         });
     }
-};
-
+});
+exports.getChamberMembers = getChamberMembers;
 // ----------------------- messages ----------------------
 // get direct messages
-export const getDirectMessages = async (req: Request, res: Response): Promise<any> => {
+const getDirectMessages = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { chatId } = req.params;
     const { page = 1, limit = 20 } = req.query;
-
     try {
         const pageNumber = Number(page);
         const limitNumber = Number(limit);
         const offset = (pageNumber - 1) * limitNumber;
-
-        const { data: chat, error: chatError } = await supabase
+        const { data: chat, error: chatError } = yield app_1.supabase
             .from('chats')
             .select('user_1, user_2')
             .eq('id', chatId)
             .single();
-
         if (chatError || !chat) {
             return res.status(404).json({
                 success: false,
                 error: 'Chat not found or access denied'
             });
         }
-
-        const { data: messages, error: messagesError, count } = await supabase
+        const { data: messages, error: messagesError, count } = yield app_1.supabase
             .from('chatmessages')
             .select('*', { count: 'exact' })
             .eq('chat_id', chatId)
             .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
-
-        if (messagesError) throw messagesError;
-
-        const messageIds = messages?.map(msg => msg.id) || [];
-
-        let reactionsData: Record<string, any> = {};
+        if (messagesError)
+            throw messagesError;
+        const messageIds = (messages === null || messages === void 0 ? void 0 : messages.map(msg => msg.id)) || [];
+        let reactionsData = {};
         if (messageIds.length > 0) {
-            const { data: reactions, error: reactionsError } = await supabase
+            const { data: reactions, error: reactionsError } = yield app_1.supabase
                 .from('chat_reactions')
                 .select('*')
                 .in('target_id', messageIds);
-
-            if (reactionsError) throw reactionsError;
-
-            reactionsData = reactions?.reduce((acc, reaction) => {
+            if (reactionsError)
+                throw reactionsError;
+            reactionsData = reactions === null || reactions === void 0 ? void 0 : reactions.reduce((acc, reaction) => {
                 if (!acc[reaction.target_id]) {
                     acc[reaction.target_id] = [];
                 }
                 acc[reaction.target_id].push(reaction);
                 return acc;
-            }, {} as Record<string, any[]>);
+            }, {});
         }
-
-        const messagesWithReactions = messages?.map(message => {
+        const messagesWithReactions = messages === null || messages === void 0 ? void 0 : messages.map(message => {
             const messageReactions = reactionsData[message.id] || [];
-            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+            const reactions = messageReactions.reduce((acc, reaction) => {
                 if (!acc[reaction.type]) {
                     acc[reaction.type] = [];
                 }
                 acc[reaction.type].push(reaction.user_id);
                 return acc;
-            }, {} as Record<string, string[]>);
-
-            return {
-                ...message,
-                reactions: Object.keys(reactions).length > 0 ? reactions : undefined
-            };
+            }, {});
+            return Object.assign(Object.assign({}, message), { reactions: Object.keys(reactions).length > 0 ? reactions : undefined });
         });
-
         const totalItems = count || 0;
         const hasMore = totalItems > pageNumber * limitNumber;
-
         return res.status(200).json({
             success: true,
             data: messagesWithReactions || [],
@@ -1098,26 +930,24 @@ export const getDirectMessages = async (req: Request, res: Response): Promise<an
                 hasMore
             }
         });
-
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error fetching messages:', error);
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch messages'
         });
     }
-};
-
+});
+exports.getDirectMessages = getDirectMessages;
 // Get all public messages (with pagination)
-export const getPublicMessages = async (req: Request, res: Response): Promise<any> => {
+const getPublicMessages = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { page = 1, limit = 50 } = req.query;
-
     try {
         const pageNumber = Number(page);
         const limitNumber = Number(limit);
         const offset = (pageNumber - 1) * limitNumber;
-
-        const { data: messages, error: messagesError, count } = await supabase
+        const { data: messages, error: messagesError, count } = yield app_1.supabase
             .from('public_chat')
             .select(`
                 id,
@@ -1131,48 +961,39 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
             `, { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(offset, offset + limitNumber - 1);
-
-        if (messagesError) throw messagesError;
-
-        const messageIds = messages?.map(msg => msg.id) || [];
-
-        let reactionsData: Record<string, any> = {};
+        if (messagesError)
+            throw messagesError;
+        const messageIds = (messages === null || messages === void 0 ? void 0 : messages.map(msg => msg.id)) || [];
+        let reactionsData = {};
         if (messageIds.length > 0) {
-            const { data: reactions, error: reactionsError } = await supabase
+            const { data: reactions, error: reactionsError } = yield app_1.supabase
                 .from('chat_reactions')
                 .select('*')
                 .in('target_id', messageIds)
                 .eq('target_type', 'public_chat_message');
-
-            if (reactionsError) throw reactionsError;
-
-            reactionsData = reactions?.reduce((acc, reaction) => {
+            if (reactionsError)
+                throw reactionsError;
+            reactionsData = reactions === null || reactions === void 0 ? void 0 : reactions.reduce((acc, reaction) => {
                 if (!acc[reaction.target_id]) {
                     acc[reaction.target_id] = [];
                 }
                 acc[reaction.target_id].push(reaction);
                 return acc;
-            }, {} as Record<string, any[]>);
+            }, {});
         }
-
-        const messagesWithReactions = messages?.map(message => {
+        const messagesWithReactions = messages === null || messages === void 0 ? void 0 : messages.map(message => {
             const messageReactions = reactionsData[message.id] || [];
-            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+            const reactions = messageReactions.reduce((acc, reaction) => {
                 if (!acc[reaction.type]) {
                     acc[reaction.type] = [];
                 }
                 acc[reaction.type].push(reaction.user_id);
                 return acc;
-            }, {} as Record<string, string[]>);
-
-            return {
-                ...message,
-                reactions: reactions
-            };
+            }, {});
+            return Object.assign(Object.assign({}, message), { reactions: reactions });
         });
         const totalItems = count || 0;
         const hasMore = totalItems > pageNumber * limitNumber;
-
         return res.status(200).json({
             success: true,
             data: messagesWithReactions || [],
@@ -1184,25 +1005,23 @@ export const getPublicMessages = async (req: Request, res: Response): Promise<an
                 hasMore
             }
         });
-
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error fetching public messages:', error);
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch messages'
         });
     }
-};
-
-export const getTravelMessages = async (req: Request, res: Response): Promise<any> => {
+});
+exports.getPublicMessages = getPublicMessages;
+const getTravelMessages = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { page = 1, limit = 50 } = req.query;
-
     try {
         const pageNumber = Number(page);
         const limitNumber = Number(limit);
         const offset = (pageNumber - 1) * limitNumber;
-
-        const { data: messages, error: messagesError, count } = await supabase
+        const { data: messages, error: messagesError, count } = yield app_1.supabase
             .from('travel_chat')
             .select(`
                 id,
@@ -1216,49 +1035,39 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
             `, { count: 'exact' })
             .order('created_at', { ascending: true })
             .range(offset, offset + limitNumber - 1);
-
-        if (messagesError) throw messagesError;
-
-        const messageIds = messages?.map(msg => msg.id) || [];
-
-        let reactionsData: Record<string, any> = {};
+        if (messagesError)
+            throw messagesError;
+        const messageIds = (messages === null || messages === void 0 ? void 0 : messages.map(msg => msg.id)) || [];
+        let reactionsData = {};
         if (messageIds.length > 0) {
-            const { data: reactions, error: reactionsError } = await supabase
+            const { data: reactions, error: reactionsError } = yield app_1.supabase
                 .from('chat_reactions')
                 .select('*')
                 .in('target_id', messageIds)
                 .eq('target_type', 'travel_chat_message');
-
-            if (reactionsError) throw reactionsError;
-
+            if (reactionsError)
+                throw reactionsError;
             reactionsData = reactions.reduce((acc, reaction) => {
                 if (!acc[reaction.target_id]) {
                     acc[reaction.target_id] = [];
                 }
                 acc[reaction.target_id].push(reaction);
                 return acc;
-            }, {} as Record<string, any[]>);
+            }, {});
         }
-
         const messagesWithReactions = messages.map(message => {
             const messageReactions = reactionsData[message.id] || [];
-            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+            const reactions = messageReactions.reduce((acc, reaction) => {
                 if (!acc[reaction.type]) {
                     acc[reaction.type] = [];
                 }
                 acc[reaction.type].push(reaction.user_id);
                 return acc;
-            }, {} as Record<string, string[]>);
-
-            return {
-                ...message,
-                reactions
-            };
+            }, {});
+            return Object.assign(Object.assign({}, message), { reactions });
         });
-
         const totalItems = count || 0;
         const hasMore = totalItems > pageNumber * limitNumber;
-
         return res.json({
             success: true,
             data: messagesWithReactions,
@@ -1270,55 +1079,49 @@ export const getTravelMessages = async (req: Request, res: Response): Promise<an
                 hasMore
             }
         });
-
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error fetching travel messages:', error);
         return res.status(500).json({
             success: false,
             error: error instanceof Error ? error.message : 'Failed to fetch messages'
         });
     }
-};
-
-export const getChamberMessages = async (req: Request, res: Response<PaginatedResponse>): Promise<void> => {
+});
+exports.getTravelMessages = getTravelMessages;
+const getChamberMessages = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { chamber_id } = req.params;
-        const { id: userId } = req.user!;
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 20;
-
+        const { id: userId } = req.user;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
         if (!chamber_id) {
             res.status(400).json({ success: false, error: 'Missing chamber_id' });
             return;
         }
-
         // Verify chamber exists
-        const { data: chamber, error: chamberError } = await supabase
+        const { data: chamber, error: chamberError } = yield app_1.supabase
             .from('custom_chambers')
             .select('is_public')
             .eq('id', chamber_id)
             .single();
-
         if (chamberError || !chamber) {
             res.status(404).json({ success: false, error: 'Chamber not found' });
             return;
         }
-
         if (!chamber.is_public) {
-            const { data: membership, error: membershipError } = await supabase
+            const { data: membership, error: membershipError } = yield app_1.supabase
                 .from('chamber_members')
                 .select('user_id')
                 .eq('chamber_id', chamber_id)
                 .eq('user_id', userId)
                 .single();
-
             if (membershipError || !membership) {
                 res.status(403).json({ success: false, error: 'Not authorized to view this chamber' });
                 return;
             }
         }
-
-        const { data: messages, error: messagesError, count } = await supabase
+        const { data: messages, error: messagesError, count } = yield app_1.supabase
             .from('chamber_messages')
             .select(`
                 id,
@@ -1340,48 +1143,42 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
             .eq('chamber_id', chamber_id)
             .order('created_at', { ascending: false })
             .range((page - 1) * limit, page * limit - 1);
-
-        if (messagesError) throw messagesError;
-
-        const messageIds = messages?.map(msg => msg.id) || [];
-
-        let reactionsData: Record<string, any> = {};
+        if (messagesError)
+            throw messagesError;
+        const messageIds = (messages === null || messages === void 0 ? void 0 : messages.map(msg => msg.id)) || [];
+        let reactionsData = {};
         if (messageIds.length > 0) {
-            const { data: reactions, error: reactionsError } = await supabase
+            const { data: reactions, error: reactionsError } = yield app_1.supabase
                 .from('chat_reactions')
                 .select('*')
                 .in('target_id', messageIds)
                 .eq('target_type', 'chamber_message');
-
-            if (reactionsError) throw reactionsError;
-
+            if (reactionsError)
+                throw reactionsError;
             reactionsData = reactions.reduce((acc, reaction) => {
                 if (!acc[reaction.target_id]) {
                     acc[reaction.target_id] = [];
                 }
                 acc[reaction.target_id].push(reaction);
                 return acc;
-            }, {} as Record<string, any[]>);
+            }, {});
         }
-
-        const formattedMessages: ChamberMessage[] = messages.map((message: any) => {
+        const formattedMessages = messages.map((message) => {
             const media = message.has_media
                 ? Array.isArray(message.media)
-                    ? message.media.filter((item: string | null) => item !== null)
+                    ? message.media.filter((item) => item !== null)
                     : message.media
                         ? [message.media]
                         : null
                 : null;
-
             const messageReactions = reactionsData[message.id] || [];
-            const reactions = messageReactions.reduce((acc: any, reaction: any) => {
+            const reactions = messageReactions.reduce((acc, reaction) => {
                 if (!acc[reaction.type]) {
                     acc[reaction.type] = [];
                 }
                 acc[reaction.type].push(reaction.user_id);
                 return acc;
-            }, {} as Record<string, string[]>);
-
+            }, {});
             return {
                 id: message.id,
                 chamber_id: message.chamber_id,
@@ -1418,9 +1215,7 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
                 reactions
             };
         });
-
         const totalPages = Math.ceil((count || 0) / limit);
-
         res.status(200).json({
             success: true,
             data: formattedMessages.reverse(),
@@ -1431,12 +1226,13 @@ export const getChamberMessages = async (req: Request, res: Response<PaginatedRe
                 hasMore: page < totalPages
             }
         });
-
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Error fetching chamber messages:', err);
         res.status(500).json({
             success: false,
             error: 'Failed to fetch chamber messages'
         });
     }
-};
+});
+exports.getChamberMessages = getChamberMessages;
