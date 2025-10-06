@@ -25,6 +25,7 @@ router.delete('/delete-thread/:thread_id', auth_middleware_1.authMiddleware, thr
 router.patch('/apply-react/:thread_id', auth_middleware_1.authMiddleware, threads_controller_1.updateReaction);
 router.get('/get-threads-by-user/:user_id', auth_middleware_1.optionalAuthMiddleware, threads_controller_1.getThreadsByUserId);
 router.patch('/toggle-status/:thread_id', auth_middleware_1.authMiddleware, threads_controller_1.toggleThreadStatus);
+router.post('/votes/:targetId', auth_middleware_1.authMiddleware, threads_controller_1.updateVote);
 // ======================= thread's comments ========================
 // get all comments(range)
 router.get('/get-comments', auth_middleware_1.optionalAuthMiddleware, comments_controller_1.getComments);

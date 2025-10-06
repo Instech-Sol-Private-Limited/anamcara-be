@@ -11,7 +11,8 @@ import {
   deletePost,
   updatePost,
   updatePostReaction,
-  getUserPostsMedia
+  getUserPostsMedia,
+  updateVote
 } from '../controllers/posts.controller';
 import {
   createComment,
@@ -50,6 +51,8 @@ router.post('/:postId/vote', authMiddleware, voteOnPoll);
 router.get('/:postId/results', authMiddleware, getPollResults);
 
 router.patch('/apply-react/:postId', authMiddleware, updatePostReaction);
+
+router.post('/votes/:targetId', authMiddleware, updateVote);
 
 // Toggle like on post
 // router.post('/:postId/like', authMiddleware, async (req, res, next) => {

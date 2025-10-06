@@ -2,20 +2,72 @@ import { Request, Response } from 'express';
 import { supabase } from '../../app';
 import { sendNotification } from '../../sockets/emitNotification';
 
-type ReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul';
+type ReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
+type VoteType = 'upvote' | 'downvote';
+type VoteTargetType = 'post' | 'thread';
 
+type TotalKey =
+  | 'total_likes'
+  | 'total_dislikes'
+  | 'total_insightfuls'
+  | 'total_hearts'
+  | 'total_hugs'
+  | 'total_souls'
+  | 'total_supports'
+  | 'total_valuables'
+  | 'total_funnies'
+  | 'total_shockeds'
+  | 'total_moveds'
+  | 'total_triggereds';
 
-type ThreadFieldMap = {
-  [key in ReactionType]: 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls';
+type ThreadReaction = {
+  id: string;
+  user_id: string;
+  target_id: string;
+  target_type: string;
+  type: ReactionType;
 };
 
-const fieldMap: ThreadFieldMap = {
+type ThreadFieldMap = {
+  [key in ReactionType]: 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls' | 'total_supports' | 'total_valuables' | 'total_funnies' | 'total_shockeds' | 'total_moveds' | 'total_triggereds';
+};
+
+const fieldMap: Record<ReactionType, TotalKey> = {
   like: 'total_likes',
   dislike: 'total_dislikes',
   insightful: 'total_insightfuls',
   heart: 'total_hearts',
   hug: 'total_hugs',
   soul: 'total_souls',
+  support: 'total_supports',
+  valuable: 'total_valuables',
+  funny: 'total_funnies',
+  shocked: 'total_shockeds',
+  moved: 'total_moveds',
+  triggered: 'total_triggereds',
+};
+
+type ThreadData = {
+  author_id: string;
+  title: string;
+  is_deleted: boolean;
+  is_chamber_thread: boolean;
+  chamber_id: string | null;
+} & Partial<Record<TotalKey, number>>;
+
+const soulpointsMap: Record<ReactionType, number> = {
+  like: 1,
+  dislike: 0,
+  insightful: 3,
+  heart: 2,
+  hug: 2,
+  soul: 4,
+  support: 2,
+  valuable: 3,
+  funny: 1,
+  shocked: 1,
+  moved: 2,
+  triggered: 0,
 };
 
 // add new thread
@@ -52,7 +104,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: 'Disclaimers must be an array' });
     }
 
-    const enabledDisclaimers = disclaimers 
+    const enabledDisclaimers = disclaimers
       ? disclaimers.filter((d: any) => d.enabled === true)
       : null;
 
@@ -393,241 +445,281 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
     if (threadError) return res.status(500).json({ error: threadError.message });
 
     const filteredThreads = allThreads.filter(thread => !spammedThreadIds.includes(thread.id));
-
     const paginatedThreads = filteredThreads.slice(offset, offset + limit);
 
-    const threadsWithReactions = await Promise.all(paginatedThreads.map(async (thread) => {
-      let userReaction = null;
+    const threadsWithDetails = await Promise.all(
+      paginatedThreads.map(async (thread) => {
+        let userReaction: string | null = null;
+        let userSaved = false;
 
-      if (user_id) {
-        const { data: reactionData } = await supabase
-          .from('thread_reactions')
-          .select('type')
-          .eq('user_id', user_id)
-          .eq('target_type', 'thread')
-          .eq('target_id', thread.id)
-          .maybeSingle();
+        if (user_id) {
+          const { data: reactionData } = await supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', user_id)
+            .eq('target_type', 'thread')
+            .eq('target_id', thread.id)
+            .maybeSingle();
 
-        if (reactionData) {
-          userReaction = reactionData.type;
-        }
-      }
+          if (reactionData) userReaction = reactionData.type;
 
-      const { data: comments } = await supabase
-        .from('threadcomments')
-        .select('id, thread_id, content, is_deleted')
-        .eq('thread_id', thread.id)
-        .eq('is_deleted', false);
-
-      const commentIds = comments?.map(c => c.id) || [];
-
-      const subcommentsResults = await Promise.all(
-        commentIds.map(commentId =>
-          supabase
-            .from('threadsubcomments')
+          const { data: savedData } = await supabase
+            .from('saved_posts')
             .select('id')
-            .eq('comment_id', commentId)
-            .eq('is_deleted', false)
-        )
-      );
+            .eq('user_id', user_id)
+            .eq('target_id', thread.id)
+            .eq('target_type', 'thread')
+            .maybeSingle();
 
-      const totalComments = comments?.length || 0;
-      const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+          if (savedData) userSaved = true;
+        }
 
-      return {
-        ...thread,
-        user_reaction: userReaction,
-        total_comments: totalComments + totalReplies,
-      };
-    }));
+        const { data: comments } = await supabase
+          .from('threadcomments')
+          .select('id')
+          .eq('thread_id', thread.id)
+          .eq('is_deleted', false);
 
-    return res.json(threadsWithReactions);
+        const commentIds = comments?.map(c => c.id) || [];
+
+        const subcommentsResults = await Promise.all(
+          commentIds.map(commentId =>
+            supabase
+              .from('threadsubcomments')
+              .select('id')
+              .eq('comment_id', commentId)
+              .eq('is_deleted', false)
+          )
+        );
+
+        const totalComments = comments?.length || 0;
+        const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+
+        return {
+          ...thread,
+          user_reaction: userReaction,
+          user_saved: userSaved,
+          total_comments: totalComments + totalReplies,
+          total_supports: thread.total_supports || 0,
+          total_valuables: thread.total_valuables || 0,
+          total_funnies: thread.total_funnies || 0,
+          total_shockeds: thread.total_shockeds || 0,
+          total_moveds: thread.total_moveds || 0,
+          total_triggereds: thread.total_triggereds || 0,
+          total_upvotes: thread.total_upvotes || 0,
+          total_downvotes: thread.total_downvotes || 0,
+          total_echos: thread.total_echos || 0,
+          total_saved: thread.total_saved || 0,
+        };
+      })
+    );
+
+    return res.json(threadsWithDetails);
   } catch (err: any) {
     console.error('getAllThreads error:', err);
     return res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 };
 
-// apply like/dislike
+const getReactionDisplayName = (reactionType: ReactionType): string => {
+  const displayNames: Record<ReactionType, string> = {
+    like: 'like',
+    dislike: 'dislike',
+    insightful: 'insightful',
+    heart: 'heart',
+    hug: 'hug',
+    soul: 'soul',
+    support: 'support',
+    valuable: 'valuable',
+    funny: 'funny',
+    shocked: 'shocked',
+    moved: 'moved',
+    triggered: 'triggered',
+  };
+  return displayNames[reactionType] || reactionType;
+};
+
 const updateReaction = async (
   req: Request<{ thread_id: string }, {}, { type: ReactionType }>,
   res: Response
 ): Promise<any> => {
-  const { thread_id } = req.params;
-  const { type } = req.body;
-  const { id: user_id } = req.user!;
+  try {
+    const { thread_id } = req.params;
+    const { type } = req.body;
+    const user_id = (req.user as { id?: string })?.id;
 
-  if (!user_id || !fieldMap[type]) {
-    return res.status(400).json({ error: 'Invalid user or reaction type.' });
-  }
-
-  const { data: existing, error: fetchError } = await supabase
-    .from('thread_reactions')
-    .select('*')
-    .eq('user_id', user_id)
-    .eq('target_id', thread_id)
-    .eq('target_type', 'thread')
-    .single();
-
-  if (fetchError && fetchError.code !== 'PGRST116') {
-    return res.status(500).json({ error: fetchError.message });
-  }
-
-  const { data: threadData, error: threadError } = await supabase
-    .from('threads')
-    .select('total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, author_id, title')
-    .eq('id', thread_id)
-    .eq('is_deleted', false)
-    .single();
-
-  if (threadError || !threadData) {
-    return res.status(404).json({ error: 'Thread not found!' });
-  }
-
-  const shouldSendNotification = threadData.author_id !== user_id;
-
-  let authorProfile = null;
-  if (shouldSendNotification) {
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('email, first_name, last_name')
-      .eq('id', threadData.author_id)
-      .single();
-
-    if (profileError) {
-      console.error('Error fetching author profile:', profileError);
-    } else {
-      authorProfile = profileData;
+    if (!user_id || !fieldMap[type]) {
+      return res.status(400).json({ error: 'Invalid user or reaction type.' });
     }
-  }
 
-  type UpdateFields = {
-    total_likes: number;
-    total_dislikes: number;
-    total_insightfuls: number;
-    total_hearts: number;
-    total_hugs: number;
-    total_souls: number;
-  };
+    const { data: existing, error: fetchError } = await supabase
+      .from('thread_reactions')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('target_id', thread_id)
+      .eq('target_type', 'thread')
+      .maybeSingle<ThreadReaction>();
 
-  const updates: UpdateFields = {
-    total_likes: threadData.total_likes ?? 0,
-    total_dislikes: threadData.total_dislikes ?? 0,
-    total_insightfuls: threadData.total_insightfuls ?? 0,
-    total_hearts: threadData.total_hearts ?? 0,
-    total_hugs: threadData.total_hugs ?? 0,
-    total_souls: threadData.total_souls ?? 0,
-  };
+    if (fetchError) {
+      return res.status(500).json({ error: fetchError.message });
+    }
 
-  const getReactionDisplayName = (reactionType: ReactionType): string => {
-    const displayNames: Record<ReactionType, string> = {
-      'like': 'like',
-      'dislike': 'dislike',
-      'insightful': 'insightful reaction',
-      'heart': 'heart',
-      'hug': 'hug',
-      'soul': 'soul reaction'
+    const { data: threadData, error: threadError } = await supabase
+      .from('threads')
+      .select(`
+        author_id,
+        title,
+        is_deleted,
+        total_likes,
+        total_dislikes,
+        total_insightfuls,
+        total_hearts,
+        total_hugs,
+        total_souls,
+        total_supports,
+        total_valuables,
+        total_funnies,
+        total_shockeds,
+        total_moveds,
+        total_triggereds,
+        total_upvotes,
+        total_downvotes,
+        total_echos,
+        total_saved
+      `)
+      .eq('id', thread_id)
+      .eq('is_deleted', false)
+      .maybeSingle<ThreadData>();
+
+    if (threadError || !threadData) {
+      return res.status(404).json({ error: 'Thread not found!' });
+    }
+
+    const shouldSendNotification = threadData.author_id !== user_id;
+
+    let authorProfile: { email?: string; first_name?: string; last_name?: string } | null = null;
+    if (shouldSendNotification) {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('email, first_name, last_name')
+        .eq('id', threadData.author_id)
+        .maybeSingle();
+
+      if (!profileError && profileData) authorProfile = profileData;
+    }
+
+    const updates: Record<TotalKey, number> = {
+      total_likes: threadData.total_likes ?? 0,
+      total_dislikes: threadData.total_dislikes ?? 0,
+      total_insightfuls: threadData.total_insightfuls ?? 0,
+      total_hearts: threadData.total_hearts ?? 0,
+      total_hugs: threadData.total_hugs ?? 0,
+      total_souls: threadData.total_souls ?? 0,
+      total_supports: threadData.total_supports ?? 0,
+      total_valuables: threadData.total_valuables ?? 0,
+      total_funnies: threadData.total_funnies ?? 0,
+      total_shockeds: threadData.total_shockeds ?? 0,
+      total_moveds: threadData.total_moveds ?? 0,
+      total_triggereds: threadData.total_triggereds ?? 0,
     };
-    return displayNames[reactionType] || reactionType;
-  };
 
-  if (existing) {
-    if (existing.type === type) {
-      const field = fieldMap[type];
-      updates[field] = Math.max(0, updates[field] - 1);
+    if (existing) {
+      if (existing.type === type) {
+        // Remove reaction (same type clicked)
+        const field = fieldMap[type];
+        updates[field] = Math.max(0, updates[field] - 1);
 
-      const { error: deleteError } = await supabase
+        // Delete reaction record
+        const { error: deleteError } = await supabase
+          .from('thread_reactions')
+          .delete()
+          .eq('id', existing.id);
+
+        if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+        // Update thread counts
+        const { error: updateThreadError } = await supabase
+          .from('threads')
+          .update({ [field]: updates[field] })
+          .eq('id', thread_id);
+
+        if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
+
+        // Send notification for reaction removal
+        if (shouldSendNotification && authorProfile?.email) {
+          await sendNotification({
+            recipientEmail: authorProfile.email,
+            recipientUserId: threadData.author_id,
+            actorUserId: user_id,
+            threadId: thread_id,
+            message: `_${getReactionDisplayName(type)}_ reaction was removed from your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
+            type: 'thread_reaction_removed',
+            metadata: { reaction_type: type, thread_id, actor_user_id: user_id },
+          });
+        }
+
+        return res.status(200).json({ message: `${type} removed!` });
+      }
+
+      // Change reaction type
+      const prevField = fieldMap[existing.type];
+      const currentField = fieldMap[type];
+
+      updates[prevField] = Math.max(0, updates[prevField] - 1);
+      updates[currentField] = updates[currentField] + 1;
+
+      // Update reaction record
+      const { error: updateReactionError } = await supabase
         .from('thread_reactions')
-        .delete()
+        .update({ type, updated_by: user_id })
         .eq('id', existing.id);
 
-      if (deleteError) return res.status(500).json({ error: deleteError.message });
+      if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
 
+      // Update thread counts
       const { error: updateThreadError } = await supabase
         .from('threads')
-        .update({ [field]: updates[field] })
+        .update({
+          [prevField]: updates[prevField],
+          [currentField]: updates[currentField],
+        })
         .eq('id', thread_id);
 
       if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-      if (shouldSendNotification && authorProfile) {
+      // Send notification for reaction change
+      if (shouldSendNotification && authorProfile?.email) {
         await sendNotification({
           recipientEmail: authorProfile.email,
           recipientUserId: threadData.author_id,
           actorUserId: user_id,
           threadId: thread_id,
-          message: `_${getReactionDisplayName(type)}_ reaction was removed from your thread **${threadData.title.split(' ').length > 3
-            ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
-            : threadData.title
-            }**`,
-          type: 'reaction_removed',
+          message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
+          type: 'thread_reaction_updated',
           metadata: {
-            reaction_type: type,
-            thread_id: thread_id,
-            thread_title: threadData.title,
-            actor_user_id: user_id
-          }
+            previous_reaction_type: existing.type,
+            new_reaction_type: type,
+            thread_id,
+            actor_user_id: user_id,
+          },
         });
       }
 
-      return res.status(200).json({ message: `${type} removed!` });
+      return res.status(200).json({ message: `Reaction updated to ${type}!` });
     }
 
-    const prevField = fieldMap[existing.type as ReactionType];
-    const currentField = fieldMap[type];
-
-    updates[prevField] = Math.max(0, updates[prevField] - 1);
-    updates[currentField] += 1;
-
-    const { error: updateReactionError } = await supabase
-      .from('thread_reactions')
-      .update({ type, updated_by: user_id })
-      .eq('id', existing.id);
-
-    if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
-
-    const { error: updateThreadError } = await supabase
-      .from('threads')
-      .update({
-        [prevField]: updates[prevField],
-        [currentField]: updates[currentField],
-      })
-      .eq('id', thread_id);
-
-    if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
-
-    if (shouldSendNotification && authorProfile) {
-      await sendNotification({
-        recipientEmail: authorProfile.email,
-        recipientUserId: threadData.author_id,
-        actorUserId: user_id,
-        threadId: thread_id,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.split(' ').length > 3
-          ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
-          : threadData.title
-          }**`,
-        type: 'reaction_updated',
-        metadata: {
-          previous_reaction_type: existing.type,
-          new_reaction_type: type,
-          thread_id: thread_id,
-          thread_title: threadData.title,
-          actor_user_id: user_id
-        }
-      });
-    }
-
-    return res.status(200).json({ message: `Reaction updated to ${type}!` });
-  } else {
+    // CASE B: No existing reaction -> insert new reaction
     const field = fieldMap[type];
-    updates[field] += 1;
+    updates[field] = updates[field] + 1;
 
+    // Insert new reaction record
     const { error: insertError } = await supabase
       .from('thread_reactions')
       .insert([{ user_id, target_id: thread_id, target_type: 'thread', type }]);
 
     if (insertError) return res.status(500).json({ error: insertError.message });
 
+    // Update thread counts
     const { error: updateThreadError } = await supabase
       .from('threads')
       .update({ [field]: updates[field] })
@@ -635,43 +727,163 @@ const updateReaction = async (
 
     if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
 
-    if (shouldSendNotification && authorProfile) {
-      const soulpointsMap: Record<ReactionType, number> = {
-        'like': 2,
-        'dislike': 0,
-        'insightful': 3,
-        'heart': 4,
-        'hug': 2,
-        'soul': 2
-      };
+    // Send notification for new reaction
+    if (shouldSendNotification && authorProfile?.email) {
+      // Award soulpoints based on reaction type
+      const soulpoints = soulpointsMap[type] ?? 0;
 
-      const soulpoints = soulpointsMap[type] || 0;
+      if (soulpoints > 0) {
+        const { error: soulpointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: threadData.author_id,
+          p_points: soulpoints,
+        });
+
+        if (soulpointsError) console.error('Error updating soulpoints:', soulpointsError);
+      }
 
       await sendNotification({
         recipientEmail: authorProfile.email,
         recipientUserId: threadData.author_id,
         actorUserId: user_id,
         threadId: thread_id,
-        message: `Received _${getReactionDisplayName(type)}_ reaction on your thread **${threadData.title.split(' ').length > 3
-          ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
-          : threadData.title
-          }**`,
-        type: 'reaction_added',
+        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} soulpoints)` : ''}`,
+        type: 'thread_reaction_added',
         metadata: {
           reaction_type: type,
-          soulpoints: soulpoints,
-          thread_id: thread_id,
-          thread_title: threadData.title,
-          actor_user_id: user_id
-        }
+          thread_id,
+          actor_user_id: user_id,
+          soulpoints,
+        },
       });
     }
 
     return res.status(200).json({ message: `${type} added!` });
+  } catch (err: any) {
+    console.error('updateReaction error:', err);
+    return res.status(500).json({ error: err?.message ?? 'Internal error' });
   }
 };
 
-// get profile threads
+const updateVote = async (
+  req: Request<{ targetId: string }, {}, { voteType: VoteType; targetType: VoteTargetType }>,
+  res: Response
+): Promise<any> => {
+  const { targetId } = req.params;
+  const { voteType, targetType } = req.body;
+  const { id: user_id } = req.user!;
+
+  if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread'].includes(targetType)) {
+    return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
+  }
+
+  try {
+    const { data: existingVote, error: fetchError } = await supabase
+      .from('post_votes')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('target_id', targetId)
+      .eq('target_type', targetType)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      return res.status(500).json({ error: fetchError.message });
+    }
+
+    const tableName = targetType === 'post' ? 'posts' : 'threads';
+    const { data: targetData, error: targetError } = await supabase
+      .from(tableName)
+      .select('total_upvotes, total_downvotes, author_id')
+      .eq('id', targetId)
+      .single();
+
+    if (targetError || !targetData) {
+      return res.status(404).json({ error: `${targetType} not found!` });
+    }
+
+    const currentUpvotes = targetData.total_upvotes || 0;
+    const currentDownvotes = targetData.total_downvotes || 0;
+
+    let newUpvotes = currentUpvotes;
+    let newDownvotes = currentDownvotes;
+
+    if (existingVote) {
+      if (existingVote.vote_type === voteType) {
+        const { error: deleteError } = await supabase
+          .from('post_votes')
+          .delete()
+          .eq('id', existingVote.id);
+
+        if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+        if (voteType === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - 20);
+        } else {
+          newDownvotes = Math.max(0, currentDownvotes - 5);
+        }
+      } else {
+        const { error: updateError } = await supabase
+          .from('post_votes')
+          .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+          .eq('id', existingVote.id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        if (existingVote.vote_type === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - 20);
+          newDownvotes = currentDownvotes + 5;
+        } else {
+          newUpvotes = currentUpvotes + 20;
+          newDownvotes = Math.max(0, currentDownvotes - 5);
+        }
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from('post_votes')
+        .insert([{ 
+          user_id, 
+          target_id: targetId, 
+          target_type: targetType, 
+          vote_type: voteType 
+        }]);
+
+      if (insertError) return res.status(500).json({ error: insertError.message });
+
+      if (voteType === 'upvote') {
+        newUpvotes = currentUpvotes + 20;
+      } else {
+        newDownvotes = currentDownvotes + 5;
+      }
+    }
+
+    const { error: updateTargetError } = await supabase
+      .from(tableName)
+      .update({
+        total_upvotes: newUpvotes,
+        total_downvotes: newDownvotes,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', targetId);
+
+    if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
+
+    const netScore = newUpvotes - newDownvotes;
+
+    return res.status(200).json({
+      message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
+      data: {
+        total_upvotes: newUpvotes,
+        total_downvotes: newDownvotes,
+        net_score: netScore,
+        user_vote: existingVote?.vote_type === voteType ? null : voteType
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error updating vote:', error);
+    return res.status(500).json({ error: 'Failed to process vote' });
+  }
+};
+
 const getThreadsByUserId = async (req: Request, res: Response): Promise<any> => {
   try {
     const { user_id } = req.params;
@@ -840,5 +1052,6 @@ export {
   updateReaction,
   getThreadsByUserId,
   toggleThreadStatus,
+  updateVote,
 };
 

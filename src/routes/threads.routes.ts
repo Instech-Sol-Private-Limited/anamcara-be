@@ -8,6 +8,7 @@ import {
     updateReaction,
      getThreadsByUserId,
      toggleThreadStatus,
+     updateVote,
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
@@ -53,6 +54,7 @@ router.get('/get-threads-by-user/:user_id', optionalAuthMiddleware, getThreadsBy
 
 router.patch('/toggle-status/:thread_id', authMiddleware, toggleThreadStatus);
 
+router.post('/votes/:targetId', authMiddleware, updateVote);
 
 
 
