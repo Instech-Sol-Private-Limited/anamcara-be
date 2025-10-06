@@ -792,7 +792,7 @@ const updateVote = async (
     const tableName = targetType === 'post' ? 'posts' : 'threads';
     const { data: targetData, error: targetError } = await supabase
       .from(tableName)
-      .select('total_upvotes, total_downvotes, user_id')
+      .select('total_upvotes, total_downvotes, author_id')
       .eq('id', targetId)
       .single();
 

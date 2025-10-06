@@ -624,7 +624,7 @@ const updateVote = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const tableName = targetType === 'post' ? 'posts' : 'threads';
         const { data: targetData, error: targetError } = yield app_1.supabase
             .from(tableName)
-            .select('total_upvotes, total_downvotes, user_id')
+            .select('total_upvotes, total_downvotes, author_id')
             .eq('id', targetId)
             .single();
         if (targetError || !targetData) {
