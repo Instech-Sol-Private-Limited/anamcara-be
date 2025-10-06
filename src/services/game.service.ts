@@ -4,8 +4,8 @@ import { supabase } from '../app';
 export const gameService = {
   async createChessInvitation(data: {
     inviter_id: string;
-    invitee_id: string;
-    chat_id: string;
+    invitee_id: string | null; // Allow null for public invitations
+    chat_id: string | null; // Allow null for public invitations
     game_settings: {
       time_control: 'blitz' | 'rapid' | 'classical';
       difficulty?: 'easy' | 'medium' | 'hard';
@@ -19,15 +19,15 @@ export const gameService = {
     const invitationData = {
       room_id: roomId,
       inviter_id: data.inviter_id,
-      invitee_id: data.invitee_id,
-      chat_id: data.chat_id,
+      invitee_id: data.invitee_id, // Can be null for public invitations
+      chat_id: data.chat_id, // Can be null for public invitations
       game_settings: data.game_settings,
       status: 'pending',
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     };
 
-    console.log(' Invitation data to insert:', invitationData);
+    console.log('📋 Invitation data to insert:', invitationData);
 
     // Create invitation
     const { data: invitation, error: inviteError } = await supabase
@@ -59,7 +59,7 @@ export const gameService = {
       created_at: new Date().toISOString()
     };
 
-    console.log(' Creating game room:', gameRoomData);
+    console.log('🏠 Creating game room:', gameRoomData);
 
     const { data: gameRoom, error: roomError } = await supabase
       .from('chess_games')
@@ -69,7 +69,6 @@ export const gameService = {
 
     if (roomError) {
       console.error('❌ Error creating game room:', roomError);
-      // Don't throw error here, just log it
       console.log('⚠️ Continuing without room creation...');
     } else {
       console.log('✅ Game room created successfully:', gameRoom);
@@ -81,7 +80,7 @@ export const gameService = {
       inviter_id: invitation.inviter_id,
       invitee_id: invitation.invitee_id,
       inviter_name: `${invitation.inviter.first_name} ${invitation.inviter.last_name || ''}`.trim(),
-      invitee_name: `${invitation.invitee.first_name} ${invitation.invitee.last_name || ''}`.trim(),
+      invitee_name: invitation.invitee ? `${invitation.invitee.first_name} ${invitation.invitee.last_name || ''}`.trim() : null,
       status: invitation.status,
       created_at: invitation.created_at,
       expires_at: invitation.expires_at,
@@ -91,27 +90,76 @@ export const gameService = {
 
   async acceptChessInvitation(inviteId: string, userId: string) {
     console.log('✅ Accepting chess invitation:', { inviteId, userId });
-  
-    const { data: invitation, error: inviteError } = await supabase
+
+    // First, get the invitation to check if invitee_id is null (public invitation)
+    const { data: invitationData, error: getInviteError } = await supabase
       .from('chess_invitations')
-      .update({ status: 'accepted' })
+      .select('*')
       .eq('id', inviteId)
-      .eq('invitee_id', userId)
-      .select()
       .single();
-  
-    if (inviteError) {
-      console.error('❌ Error accepting invitation:', inviteError);
-      throw inviteError;
+
+    if (getInviteError || !invitationData) {
+      console.error('❌ Error getting invitation:', getInviteError);
+      throw new Error('Invitation not found');
     }
-  
-    console.log('📋 Invitation accepted:', invitation);
-  
+
+    console.log('📋 Found invitation:', {
+      id: invitationData.id,
+      invitee_id: invitationData.invitee_id,
+      status: invitationData.status
+    });
+
+    let invitation;
+
+    // Check if this is a public invitation (null invitee_id)
+    if (invitationData.invitee_id === null) {
+      console.log('🌐 Public invitation - allowing any user to join');
+      
+      // Update invitation with the joining user's ID
+      const { data: updatedInvitation, error: updateError } = await supabase
+        .from('chess_invitations')
+        .update({ 
+          status: 'accepted',
+          invitee_id: userId // Set the joining user as invitee
+        })
+        .eq('id', inviteId)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error updating public invitation:', updateError);
+        throw updateError;
+      }
+
+      invitation = updatedInvitation;
+      console.log('✅ Public invitation updated with joining user:', userId);
+      
+    } else {
+      console.log('👥 Regular invitation - checking if user is the intended invitee');
+      
+      // Regular invitation - only the specific invitee can accept
+      const { data: updatedInvitation, error: updateError } = await supabase
+        .from('chess_invitations')
+        .update({ status: 'accepted' })
+        .eq('id', inviteId)
+        .eq('invitee_id', userId) // Must match the intended invitee
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error accepting invitation:', updateError);
+        throw new Error('You are not the intended recipient of this invitation');
+      }
+
+      invitation = updatedInvitation;
+      console.log('✅ Regular invitation accepted by intended user:', userId);
+    }
+
     // Update existing room instead of creating new one
     const { data: gameRoom, error: gameError } = await supabase
       .from('chess_games')
       .update({
-        black_player_id: invitation.invitee_id,
+        black_player_id: invitation.invitee_id, // This will be the joining user's ID
         game_status: 'active',
         updated_at: new Date().toISOString()
       })
@@ -122,14 +170,14 @@ export const gameService = {
         black_player:profiles!chess_games_black_player_id_fkey(id, first_name, last_name, avatar_url)
       `)
       .single();
-  
+
     if (gameError) {
       console.error('❌ Error updating game room:', gameError);
       throw gameError;
     }
-  
+
     console.log('✅ Game room updated successfully:', gameRoom);
-  
+
     return {
       id: gameRoom.id,
       room_id: gameRoom.room_id,
@@ -147,7 +195,11 @@ export const gameService = {
       current_turn: gameRoom.current_turn,
       game_status: gameRoom.game_status,
       created_at: gameRoom.created_at,
-      moves: []
+      moves: [],
+      // Explicit game type indicators
+      game_type: 'multiplayer', // Always multiplayer when two real players
+      is_ai_game: false, // Never AI when it's a real multiplayer game
+      is_public: invitation.invitee_id === null // True if it was a public invitation
     };
   },
 
@@ -687,7 +739,11 @@ export const gameService = {
       game_status: gameRoom.game_status,
       is_public: true,
       created_at: gameRoom.created_at,
-      moves: []
+      moves: [],
+      // Explicit game type indicators
+      game_type: 'multiplayer', // Always multiplayer when two real players
+      is_ai_game: false, // Never AI when it's a real multiplayer game
+    // Remove the duplicate line 746
     };
   },
 

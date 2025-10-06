@@ -113,23 +113,26 @@ export const registerChessHandlers = (io: Server) => {
           socket_id: socket.id
         });
 
-        // FIRST: Check for public invitation (new logic)
+        // FIRST: Check for public invitation (by is_public flag OR null invitee_id)
         const { data: publicInvitation, error: publicInviteError } = await supabase
           .from('chess_invitations')
           .select('*')
           .eq('room_id', payload.room_id)
-          .eq('is_public', true)
           .eq('status', 'pending')
+          .or('is_public.eq.true,invitee_id.is.null') // Check for is_public OR null invitee_id
           .single();
 
         if (publicInvitation && !publicInviteError) {
           console.log('✅ Found public invitation, joining as multiplayer...', {
             invitation_id: publicInvitation.id,
             inviter_id: publicInvitation.inviter_id,
+            invitee_id: publicInvitation.invitee_id,
             is_public: publicInvitation.is_public
           });
           
-          const gameRoom = await gameService.joinPublicChessInvitation(payload.room_id, userId);
+          // Use the existing acceptChessInvitation method for public invitations
+          const gameRoom = await gameService.acceptChessInvitation(publicInvitation.id, userId);
+          
           console.log('✅ Joined public game:', {
             room_id: gameRoom.room_id,
             white_player: gameRoom.white_player?.name,

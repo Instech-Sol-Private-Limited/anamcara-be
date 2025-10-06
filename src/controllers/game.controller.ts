@@ -90,13 +90,13 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     const { friend_id, invitee_id, chat_id, game_settings, message } = req.body;
 
-    // Determine the invitee - prioritize friend_id for backward compatibility
-    const targetUserId = friend_id || invitee_id;
+    // Determine the invitee - allow null for public invitations
+    const targetUserId = friend_id || invitee_id || null;
 
-    if (!targetUserId || !game_settings) {
+    if (!game_settings) {
       res.status(400).json({
         success: false,
-        message: 'Missing required fields: friend_id/invitee_id, game_settings'
+        message: 'Missing required fields: game_settings'
       });
       return;
     }
@@ -109,6 +109,36 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       game_settings
     });
 
+    // If targetUserId is null, this is a public invitation
+    if (targetUserId === null) {
+      console.log('🌐 Creating public invitation (no specific invitee)...');
+      
+      const invitation = await gameService.createChessInvitation({
+        inviter_id: userId,
+        invitee_id: null, // No specific invitee
+        chat_id: null, // No chat for public invitations
+        game_settings
+      });
+
+      res.status(201).json({
+        success: true,
+        data: {
+          room_id: invitation.room_id,
+          room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
+          invitation_id: invitation.id,
+          inviter_name: invitation.inviter_name,
+          status: invitation.status,
+          created_at: invitation.created_at,
+          expires_at: invitation.expires_at,
+          game_settings: invitation.game_settings,
+          is_public: true
+        },
+        message: 'Public chess invitation created successfully'
+      });
+      return;
+    }
+
+    // Rest of the existing logic for specific user invitations...
     // Check if target user exists
     const { data: targetProfile, error: targetError } = await supabase
       .from('profiles')
@@ -234,7 +264,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
         game_settings: game_settings,
         game_type: game_settings.game_type || 'casual',
         bet_amount: game_settings.bet_amount || 0,
-        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+        room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`
       }
     });
 
@@ -252,7 +282,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
             inviter_name: inviterName,
             inviter_id: userId,
             message: message || `You've been invited to play chess!`,
-            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+            room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
             // Add betting info from game_settings for notification only
             game_type: game_settings.game_type || 'casual',
             bet_amount: game_settings.bet_amount || 0
@@ -325,7 +355,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       data: {
         room_id: invitation.room_id,
         chat_id: finalChatId,
-        room_link: `${process.env.CLIENT_URL}/chess?room=${invitation.room_id}`,
+        room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess?room=${invitation.room_id}`,
         invitation_id: invitation.id,
         inviter_name: inviterName,
         invitee_name: `${targetProfile.first_name} ${targetProfile.last_name || ''}`.trim(),
