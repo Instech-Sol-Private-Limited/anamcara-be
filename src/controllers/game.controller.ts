@@ -90,13 +90,13 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     const { friend_id, invitee_id, chat_id, game_settings, message } = req.body;
 
-    // Determine the invitee - prioritize friend_id for backward compatibility
-    const targetUserId = friend_id || invitee_id;
+    // Determine the invitee - allow null for public invitations
+    const targetUserId = friend_id || invitee_id || null;
 
-    if (!targetUserId || !game_settings) {
+    if (!game_settings) {
       res.status(400).json({
         success: false,
-        message: 'Missing required fields: friend_id/invitee_id, game_settings'
+        message: 'Missing required fields: game_settings'
       });
       return;
     }
@@ -109,6 +109,36 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       game_settings
     });
 
+    // If targetUserId is null, this is a public invitation
+    if (targetUserId === null) {
+      console.log('🌐 Creating public invitation (no specific invitee)...');
+      
+      const invitation = await gameService.createChessInvitation({
+        inviter_id: userId,
+        invitee_id: null, // No specific invitee
+        chat_id: null, // No chat for public invitations
+        game_settings
+      });
+
+      res.status(201).json({
+        success: true,
+        data: {
+          room_id: invitation.room_id,
+          room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
+          invitation_id: invitation.id,
+          inviter_name: invitation.inviter_name,
+          status: invitation.status,
+          created_at: invitation.created_at,
+          expires_at: invitation.expires_at,
+          game_settings: invitation.game_settings,
+          is_public: true
+        },
+        message: 'Public chess invitation created successfully'
+      });
+      return;
+    }
+
+    // Rest of the existing logic for specific user invitations...
     // Check if target user exists
     const { data: targetProfile, error: targetError } = await supabase
       .from('profiles')
@@ -234,7 +264,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
         game_settings: game_settings,
         game_type: game_settings.game_type || 'casual',
         bet_amount: game_settings.bet_amount || 0,
-        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+        room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`
       }
     });
 
@@ -252,7 +282,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
             inviter_name: inviterName,
             inviter_id: userId,
             message: message || `You've been invited to play chess!`,
-            room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+            room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
             // Add betting info from game_settings for notification only
             game_type: game_settings.game_type || 'casual',
             bet_amount: game_settings.bet_amount || 0
@@ -325,7 +355,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       data: {
         room_id: invitation.room_id,
         chat_id: finalChatId,
-        room_link: `${process.env.CLIENT_URL}/chess?room=${invitation.room_id}`,
+        room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess?room=${invitation.room_id}`,
         invitation_id: invitation.id,
         inviter_name: inviterName,
         invitee_name: `${targetProfile.first_name} ${targetProfile.last_name || ''}`.trim(),
@@ -650,6 +680,114 @@ export const generateAIMoveWithBoard = async (req: Request, res: Response): Prom
     res.status(500).json({
       success: false,
       message: 'Failed to generate AI move',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const createPublicChessInvite = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const { game_settings } = req.body;
+
+    if (!game_settings) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: game_settings'
+      });
+      return;
+    }
+
+    const invitation = await gameService.createPublicChessInvitation({
+      inviter_id: userId,
+      game_settings: game_settings
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        room_id: invitation.room_id,
+        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+        game_settings: game_settings
+      },
+      message: 'Public chess invitation created successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating public chess invitation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create public invitation',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const joinPublicChessInvite = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const { room_id } = req.params;
+
+    if (!room_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Room ID is required'
+      });
+      return;
+    }
+
+    const gameRoom = await gameService.joinPublicChessInvitation(room_id, userId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        room_id: gameRoom.room_id,
+        room_link: `${process.env.CLIENT_URL}/chess/room/${gameRoom.room_id}`,
+        game_room: gameRoom
+      },
+      message: 'Successfully joined public chess game'
+    });
+
+  } catch (error) {
+    console.error('❌ Error joining public chess invitation:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to join public invitation'
+    });
+  }
+};
+
+// NEW: Get available public invitations
+export const getAvailablePublicInvitations = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    const invitations = await gameService.getAvailablePublicInvitations(limit);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        invitations,
+        count: invitations.length
+      },
+      message: 'Available public invitations fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching public invitations:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch public invitations',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
