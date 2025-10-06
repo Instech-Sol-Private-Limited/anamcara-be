@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updatePost = exports.deletePost = exports.getPollResults = exports.voteOnPoll = exports.getTrendingPosts = exports.getUserPostsMedia = exports.getUserPosts = exports.getPostComments = exports.addReply = exports.addComment = exports.getPosts = exports.createPost = exports.updatePostReaction = void 0;
+exports.updateVote = exports.updatePost = exports.deletePost = exports.getPollResults = exports.voteOnPoll = exports.getTrendingPosts = exports.getUserPostsMedia = exports.getUserPosts = exports.getPostComments = exports.addReply = exports.addComment = exports.getPosts = exports.createPost = exports.updatePostReaction = void 0;
 const app_1 = require("../app");
 const emitNotification_1 = require("../sockets/emitNotification");
 const posts_service_1 = require("../services/posts.service");
@@ -21,6 +21,26 @@ const postFieldMap = {
     heart: 'total_hearts',
     hug: 'total_hugs',
     soul: 'total_souls',
+    support: 'total_supports',
+    valuable: 'total_valuables',
+    funny: 'total_funnies',
+    shocked: 'total_shockeds',
+    moved: 'total_moveds',
+    triggered: 'total_triggereds'
+};
+const soulpointsMap = {
+    'like': 2,
+    'dislike': 0,
+    'insightful': 3,
+    'heart': 4,
+    'hug': 2,
+    'soul': 2,
+    'support': 3,
+    'valuable': 4,
+    'funny': 2,
+    'shocked': 1,
+    'moved': 3,
+    'triggered': 1
 };
 const getReactionDisplayName = (reactionType) => {
     const displayNames = {
@@ -29,12 +49,18 @@ const getReactionDisplayName = (reactionType) => {
         'insightful': 'insightful reaction',
         'heart': 'heart',
         'hug': 'hug',
-        'soul': 'soul reaction'
+        'soul': 'soul reaction',
+        'support': 'support',
+        'valuable': 'valuable reaction',
+        'funny': 'funny reaction',
+        'shocked': 'shocked reaction',
+        'moved': 'moved reaction',
+        'triggered': 'triggered reaction'
     };
     return displayNames[reactionType] || reactionType;
 };
 const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     const { postId } = req.params;
     const { type } = req.body;
     const { id: user_id } = req.user;
@@ -53,7 +79,7 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
     const { data: postData, error: postError } = yield app_1.supabase
         .from('posts')
-        .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, is_chamber_post, chamber_id')
+        .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, total_supports, total_valuables, total_funnies, total_shockeds, total_moveds, total_triggereds, is_chamber_post, chamber_id')
         .eq('id', postId)
         .single();
     if (postError || !postData) {
@@ -78,6 +104,12 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
         total_hearts: (_d = postData.total_hearts) !== null && _d !== void 0 ? _d : 0,
         total_hugs: (_e = postData.total_hugs) !== null && _e !== void 0 ? _e : 0,
         total_souls: (_f = postData.total_souls) !== null && _f !== void 0 ? _f : 0,
+        total_supports: (_g = postData.total_supports) !== null && _g !== void 0 ? _g : 0,
+        total_valuables: (_h = postData.total_valuables) !== null && _h !== void 0 ? _h : 0,
+        total_funnies: (_j = postData.total_funnies) !== null && _j !== void 0 ? _j : 0,
+        total_shockeds: (_k = postData.total_shockeds) !== null && _k !== void 0 ? _k : 0,
+        total_moveds: (_l = postData.total_moveds) !== null && _l !== void 0 ? _l : 0,
+        total_triggereds: (_m = postData.total_triggereds) !== null && _m !== void 0 ? _m : 0,
     };
     if (existing) {
         if (existing.type === type) {
@@ -164,14 +196,6 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (updatePostError)
             return res.status(500).json({ error: updatePostError.message });
         if (shouldSendNotification && authorProfile) {
-            const soulpointsMap = {
-                'like': 2,
-                'dislike': 0,
-                'insightful': 3,
-                'heart': 4,
-                'hug': 2,
-                'soul': 2
-            };
             let soulpoints = soulpointsMap[type] || 0;
             if (postData.is_chamber_post && postData.chamber_id) {
                 const { data: chamberData, error: chamberError } = yield app_1.supabase
@@ -179,7 +203,7 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
                     .select('monetization')
                     .eq('id', postData.chamber_id)
                     .single();
-                if (!chamberError && chamberData && ((_g = chamberData.monetization) === null || _g === void 0 ? void 0 : _g.enabled)) {
+                if (!chamberError && chamberData && ((_o = chamberData.monetization) === null || _o === void 0 ? void 0 : _o.enabled)) {
                     soulpoints *= 2;
                 }
             }
@@ -197,7 +221,7 @@ const updatePostReaction = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 recipientUserId: postData.user_id,
                 actorUserId: user_id,
                 threadId: postId,
-                message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. +${soulpoints} soulpoints added!`,
+                message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
                 type: 'post_reaction_added',
                 metadata: {
                     reaction_type: type,
@@ -376,8 +400,12 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         const postsWithReactions = yield Promise.all(allPosts.map((post) => __awaiter(void 0, void 0, void 0, function* () {
             let userReaction = null;
+            let userVote = null;
+            let userSaved = false;
+            let savedId = null;
             let chamberInfo = null;
             if (user_id) {
+                // ✅ Get user reaction
                 const { data: reactionData } = yield app_1.supabase
                     .from('thread_reactions')
                     .select('type')
@@ -388,7 +416,31 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 if (reactionData) {
                     userReaction = reactionData.type;
                 }
+                // ✅ Get user vote
+                const { data: voteData } = yield app_1.supabase
+                    .from('post_votes')
+                    .select('vote_type')
+                    .eq('user_id', user_id)
+                    .eq('target_id', post.id)
+                    .eq('target_type', 'post')
+                    .maybeSingle();
+                if (voteData) {
+                    userVote = voteData.vote_type;
+                }
+                // ✅ Check if post is saved by user
+                const { data: savedData } = yield app_1.supabase
+                    .from('saved_posts')
+                    .select('id')
+                    .eq('target_id', post.id)
+                    .eq('target_type', 'post')
+                    .eq('user_id', user_id)
+                    .maybeSingle();
+                if (savedData) {
+                    userSaved = true;
+                    savedId = savedData.id;
+                }
             }
+            // ✅ Get chamber info (if applicable)
             if (post.is_chamber_post && post.chamber_id) {
                 const { data: chamberData } = yield app_1.supabase
                     .from('custom_chambers')
@@ -409,20 +461,21 @@ const getPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     };
                 }
             }
+            // ✅ Fetch comments and replies
             const { data: comments } = yield app_1.supabase
                 .from('threadcomments')
                 .select('id, post_id, content, is_deleted')
                 .eq('post_id', post.id)
                 .eq('is_deleted', false);
-            const commentIds = (comments === null || comments === void 0 ? void 0 : comments.map(c => c.id)) || [];
-            const subcommentsResults = yield Promise.all(commentIds.map(commentId => app_1.supabase
+            const commentIds = (comments === null || comments === void 0 ? void 0 : comments.map((c) => c.id)) || [];
+            const subcommentsResults = yield Promise.all(commentIds.map((commentId) => app_1.supabase
                 .from('threadsubcomments')
                 .select('id')
                 .eq('comment_id', commentId)
                 .eq('is_deleted', false)));
             const totalComments = (comments === null || comments === void 0 ? void 0 : comments.length) || 0;
             const totalReplies = subcommentsResults.reduce((sum, result) => { var _a; return sum + (((_a = result.data) === null || _a === void 0 ? void 0 : _a.length) || 0); }, 0);
-            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, total_comments: totalComments + totalReplies, chamber: chamberInfo });
+            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, user_vote: userVote, user_saved: userSaved, saved_id: savedId, total_comments: totalComments + totalReplies, chamber: chamberInfo, total_upvotes: post.total_upvotes || 0, total_downvotes: post.total_downvotes || 0 });
         })));
         res.status(200).json({
             success: true,
@@ -706,7 +759,8 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
           first_name,
           last_name,
           avatar_url,
-          email
+          email,
+          username
         )
       `)
             .eq('user_id', userId)
@@ -719,36 +773,63 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 message: error.message
             });
         }
-        // Add user reactions and comment counts
+        // Add user reactions, votes, saved posts, and comment counts
         const postsWithReactions = yield Promise.all(posts.map((post) => __awaiter(void 0, void 0, void 0, function* () {
             let userReaction = null;
+            let userVote = null;
+            let userSaved = false;
+            let savedId = null;
             if (current_user_id) {
+                // ✅ Get user reaction
                 const { data: reactionData } = yield app_1.supabase
                     .from('thread_reactions')
                     .select('type')
                     .eq('user_id', current_user_id)
-                    .eq('post_id', post.id)
+                    .eq('target_id', post.id)
                     .eq('target_type', 'post')
                     .maybeSingle();
                 if (reactionData) {
                     userReaction = reactionData.type;
                 }
+                // ✅ Get user vote
+                const { data: voteData } = yield app_1.supabase
+                    .from('post_votes')
+                    .select('vote_type')
+                    .eq('user_id', current_user_id)
+                    .eq('target_id', post.id)
+                    .eq('target_type', 'post')
+                    .maybeSingle();
+                if (voteData) {
+                    userVote = voteData.vote_type;
+                }
+                // ✅ Check if the post is saved by user
+                const { data: savedData } = yield app_1.supabase
+                    .from('saved_posts')
+                    .select('id')
+                    .eq('target_id', post.id)
+                    .eq('target_type', 'post')
+                    .eq('user_id', current_user_id)
+                    .maybeSingle();
+                if (savedData) {
+                    userSaved = true;
+                    savedId = savedData.id;
+                }
             }
-            // Get comment count
+            // ✅ Get comment count
             const { data: comments } = yield app_1.supabase
                 .from('threadcomments')
                 .select('id, post_id, content, is_deleted')
                 .eq('post_id', post.id)
                 .eq('is_deleted', false);
-            const commentIds = (comments === null || comments === void 0 ? void 0 : comments.map(c => c.id)) || [];
-            const subcommentsResults = yield Promise.all(commentIds.map(commentId => app_1.supabase
+            const commentIds = (comments === null || comments === void 0 ? void 0 : comments.map((c) => c.id)) || [];
+            const subcommentsResults = yield Promise.all(commentIds.map((commentId) => app_1.supabase
                 .from('threadsubcomments')
                 .select('id')
                 .eq('comment_id', commentId)
                 .eq('is_deleted', false)));
             const totalComments = (comments === null || comments === void 0 ? void 0 : comments.length) || 0;
             const totalReplies = subcommentsResults.reduce((sum, result) => { var _a; return sum + (((_a = result.data) === null || _a === void 0 ? void 0 : _a.length) || 0); }, 0);
-            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, total_comments: totalComments + totalReplies });
+            return Object.assign(Object.assign({}, post), { user_reaction: userReaction, user_vote: userVote, user_saved: userSaved, saved_id: savedId, total_comments: totalComments + totalReplies, total_upvotes: post.total_upvotes || 0, total_downvotes: post.total_downvotes || 0 });
         })));
         res.status(200).json({
             success: true,
@@ -1121,3 +1202,111 @@ const updatePost = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.updatePost = updatePost;
+const updateVote = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { targetId } = req.params;
+    const { voteType, targetType } = req.body;
+    const { id: user_id } = req.user;
+    if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread'].includes(targetType)) {
+        return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
+    }
+    try {
+        const { data: existingVote, error: fetchError } = yield app_1.supabase
+            .from('post_votes')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('target_id', targetId)
+            .eq('target_type', targetType)
+            .single();
+        if (fetchError && fetchError.code !== 'PGRST116') {
+            return res.status(500).json({ error: fetchError.message });
+        }
+        const tableName = targetType === 'post' ? 'posts' : 'threads';
+        const { data: targetData, error: targetError } = yield app_1.supabase
+            .from(tableName)
+            .select('total_upvotes, total_downvotes, user_id')
+            .eq('id', targetId)
+            .single();
+        if (targetError || !targetData) {
+            return res.status(404).json({ error: `${targetType} not found!` });
+        }
+        const currentUpvotes = targetData.total_upvotes || 0;
+        const currentDownvotes = targetData.total_downvotes || 0;
+        let newUpvotes = currentUpvotes;
+        let newDownvotes = currentDownvotes;
+        if (existingVote) {
+            if (existingVote.vote_type === voteType) {
+                const { error: deleteError } = yield app_1.supabase
+                    .from('post_votes')
+                    .delete()
+                    .eq('id', existingVote.id);
+                if (deleteError)
+                    return res.status(500).json({ error: deleteError.message });
+                if (voteType === 'upvote') {
+                    newUpvotes = Math.max(0, currentUpvotes - 20);
+                }
+                else {
+                    newDownvotes = Math.max(0, currentDownvotes - 5);
+                }
+            }
+            else {
+                const { error: updateError } = yield app_1.supabase
+                    .from('post_votes')
+                    .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+                    .eq('id', existingVote.id);
+                if (updateError)
+                    return res.status(500).json({ error: updateError.message });
+                if (existingVote.vote_type === 'upvote') {
+                    newUpvotes = Math.max(0, currentUpvotes - 20);
+                    newDownvotes = currentDownvotes + 5;
+                }
+                else {
+                    newUpvotes = currentUpvotes + 20;
+                    newDownvotes = Math.max(0, currentDownvotes - 5);
+                }
+            }
+        }
+        else {
+            const { error: insertError } = yield app_1.supabase
+                .from('post_votes')
+                .insert([{
+                    user_id,
+                    target_id: targetId,
+                    target_type: targetType,
+                    vote_type: voteType
+                }]);
+            if (insertError)
+                return res.status(500).json({ error: insertError.message });
+            if (voteType === 'upvote') {
+                newUpvotes = currentUpvotes + 20;
+            }
+            else {
+                newDownvotes = currentDownvotes + 5;
+            }
+        }
+        const { error: updateTargetError } = yield app_1.supabase
+            .from(tableName)
+            .update({
+            total_upvotes: newUpvotes,
+            total_downvotes: newDownvotes,
+            updated_at: new Date().toISOString()
+        })
+            .eq('id', targetId);
+        if (updateTargetError)
+            return res.status(500).json({ error: updateTargetError.message });
+        const netScore = newUpvotes - newDownvotes;
+        return res.status(200).json({
+            message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
+            data: {
+                total_upvotes: newUpvotes,
+                total_downvotes: newDownvotes,
+                net_score: netScore,
+                user_vote: (existingVote === null || existingVote === void 0 ? void 0 : existingVote.vote_type) === voteType ? null : voteType
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error updating vote:', error);
+        return res.status(500).json({ error: 'Failed to process vote' });
+    }
+});
+exports.updateVote = updateVote;

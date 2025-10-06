@@ -4,10 +4,25 @@ import { sendNotification } from '../sockets/emitNotification';
 import { allocateSoulpointsForPost, checkChamberPermission, createPostInDatabase, determinePostType, sendPostCreationNotification, updateUserSoulpoints, validatePostRequest } from '../services/posts.service';
 import { notifyChamberMembers } from '../sockets/manageChambers';
 
-type PostReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul';
+type PostReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
+
+type VoteType = 'upvote' | 'downvote';
+type VoteTargetType = 'post' | 'thread';
+
+interface PostVote {
+  id: string;
+  user_id: string;
+  target_id: string;
+  target_type: VoteTargetType;
+  vote_type: VoteType;
+  created_at: string;
+  updated_at: string;
+}
 
 type PostFieldMap = {
-  [key in PostReactionType]: 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls';
+  [key in PostReactionType]: 
+    | 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls'
+    | 'total_supports' | 'total_valuables' | 'total_funnies' | 'total_shockeds' | 'total_moveds' | 'total_triggereds';
 };
 
 const postFieldMap: PostFieldMap = {
@@ -17,6 +32,27 @@ const postFieldMap: PostFieldMap = {
   heart: 'total_hearts',
   hug: 'total_hugs',
   soul: 'total_souls',
+  support: 'total_supports',
+  valuable: 'total_valuables',
+  funny: 'total_funnies',
+  shocked: 'total_shockeds',
+  moved: 'total_moveds',
+  triggered: 'total_triggereds'
+};
+
+const soulpointsMap: Record<PostReactionType, number> = {
+  'like': 2,
+  'dislike': 0,
+  'insightful': 3,
+  'heart': 4,
+  'hug': 2,
+  'soul': 2,
+  'support': 3,
+  'valuable': 4,
+  'funny': 2,
+  'shocked': 1,
+  'moved': 3,
+  'triggered': 1
 };
 
 const getReactionDisplayName = (reactionType: PostReactionType): string => {
@@ -26,7 +62,13 @@ const getReactionDisplayName = (reactionType: PostReactionType): string => {
     'insightful': 'insightful reaction',
     'heart': 'heart',
     'hug': 'hug',
-    'soul': 'soul reaction'
+    'soul': 'soul reaction',
+    'support': 'support',
+    'valuable': 'valuable reaction',
+    'funny': 'funny reaction',
+    'shocked': 'shocked reaction',
+    'moved': 'moved reaction',
+    'triggered': 'triggered reaction'
   };
   return displayNames[reactionType] || reactionType;
 };
@@ -57,7 +99,7 @@ export const updatePostReaction = async (
 
   const { data: postData, error: postError } = await supabase
     .from('posts')
-    .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, is_chamber_post, chamber_id')
+    .select('user_id, content, total_likes, total_dislikes, total_insightfuls, total_hearts, total_hugs, total_souls, total_supports, total_valuables, total_funnies, total_shockeds, total_moveds, total_triggereds, is_chamber_post, chamber_id')
     .eq('id', postId)
     .single();
 
@@ -87,6 +129,12 @@ export const updatePostReaction = async (
     total_hearts: postData.total_hearts ?? 0,
     total_hugs: postData.total_hugs ?? 0,
     total_souls: postData.total_souls ?? 0,
+    total_supports: postData.total_supports ?? 0,
+    total_valuables: postData.total_valuables ?? 0,
+    total_funnies: postData.total_funnies ?? 0,
+    total_shockeds: postData.total_shockeds ?? 0,
+    total_moveds: postData.total_moveds ?? 0,
+    total_triggereds: postData.total_triggereds ?? 0,
   };
 
   if (existing) {
@@ -186,15 +234,6 @@ export const updatePostReaction = async (
     if (updatePostError) return res.status(500).json({ error: updatePostError.message });
 
     if (shouldSendNotification && authorProfile) {
-      const soulpointsMap: Record<PostReactionType, number> = {
-        'like': 2,
-        'dislike': 0,
-        'insightful': 3,
-        'heart': 4,
-        'hug': 2,
-        'soul': 2
-      };
-
       let soulpoints = soulpointsMap[type] || 0;
 
       if (postData.is_chamber_post && postData.chamber_id) {
@@ -225,7 +264,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. +${soulpoints} soulpoints added!`,
+        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,
@@ -444,74 +483,117 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    const postsWithReactions = await Promise.all(allPosts.map(async (post) => {
-      let userReaction = null;
-      let chamberInfo = null;
+    const postsWithReactions = await Promise.all(
+      allPosts.map(async (post) => {
+        let userReaction = null;
+        let userVote = null;
+        let userSaved = false;
+        let savedId = null;
+        let chamberInfo = null;
 
-      if (user_id) {
-        const { data: reactionData } = await supabase
-          .from('thread_reactions')
-          .select('type')
-          .eq('user_id', user_id)
-          .eq('target_id', post.id)
-          .eq('target_type', 'post')
-          .maybeSingle();
+        if (user_id) {
+          // ✅ Get user reaction
+          const { data: reactionData } = await supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', user_id)
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .maybeSingle();
 
-        if (reactionData) {
-          userReaction = reactionData.type;
-        }
-      }
+          if (reactionData) {
+            userReaction = reactionData.type;
+          }
 
-      if (post.is_chamber_post && post.chamber_id) {
-        const { data: chamberData } = await supabase
-          .from('custom_chambers')
-          .select('id, name, custom_url, logo, member_count, color_theme, is_public, monetization')
-          .eq('id', post.chamber_id)
-          .eq('is_active', true)
-          .maybeSingle();
+          // ✅ Get user vote
+          const { data: voteData } = await supabase
+            .from('post_votes')
+            .select('vote_type')
+            .eq('user_id', user_id)
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .maybeSingle();
 
-        if (chamberData) {
-          chamberInfo = {
-            id: chamberData.id,
-            name: chamberData.name,
-            logo: chamberData.logo,
-            custom_url: chamberData.custom_url,
-            member_count: chamberData.member_count,
-            color_theme: chamberData.color_theme,
-            is_public: chamberData.is_public,
-            monetization: chamberData.monetization
-          };
-        }
-      }
+          if (voteData) {
+            userVote = voteData.vote_type;
+          }
 
-      const { data: comments } = await supabase
-        .from('threadcomments')
-        .select('id, post_id, content, is_deleted')
-        .eq('post_id', post.id)
-        .eq('is_deleted', false);
-
-      const commentIds = comments?.map(c => c.id) || [];
-
-      const subcommentsResults = await Promise.all(
-        commentIds.map(commentId =>
-          supabase
-            .from('threadsubcomments')
+          // ✅ Check if post is saved by user
+          const { data: savedData } = await supabase
+            .from('saved_posts')
             .select('id')
-            .eq('comment_id', commentId)
-            .eq('is_deleted', false)
-        )
-      );
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .eq('user_id', user_id)
+            .maybeSingle();
 
-      const totalComments = comments?.length || 0;
-      const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+          if (savedData) {
+            userSaved = true;
+            savedId = savedData.id;
+          }
+        }
 
-      return {
-        ...post,
-        user_reaction: userReaction,
-        total_comments: totalComments + totalReplies,
-        chamber: chamberInfo
-      };
-    }));
+        // ✅ Get chamber info (if applicable)
+        if (post.is_chamber_post && post.chamber_id) {
+          const { data: chamberData } = await supabase
+            .from('custom_chambers')
+            .select('id, name, custom_url, logo, member_count, color_theme, is_public, monetization')
+            .eq('id', post.chamber_id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (chamberData) {
+            chamberInfo = {
+              id: chamberData.id,
+              name: chamberData.name,
+              logo: chamberData.logo,
+              custom_url: chamberData.custom_url,
+              member_count: chamberData.member_count,
+              color_theme: chamberData.color_theme,
+              is_public: chamberData.is_public,
+              monetization: chamberData.monetization
+            };
+          }
+        }
+
+        // ✅ Fetch comments and replies
+        const { data: comments } = await supabase
+          .from('threadcomments')
+          .select('id, post_id, content, is_deleted')
+          .eq('post_id', post.id)
+          .eq('is_deleted', false);
+
+        const commentIds = comments?.map((c) => c.id) || [];
+
+        const subcommentsResults = await Promise.all(
+          commentIds.map((commentId) =>
+            supabase
+              .from('threadsubcomments')
+              .select('id')
+              .eq('comment_id', commentId)
+              .eq('is_deleted', false)
+          )
+        );
+
+        const totalComments = comments?.length || 0;
+        const totalReplies = subcommentsResults.reduce(
+          (sum, result) => sum + (result.data?.length || 0),
+          0
+        );
+
+        return {
+          ...post,
+          user_reaction: userReaction,
+          user_vote: userVote,
+          user_saved: userSaved,
+          saved_id: savedId,
+          total_comments: totalComments + totalReplies,
+          chamber: chamberInfo,
+          total_upvotes: post.total_upvotes || 0,
+          total_downvotes: post.total_downvotes || 0
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -826,7 +908,8 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
           first_name,
           last_name,
           avatar_url,
-          email
+          email,
+          username
         )
       `)
       .eq('user_id', userId)
@@ -841,52 +924,93 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
       });
     }
 
-    // Add user reactions and comment counts
-    const postsWithReactions = await Promise.all(posts.map(async (post) => {
-      let userReaction = null;
+    // Add user reactions, votes, saved posts, and comment counts
+    const postsWithReactions = await Promise.all(
+      posts.map(async (post) => {
+        let userReaction = null;
+        let userVote = null;
+        let userSaved = false;
+        let savedId = null;
 
-      if (current_user_id) {
-        const { data: reactionData } = await supabase
-          .from('thread_reactions')
-          .select('type')
-          .eq('user_id', current_user_id)
-          .eq('post_id', post.id)
-          .eq('target_type', 'post')
-          .maybeSingle();
+        if (current_user_id) {
+          // ✅ Get user reaction
+          const { data: reactionData } = await supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', current_user_id)
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .maybeSingle();
 
-        if (reactionData) {
-          userReaction = reactionData.type;
-        }
-      }
+          if (reactionData) {
+            userReaction = reactionData.type;
+          }
 
-      // Get comment count
-      const { data: comments } = await supabase
-        .from('threadcomments')
-        .select('id, post_id, content, is_deleted')
-        .eq('post_id', post.id)
-        .eq('is_deleted', false);
+          // ✅ Get user vote
+          const { data: voteData } = await supabase
+            .from('post_votes')
+            .select('vote_type')
+            .eq('user_id', current_user_id)
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .maybeSingle();
 
-      const commentIds = comments?.map(c => c.id) || [];
+          if (voteData) {
+            userVote = voteData.vote_type;
+          }
 
-      const subcommentsResults = await Promise.all(
-        commentIds.map(commentId =>
-          supabase
-            .from('threadsubcomments')
+          // ✅ Check if the post is saved by user
+          const { data: savedData } = await supabase
+            .from('saved_posts')
             .select('id')
-            .eq('comment_id', commentId)
-            .eq('is_deleted', false)
-        )
-      );
+            .eq('target_id', post.id)
+            .eq('target_type', 'post')
+            .eq('user_id', current_user_id)
+            .maybeSingle();
 
-      const totalComments = comments?.length || 0;
-      const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+          if (savedData) {
+            userSaved = true;
+            savedId = savedData.id;
+          }
+        }
 
-      return {
-        ...post,
-        user_reaction: userReaction,
-        total_comments: totalComments + totalReplies,
-      };
-    }));
+        // ✅ Get comment count
+        const { data: comments } = await supabase
+          .from('threadcomments')
+          .select('id, post_id, content, is_deleted')
+          .eq('post_id', post.id)
+          .eq('is_deleted', false);
+
+        const commentIds = comments?.map((c) => c.id) || [];
+
+        const subcommentsResults = await Promise.all(
+          commentIds.map((commentId) =>
+            supabase
+              .from('threadsubcomments')
+              .select('id')
+              .eq('comment_id', commentId)
+              .eq('is_deleted', false)
+          )
+        );
+
+        const totalComments = comments?.length || 0;
+        const totalReplies = subcommentsResults.reduce(
+          (sum, result) => sum + (result.data?.length || 0),
+          0
+        );
+
+        return {
+          ...post,
+          user_reaction: userReaction,
+          user_vote: userVote,
+          user_saved: userSaved,
+          saved_id: savedId,
+          total_comments: totalComments + totalReplies,
+          total_upvotes: post.total_upvotes || 0,
+          total_downvotes: post.total_downvotes || 0
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -1284,5 +1408,125 @@ export const updatePost = async (req: Request, res: Response): Promise<any> => {
       success: false,
       message: error.message || 'Error updating post'
     });
+  }
+};
+
+export const updateVote = async (
+  req: Request<{ targetId: string }, {}, { voteType: VoteType; targetType: VoteTargetType }>,
+  res: Response
+): Promise<any> => {
+  const { targetId } = req.params;
+  const { voteType, targetType } = req.body;
+  const { id: user_id } = req.user!;
+
+  if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread'].includes(targetType)) {
+    return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
+  }
+
+  try {
+    const { data: existingVote, error: fetchError } = await supabase
+      .from('post_votes')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('target_id', targetId)
+      .eq('target_type', targetType)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      return res.status(500).json({ error: fetchError.message });
+    }
+
+    const tableName = targetType === 'post' ? 'posts' : 'threads';
+    const { data: targetData, error: targetError } = await supabase
+      .from(tableName)
+      .select('total_upvotes, total_downvotes, user_id')
+      .eq('id', targetId)
+      .single();
+
+    if (targetError || !targetData) {
+      return res.status(404).json({ error: `${targetType} not found!` });
+    }
+
+    const currentUpvotes = targetData.total_upvotes || 0;
+    const currentDownvotes = targetData.total_downvotes || 0;
+
+    let newUpvotes = currentUpvotes;
+    let newDownvotes = currentDownvotes;
+
+    if (existingVote) {
+      if (existingVote.vote_type === voteType) {
+        const { error: deleteError } = await supabase
+          .from('post_votes')
+          .delete()
+          .eq('id', existingVote.id);
+
+        if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+        if (voteType === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - 20);
+        } else {
+          newDownvotes = Math.max(0, currentDownvotes - 5);
+        }
+      } else {
+        const { error: updateError } = await supabase
+          .from('post_votes')
+          .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+          .eq('id', existingVote.id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        if (existingVote.vote_type === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - 20);
+          newDownvotes = currentDownvotes + 5;
+        } else {
+          newUpvotes = currentUpvotes + 20;
+          newDownvotes = Math.max(0, currentDownvotes - 5);
+        }
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from('post_votes')
+        .insert([{ 
+          user_id, 
+          target_id: targetId, 
+          target_type: targetType, 
+          vote_type: voteType 
+        }]);
+
+      if (insertError) return res.status(500).json({ error: insertError.message });
+
+      if (voteType === 'upvote') {
+        newUpvotes = currentUpvotes + 20;
+      } else {
+        newDownvotes = currentDownvotes + 5;
+      }
+    }
+
+    const { error: updateTargetError } = await supabase
+      .from(tableName)
+      .update({
+        total_upvotes: newUpvotes,
+        total_downvotes: newDownvotes,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', targetId);
+
+    if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
+
+    const netScore = newUpvotes - newDownvotes;
+
+    return res.status(200).json({
+      message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
+      data: {
+        total_upvotes: newUpvotes,
+        total_downvotes: newDownvotes,
+        net_score: netScore,
+        user_vote: existingVote?.vote_type === voteType ? null : voteType
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error updating vote:', error);
+    return res.status(500).json({ error: 'Failed to process vote' });
   }
 };
