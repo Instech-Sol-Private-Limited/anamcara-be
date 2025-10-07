@@ -23,7 +23,8 @@ import {
    getTrustedDevicesController,
    regenerateBackupCodesController,
    getUnapprovedUsersController,
-   approveUserController
+   approveUserController,
+   sendApprovalEmail
 } from '../controllers/users.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
@@ -82,4 +83,7 @@ router.delete('/2fa/trusted-device/:deviceId', authMiddleware, removeTrustedDevi
 router.get("/unapproved-users", authMiddleware, getUnapprovedUsersController);
 
 router.post("/approve-user/:userId", authMiddleware, approveUserController);
+
+router.post("/send-approval-email", authMiddleware, sendApprovalEmail);
+
 export default router;
