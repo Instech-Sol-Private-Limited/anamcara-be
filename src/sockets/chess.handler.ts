@@ -130,7 +130,30 @@ export const registerChessHandlers = (io: Server) => {
             is_public: publicInvitation.is_public
           });
           
-          // Use the existing acceptChessInvitation method for public invitations
+          // Check if this is the creator joining their own invitation
+          if (publicInvitation.inviter_id === userId) {
+            console.log('👤 Creator joining their own public invitation, waiting for opponent...');
+            
+            // Just join the room, don't accept invitation yet
+            socket.join(`chess_room_${payload.room_id}`);
+            socket.data.currentChessRoom = payload.room_id;
+            
+            const gameRoom = await gameService.getChessGameRoom(payload.room_id);
+            
+            io.to(`chess_room_${payload.room_id}`).emit('chess_game_joined', {
+              room_id: payload.room_id,
+              game_room: gameRoom,
+              player_count: 1,
+              is_public: true,
+              waiting_for_opponent: true
+            });
+            
+            console.log('⏳ Waiting for opponent to join...');
+            return;
+          }
+          
+          // Second player joining - accept invitation and start game
+          console.log('👤 Second player joining public game...');
           const gameRoom = await gameService.acceptChessInvitation(publicInvitation.id, userId);
           
           console.log('✅ Joined public game:', {
@@ -143,6 +166,13 @@ export const registerChessHandlers = (io: Server) => {
           socket.join(`chess_room_${payload.room_id}`);
           socket.data.currentChessRoom = payload.room_id;
 
+          console.log('🔍 Debug - User joined room:', {
+            room_id: payload.room_id,
+            user_id: userId,
+            socket_id: socket.id,
+            room_size: io.sockets.adapter.rooms.get(`chess_room_${payload.room_id}`)?.size
+          });
+
           io.to(`chess_room_${payload.room_id}`).emit('chess_game_joined', {
             room_id: payload.room_id,
             game_room: gameRoom,
@@ -150,7 +180,7 @@ export const registerChessHandlers = (io: Server) => {
             is_public: true
           });
 
-          // Auto-start for public games
+          // Now start the game since both players are present
           console.log('🎯 Starting public chess game...');
           io.to(`chess_room_${payload.room_id}`).emit('chess_game_start', {
             room_id: payload.room_id,
@@ -405,6 +435,23 @@ export const registerChessHandlers = (io: Server) => {
           
           console.log(`✅ Checkmate detected after move: ${winnerName} wins!`);
         }
+
+        const room = io.sockets.adapter.rooms.get(`chess_room_${payload.room_id}`);
+        console.log('🔍 Debug - Players in room:', {
+          room_id: payload.room_id,
+          room_size: room?.size,
+          room_members: Array.from(room || []),
+          move_player_id: payload.move.player_id,
+          current_turn: payload.game_state?.current_turn
+        });
+
+        // const rooms = io.sockets.adapter.rooms.get(`chess_room_${payload.room_id}`);
+        // console.log('🔍 Debug - Move broadcast:', {
+        //   room_id: payload.room_id,
+        //   room_size: room?.size,
+        //   move_player: payload.move.player_id,
+        //   current_turn: payload.game_state?.current_turn
+        // });
 
         socket.broadcast.to(`chess_room_${payload.room_id}`).emit('chess_move_received', {
           room_id: payload.room_id,
