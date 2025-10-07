@@ -19,6 +19,7 @@ router.delete('/:postId', auth_middleware_1.authMiddleware, posts_controller_1.d
 router.post('/:postId/vote', auth_middleware_1.authMiddleware, posts_controller_1.voteOnPoll);
 router.get('/:postId/results', auth_middleware_1.authMiddleware, posts_controller_1.getPollResults);
 router.patch('/apply-react/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePostReaction);
+router.post('/votes/:targetId', auth_middleware_1.authMiddleware, posts_controller_1.updateVote);
 // Toggle like on post
 // router.post('/:postId/like', authMiddleware, async (req, res, next) => {
 //   try {

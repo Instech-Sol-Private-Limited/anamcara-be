@@ -18,7 +18,9 @@ const messageCounts = new Map<string, number>();
 
 export const registerStreamingHandlers = (io: Server) => {
   io.on('connection', (socket: Socket) => {
-    console.log('✅ New client connected:', socket.id);
+    console.log('✅ New streaming client connected:', socket.id);
+    console.log('📡 Client IP:', socket.handshake.address);
+    console.log('🌐 Client headers:', socket.handshake.headers);
 
     sendActiveStreamsToClient(socket);
 
@@ -29,12 +31,16 @@ export const registerStreamingHandlers = (io: Server) => {
       category: string;
       thumbnailUrl?: string;
     }) => {
+      console.log('🎥 CREATE_STREAM event received:', { streamId, email, title, category, thumbnailUrl });
+      
       if (activeStreams.has(streamId)) {
+        console.log('❌ Stream already exists:', streamId);
         socket.emit('streamError', { message: 'Stream already exists.' });
         return;
       }
 
       try {
+        console.log('🔍 Looking for category:', category);
         let categoryId: string;
 
         const { data: existingCategory, error: categoryError } = await supabase
@@ -44,6 +50,7 @@ export const registerStreamingHandlers = (io: Server) => {
           .single();
 
         if (categoryError || !existingCategory) {
+          console.log('📌 Creating new category:', category);
           const { data: newCategory, error: createError } = await supabase
             .from('stream_categories')
             .insert([{ name: category }])
@@ -76,6 +83,7 @@ export const registerStreamingHandlers = (io: Server) => {
         messageCounts.set(streamId, 0);
         socket.join(streamId);
 
+        console.log('💾 Inserting stream into database...');
         const { data, error } = await supabase
           .from('active_streams')
           .insert([{
@@ -90,13 +98,16 @@ export const registerStreamingHandlers = (io: Server) => {
           }])
           .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Database insert error:', error);
+          throw error;
+        }
 
-        console.log(`🎥 Stream created in Supabase:`, data);
+        console.log(`🎥 Stream created successfully in Supabase:`, data);
         broadcastStreamsUpdate(io);
 
       } catch (error) {
-        console.error('Error in stream creation:', error);
+        console.error('❌ Error in stream creation:', error);
         activeStreams.delete(streamId);
         messageCounts.delete(streamId);
         socket.leave(streamId);
@@ -108,6 +119,7 @@ export const registerStreamingHandlers = (io: Server) => {
     });
 
     socket.on('join_stream', async ({ streamId, email }: { streamId: string; email: string }) => {
+      console.log('👥 JOIN_STREAM event received:', { streamId, email });
       const stream = activeStreams.get(streamId);
       if (!stream) {
         socket.emit('streamError', { message: 'Stream does not exist.' });
@@ -235,7 +247,7 @@ export const registerStreamingHandlers = (io: Server) => {
     });
 
     socket.on('disconnect', async () => {
-      console.log('❌ Client disconnected:', socket.id);
+      console.log('❌ Streaming client disconnected:', socket.id);
 
       for (const [streamId, stream] of activeStreams.entries()) {
         if (stream.participants.has(socket.id)) {
@@ -308,6 +320,8 @@ function getStreamsWithViewerCount() {
 
 export const getActiveStreams = async (req: Request, res: Response) => {
   try {
+    console.log('🔍 Fetching active streams from database...');
+    
     const { data, error } = await supabase
       .from('active_streams')
       .select(`
@@ -324,12 +338,19 @@ export const getActiveStreams = async (req: Request, res: Response) => {
       `)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    console.log('📊 Database response:', { data, error });
+
+    if (error) {
+      console.error('❌ Database error:', error);
+      throw error;
+    }
+
+    console.log(`✅ Found ${data?.length || 0} streams in database`);
 
     res.json({
       success: true,
-      count: data.length,
-      streams: data.map(stream => ({
+      count: data?.length || 0,
+      streams: data?.map(stream => ({
         id: stream.stream_id,
         email: stream.email,
         title: stream.stream_title,
@@ -339,7 +360,7 @@ export const getActiveStreams = async (req: Request, res: Response) => {
         thumbnailUrl: stream.thumbnail_url,
         // @ts-ignore
         category: stream.stream_category_id?.name || 'Uncategorized'
-      })),
+      })) || [],
     });
   } catch (error) {
     console.error('❌ Error fetching active streams:', error);

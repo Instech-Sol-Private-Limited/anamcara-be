@@ -792,8 +792,7 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
 
             membersByChamber = membersList.reduce((acc: any, member: any) => {
                 if (!acc[member.chamber_id]) acc[member.chamber_id] = [];
-                
-                // Map all chamber_members columns to the response
+
                 acc[member.chamber_id].push({
                     id: member.id,
                     chamber_id: member.chamber_id,
@@ -812,7 +811,7 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
                     last_payment_at: member.last_payment_at,
                     next_payment_due: member.next_payment_due,
                     payment_status: member.payment_status,
-                    
+
                     // Profile information
                     email: member.profile?.email,
                     first_name: member.profile?.first_name,
@@ -820,7 +819,7 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
                     username: member.profile?.username,
                     avatar_url: member.profile?.avatar_url,
                     is_active: member.profile?.is_active,
-                    
+
                     // Computed fields for convenience - using full_name instead of user_name
                     full_name: `${member.profile?.first_name || ''} ${member.profile?.last_name || ''}`.trim(),
                     is_creator: allChambers.find((c: any) => c.id === member.chamber_id)?.creator_id === member.user_id
@@ -843,6 +842,7 @@ export const getUserChambers = async (req: Request, res: Response): Promise<any>
             is_active: chamber.is_active,
             is_chamber: true,
             creator_id: chamber.creator_id,
+            custom_url: chamber.custom_url,
             tags: chamber.tags || [],
             member_count: membersByChamber[chamber.id]?.length || 0,
             updated_at: chamber.updated_at,
@@ -966,7 +966,7 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
             last_payment_at: member.last_payment_at,
             next_payment_due: member.next_payment_due,
             payment_status: member.payment_status,
-            
+
             // Profile data
             first_name: member.profiles?.first_name,
             last_name: member.profiles?.last_name,
@@ -975,7 +975,7 @@ export const getChamberMembers = async (req: Request, res: Response): Promise<an
             avatar_url: member.profiles?.avatar_url,
             email: member.profiles?.email,
             is_active: member.profiles?.is_active,
-            
+
             // Additional computed fields
             is_creator: member.user_id === chamber.creator_id,
             online: false, // You might want to implement actual online status logic

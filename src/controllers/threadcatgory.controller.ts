@@ -33,6 +33,8 @@ const addNewCategory = async (
         return res.status(403).json({ error: 'Access denied!' });
 
     const { category_name, category_slug } = req.body;
+    console.log(req.body,"blah");
+    
     if (!category_name || !category_slug)
         return res.status(400).json({ error: 'Category name and slug are required!' });
 

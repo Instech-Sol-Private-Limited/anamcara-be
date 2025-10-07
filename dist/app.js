@@ -114,7 +114,7 @@ app.use('/api/friends', friends_routes_1.default);
 app.use('/api/chat-messages', chatmessages_routes_1.default);
 app.use('/api/posts', posts_routes_1.default);
 app.use('/api/courses', course_routes_1.default);
-app.use('/api/anamfamily', anamfamily_routes_1.default); // Add space after comma
+app.use('/api/anamfamily', anamfamily_routes_1.default);
 app.use('/api/enrollment', enrollment_routes_1.default);
 app.use('/api/stories', auth_middleware_1.authMiddleware, stories_routes_1.default);
 app.use('/api/streams', auth_middleware_1.authMiddleware, streams_routes_1.default);
@@ -124,7 +124,7 @@ app.use('/api/boostcampaign', auth_middleware_1.authMiddleware, campaign_routes_
 app.use('/api/soul-stories', soulStories_routes_1.default);
 app.use('/api/vault', auth_middleware_1.authMiddleware, vault_routes_1.default);
 app.use('/api/admin/marketplace-analytics', auth_middleware_1.authMiddleware, analytics_routes_1.default);
-app.use('/api/campaigns', auth_middleware_1.authMiddleware, campaign_routes_1.default);
+app.use('/api/campaigns', campaign_routes_1.default);
 app.use('/api/stripe', payment_routes_1.default);
 app.use('/api/games', auth_middleware_1.authMiddleware, game_routes_1.default);
 node_cron_1.default.schedule('0 0 * * *', dailyInsightsCron_1.default);
@@ -198,6 +198,7 @@ exports.streamIo.on('connection', (socket) => {
 });
 (0, sockets_1.registerSocketHandlers)(exports.io);
 (0, streaming_handler_1.registerStreamingHandlers)(exports.streamIo);
+// sendMail()
 server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`⚡ Main Socket.IO listening on ws://localhost:${PORT}`);

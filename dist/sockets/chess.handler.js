@@ -84,7 +84,7 @@ const registerChessHandlers = (io) => {
         }));
         // Join chess game room
         socket.on('join_chess_room', (payload) => __awaiter(void 0, void 0, void 0, function* () {
-            var _a, _b, _c, _d;
+            var _a, _b, _c, _d, _e, _f;
             try {
                 const userId = payload.player_id;
                 if (!userId) {
@@ -97,6 +97,49 @@ const registerChessHandlers = (io) => {
                     player_id: payload.player_id,
                     socket_id: socket.id
                 });
+                // FIRST: Check for public invitation (by is_public flag OR null invitee_id)
+                const { data: publicInvitation, error: publicInviteError } = yield app_1.supabase
+                    .from('chess_invitations')
+                    .select('*')
+                    .eq('room_id', payload.room_id)
+                    .eq('status', 'pending')
+                    .or('is_public.eq.true,invitee_id.is.null') // Check for is_public OR null invitee_id
+                    .single();
+                if (publicInvitation && !publicInviteError) {
+                    console.log('✅ Found public invitation, joining as multiplayer...', {
+                        invitation_id: publicInvitation.id,
+                        inviter_id: publicInvitation.inviter_id,
+                        invitee_id: publicInvitation.invitee_id,
+                        is_public: publicInvitation.is_public
+                    });
+                    // Use the existing acceptChessInvitation method for public invitations
+                    const gameRoom = yield game_service_1.gameService.acceptChessInvitation(publicInvitation.id, userId);
+                    console.log('✅ Joined public game:', {
+                        room_id: gameRoom.room_id,
+                        white_player: (_a = gameRoom.white_player) === null || _a === void 0 ? void 0 : _a.name,
+                        black_player: (_b = gameRoom.black_player) === null || _b === void 0 ? void 0 : _b.name,
+                        game_status: gameRoom.game_status
+                    });
+                    socket.join(`chess_room_${payload.room_id}`);
+                    socket.data.currentChessRoom = payload.room_id;
+                    io.to(`chess_room_${payload.room_id}`).emit('chess_game_joined', {
+                        room_id: payload.room_id,
+                        game_room: gameRoom,
+                        player_count: 2,
+                        is_public: true
+                    });
+                    // Auto-start for public games
+                    console.log('🎯 Starting public chess game...');
+                    io.to(`chess_room_${payload.room_id}`).emit('chess_game_start', {
+                        room_id: payload.room_id,
+                        game_state: gameRoom.game_status,
+                        white_player: gameRoom.white_player,
+                        black_player: gameRoom.black_player
+                    });
+                    console.log('✅ Public chess game started successfully');
+                    return;
+                }
+                // SECOND: Check for private invitation (existing logic - unchanged)
                 const { data: invitation, error: inviteError } = yield app_1.supabase
                     .from('chess_invitations')
                     .select('*')
@@ -105,16 +148,16 @@ const registerChessHandlers = (io) => {
                     .eq('status', 'pending')
                     .single();
                 if (invitation && !inviteError) {
-                    console.log('✅ Found pending invitation, auto-accepting...', {
+                    console.log('✅ Found pending private invitation, auto-accepting...', {
                         invitation_id: invitation.id,
                         inviter_id: invitation.inviter_id,
                         invitee_id: invitation.invitee_id
                     });
                     const gameRoom = yield game_service_1.gameService.acceptChessInvitation(invitation.id, userId);
-                    console.log('✅ Invitation accepted, game room created:', {
+                    console.log('✅ Private invitation accepted, game room created:', {
                         room_id: gameRoom.room_id,
-                        white_player: (_a = gameRoom.white_player) === null || _a === void 0 ? void 0 : _a.name,
-                        black_player: (_b = gameRoom.black_player) === null || _b === void 0 ? void 0 : _b.name,
+                        white_player: (_c = gameRoom.white_player) === null || _c === void 0 ? void 0 : _c.name,
+                        black_player: (_d = gameRoom.black_player) === null || _d === void 0 ? void 0 : _d.name,
                         game_status: gameRoom.game_status
                     });
                     const inviterEmail = yield (0, getUserFriends_1.getUserEmailFromId)(invitation.inviter_id);
@@ -154,6 +197,7 @@ const registerChessHandlers = (io) => {
                     console.log('✅ Chess game started successfully');
                     return;
                 }
+                // THIRD: Join existing room (existing logic - unchanged)
                 console.log('🔍 No pending invitation found, joining existing room...');
                 let gameRoom = yield game_service_1.gameService.getChessGameRoom(payload.room_id);
                 if (!gameRoom) {
@@ -163,8 +207,8 @@ const registerChessHandlers = (io) => {
                 }
                 console.log('✅ Found existing game room:', {
                     room_id: gameRoom.room_id,
-                    white_player: (_c = gameRoom.white_player) === null || _c === void 0 ? void 0 : _c.name,
-                    black_player: (_d = gameRoom.black_player) === null || _d === void 0 ? void 0 : _d.name,
+                    white_player: (_e = gameRoom.white_player) === null || _e === void 0 ? void 0 : _e.name,
+                    black_player: (_f = gameRoom.black_player) === null || _f === void 0 ? void 0 : _f.name,
                     game_status: gameRoom.game_status
                 });
                 socket.join(`chess_room_${payload.room_id}`);
@@ -221,12 +265,24 @@ const registerChessHandlers = (io) => {
         }));
         // Chess move handler
         socket.on('chess_move', (payload) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b;
             try {
                 console.log('♟️ Chess move received:', {
                     room_id: payload.room_id,
                     move: payload.move,
                     game_state: payload.game_state
                 });
+                // Check if this is an AI game and prevent processing
+                const { data: gameRoom } = yield app_1.supabase
+                    .from('chess_games')
+                    .select('is_ai_game')
+                    .eq('room_id', payload.room_id)
+                    .single();
+                if (gameRoom === null || gameRoom === void 0 ? void 0 : gameRoom.is_ai_game) {
+                    console.log('❌ Player move in AI game - ignoring');
+                    socket.emit('chess_move_error', { message: 'This is an AI game - use AI handlers' });
+                    return;
+                }
                 const { error: moveError } = yield app_1.supabase
                     .from('chess_moves')
                     .insert([{
@@ -247,7 +303,7 @@ const registerChessHandlers = (io) => {
                 const { error: gameError } = yield app_1.supabase
                     .from('chess_games')
                     .update({
-                    current_turn: payload.game_state.current_turn,
+                    current_turn: ((_a = payload.game_state) === null || _a === void 0 ? void 0 : _a.current_turn) || 'white',
                     game_state: JSON.stringify(payload.game_state),
                     updated_at: new Date().toISOString()
                 })
@@ -256,7 +312,7 @@ const registerChessHandlers = (io) => {
                     console.error('❌ Error updating game state:', gameError);
                 }
                 // Check for checkmate after move
-                if (payload.game_state.is_checkmate) {
+                if ((_b = payload.game_state) === null || _b === void 0 ? void 0 : _b.is_checkmate) {
                     const winner = payload.game_state.current_turn === 'white' ? 'black' : 'white';
                     // Get winner name from database
                     const { data: winnerProfile } = yield app_1.supabase

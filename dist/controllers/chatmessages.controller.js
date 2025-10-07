@@ -644,7 +644,6 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
                 var _a, _b, _c, _d, _e, _f, _g, _h, _j;
                 if (!acc[member.chamber_id])
                     acc[member.chamber_id] = [];
-                // Map all chamber_members columns to the response
                 acc[member.chamber_id].push({
                     id: member.id,
                     chamber_id: member.chamber_id,
@@ -693,6 +692,7 @@ const getUserChambers = (req, res) => __awaiter(void 0, void 0, void 0, function
                 is_active: chamber.is_active,
                 is_chamber: true,
                 creator_id: chamber.creator_id,
+                custom_url: chamber.custom_url,
                 tags: chamber.tags || [],
                 member_count: ((_a = membersByChamber[chamber.id]) === null || _a === void 0 ? void 0 : _a.length) || 0,
                 updated_at: chamber.updated_at,

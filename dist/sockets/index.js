@@ -14,6 +14,7 @@ const app_1 = require("../app");
 const getUserFriends_1 = require("./getUserFriends");
 const manageChambers_1 = require("./manageChambers");
 const chess_handler_1 = require("./chess.handler");
+const chess_ai_handler_1 = require("./chess-ai.handler");
 exports.connectedUsers = new Map();
 const registerSocketHandlers = (io) => {
     console.log(exports.connectedUsers);
@@ -244,6 +245,7 @@ const registerSocketHandlers = (io) => {
                     });
                 }
                 socket.emit('message_sent', insertedMessage);
+                yield (0, getUserFriends_1.updateUnseenCountForUser)(receiver_email);
             }
             catch (error) {
                 console.error('Message send error:', error);
@@ -279,31 +281,52 @@ const registerSocketHandlers = (io) => {
                 }
             }
         }));
+        // Get unseen messages count
+        socket.on('get_unseen_count', (userId) => __awaiter(void 0, void 0, void 0, function* () {
+            try {
+                console.log('userId', userId);
+                const unseenCount = yield (0, getUserFriends_1.getUnseenMessagesCount)(userId);
+                console.log(unseenCount);
+                socket.emit('unseen_count_update', { count: unseenCount });
+            }
+            catch (error) {
+                console.error('Unseen count error:', error);
+                socket.emit('unseen_count_error', {
+                    error: error instanceof Error ? error.message : 'Failed to get unseen count'
+                });
+            }
+        }));
         // Message seen
         socket.on('message_seen', (_a) => __awaiter(void 0, [_a], void 0, function* ({ messageId, userId }) {
-            const { error } = yield app_1.supabase
-                .from('chatmessages')
-                .update({ status: 'seen' })
-                .eq('id', messageId);
-            if (error) {
-                console.error('Seen update error:', error.message);
-                return;
-            }
-            const { data: message } = yield app_1.supabase
-                .from('chatmessages')
-                .select('sender, chat_id')
-                .eq('id', messageId)
-                .single();
-            if (message) {
-                const senderEmail = yield (0, getUserFriends_1.getUserEmailFromId)(message.sender);
-                if (senderEmail && exports.connectedUsers.has(senderEmail)) {
-                    exports.connectedUsers.get(senderEmail).forEach(socketId => {
-                        io.to(socketId).emit('message_status_update', {
-                            messageId,
-                            status: 'seen'
-                        });
-                    });
+            try {
+                const { error } = yield app_1.supabase
+                    .from('chatmessages')
+                    .update({ status: 'seen' })
+                    .eq('id', messageId);
+                if (error) {
+                    console.error('Seen update error:', error.message);
+                    return;
                 }
+                const { data: message } = yield app_1.supabase
+                    .from('chatmessages')
+                    .select('sender, chat_id')
+                    .eq('id', messageId)
+                    .single();
+                if (message) {
+                    const senderEmail = yield (0, getUserFriends_1.getUserEmailFromId)(message.sender);
+                    if (senderEmail && exports.connectedUsers.has(senderEmail)) {
+                        exports.connectedUsers.get(senderEmail).forEach(socketId => {
+                            io.to(socketId).emit('message_status_update', {
+                                messageId,
+                                status: 'seen'
+                            });
+                        });
+                    }
+                    yield (0, getUserFriends_1.updateUnseenCountForChatParticipants)(message.chat_id);
+                }
+            }
+            catch (error) {
+                console.error('Message seen error:', error);
             }
         }));
         // Delete message
@@ -437,6 +460,7 @@ const registerSocketHandlers = (io) => {
                     .eq('user_id', userId)
                     .eq('type', emoji)
                     .maybeSingle();
+                let action = 'add';
                 if (existingReaction) {
                     const { error: deleteError } = yield app_1.supabase
                         .from('chat_reactions')
@@ -444,6 +468,7 @@ const registerSocketHandlers = (io) => {
                         .eq('id', existingReaction.id);
                     if (deleteError)
                         throw deleteError;
+                    action = 'remove';
                 }
                 else {
                     const { error: insertError } = yield app_1.supabase
@@ -456,6 +481,7 @@ const registerSocketHandlers = (io) => {
                         }]);
                     if (insertError)
                         throw insertError;
+                    action = 'add';
                 }
                 const { data: reactions } = yield app_1.supabase
                     .from('chat_reactions')
@@ -467,7 +493,6 @@ const registerSocketHandlers = (io) => {
                     acc[reaction.type].push(reaction.user_id);
                     return acc;
                 }, {});
-                // Get message details
                 const { data: message } = yield app_1.supabase
                     .from('chatmessages')
                     .select('chat_id, sender')
@@ -475,19 +500,28 @@ const registerSocketHandlers = (io) => {
                     .single();
                 if (!message)
                     throw new Error('Message not found');
-                // Emit to all participants in the chat
-                const participants = yield (0, getUserFriends_1.getChatParticipants)(message.chat_id);
+                const { data: chat } = yield app_1.supabase
+                    .from('chats')
+                    .select('user_1, user_2')
+                    .eq('id', message.chat_id)
+                    .single();
+                const participants = chat ? [chat.user_1, chat.user_2] : [];
+                const reactionPayload = {
+                    messageId,
+                    emoji,
+                    userId,
+                    action,
+                    reactions: reactionMap || {}
+                };
                 participants.forEach((participantId) => __awaiter(void 0, void 0, void 0, function* () {
                     const email = yield (0, getUserFriends_1.getUserEmailFromId)(participantId);
                     if (email && exports.connectedUsers.has(email)) {
                         exports.connectedUsers.get(email).forEach(socketId => {
-                            io.to(socketId).emit('reaction_update', {
-                                messageId,
-                                reactions: reactionMap || {}
-                            });
+                            io.to(socketId).emit('reaction_update', reactionPayload);
                         });
                     }
                 }));
+                socket.emit('reaction_update', reactionPayload);
             }
             catch (error) {
                 console.error('Reaction error:', error);
@@ -1755,5 +1789,6 @@ const registerSocketHandlers = (io) => {
     });
     // Register chess handlers separately
     (0, chess_handler_1.registerChessHandlers)(io);
+    (0, chess_ai_handler_1.registerChessAIHandlers)(io);
 };
 exports.registerSocketHandlers = registerSocketHandlers;

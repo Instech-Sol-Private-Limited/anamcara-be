@@ -736,8 +736,8 @@ const approveCampaign = (req, res) => __awaiter(void 0, void 0, void 0, function
             .from('hope_campaigns')
             .update({
             is_approved: true,
-            approved_at: new Date().toISOString(),
-            approved_by: adminId
+            status: 'active',
+            updated_at: new Date().toISOString()
         })
             .eq('id', id)
             .select()

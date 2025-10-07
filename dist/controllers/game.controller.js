@@ -9,11 +9,80 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getChessLeaderboard = exports.getPlayerChessRanking = exports.fetchAllUsers = exports.saveGameResult = exports.getChessGameRoom = exports.createChessRoom = exports.acceptChessInvite = exports.sendChessInvite = void 0;
+exports.getAvailablePublicInvitations = exports.joinPublicChessInvite = exports.createPublicChessInvite = exports.generateAIMoveWithBoard = exports.getAIGameStatus = exports.getChessLeaderboard = exports.getPlayerChessRanking = exports.fetchAllUsers = exports.saveGameResult = exports.getChessGameRoom = exports.createChessRoom = exports.acceptChessInvite = exports.sendChessInvite = exports.requestAIMove = exports.createAIGame = void 0;
 const app_1 = require("../app");
 const game_service_1 = require("../services/game.service");
 const sockets_1 = require("../sockets");
 const getUserFriends_1 = require("../sockets/getUserFriends");
+const emitNotification_1 = require("../sockets/emitNotification");
+const chess_ai_service_1 = require("../services/chess-ai.service");
+const createAIGame = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            res.status(401).json({ success: false, message: 'Unauthorized' });
+            return;
+        }
+        const { difficulty = 'medium', player_color = 'white' } = req.body;
+        console.log('🤖 Creating AI game:', { userId, difficulty, player_color });
+        const aiGameData = yield chess_ai_service_1.chessAIService.createAIGame(userId, difficulty, player_color);
+        res.status(201).json({
+            success: true,
+            data: {
+                room_id: aiGameData.room_id,
+                room_link: `${process.env.CLIENT_URL}/chess/room/${aiGameData.room_id}`,
+                ai_difficulty: aiGameData.ai_difficulty,
+                player_color: aiGameData.player_color,
+                game_type: 'ai'
+            },
+            message: 'AI chess game created successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error creating AI game:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create AI game',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.createAIGame = createAIGame;
+const requestAIMove = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { room_id } = req.params;
+        const { difficulty } = req.body;
+        console.log('🤖 AI move requested for room:', room_id);
+        // Generate AI move
+        const aiMove = chess_ai_service_1.chessAIService.generateAIMove(difficulty);
+        if (!aiMove) {
+            res.status(400).json({ success: false, message: 'No valid AI moves available' });
+            return;
+        }
+        // Add natural delay
+        setTimeout(() => {
+            res.status(200).json({
+                success: true,
+                data: {
+                    move: aiMove,
+                    ai_move: true,
+                    room_id: room_id
+                },
+                message: 'AI move generated successfully'
+            });
+        }, Math.random() * 1000 + 500);
+    }
+    catch (error) {
+        console.error('❌ Error generating AI move:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to generate AI move',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.requestAIMove = requestAIMove;
 const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -23,12 +92,12 @@ const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function
             return;
         }
         const { friend_id, invitee_id, chat_id, game_settings, message } = req.body;
-        // Determine the invitee - prioritize friend_id for backward compatibility
-        const targetUserId = friend_id || invitee_id;
-        if (!targetUserId || !game_settings) {
+        // Determine the invitee - allow null for public invitations
+        const targetUserId = friend_id || invitee_id || null;
+        if (!game_settings) {
             res.status(400).json({
                 success: false,
-                message: 'Missing required fields: friend_id/invitee_id, game_settings'
+                message: 'Missing required fields: game_settings'
             });
             return;
         }
@@ -39,6 +108,33 @@ const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function
             chat_id,
             game_settings
         });
+        // If targetUserId is null, this is a public invitation
+        if (targetUserId === null) {
+            console.log('🌐 Creating public invitation (no specific invitee)...');
+            const invitation = yield game_service_1.gameService.createChessInvitation({
+                inviter_id: userId,
+                invitee_id: null, // No specific invitee
+                chat_id: null, // No chat for public invitations
+                game_settings
+            });
+            res.status(201).json({
+                success: true,
+                data: {
+                    room_id: invitation.room_id,
+                    room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
+                    invitation_id: invitation.id,
+                    inviter_name: invitation.inviter_name,
+                    status: invitation.status,
+                    created_at: invitation.created_at,
+                    expires_at: invitation.expires_at,
+                    game_settings: invitation.game_settings,
+                    is_public: true
+                },
+                message: 'Public chess invitation created successfully'
+            });
+            return;
+        }
+        // Rest of the existing logic for specific user invitations...
         // Check if target user exists
         const { data: targetProfile, error: targetError } = yield app_1.supabase
             .from('profiles')
@@ -135,6 +231,24 @@ const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function
             .eq('id', userId)
             .single();
         const inviterName = `${inviterProfile === null || inviterProfile === void 0 ? void 0 : inviterProfile.first_name} ${(inviterProfile === null || inviterProfile === void 0 ? void 0 : inviterProfile.last_name) || ''}`.trim();
+        // Store notification using existing system
+        yield (0, emitNotification_1.sendNotification)({
+            recipientEmail: targetProfile.email,
+            recipientUserId: targetUserId,
+            actorUserId: userId,
+            threadId: null,
+            message: message || `You've been invited to play chess!`,
+            type: 'chess_invitation',
+            metadata: {
+                invitation_id: invitation.id,
+                room_id: invitation.room_id,
+                inviter_name: inviterName,
+                game_settings: game_settings,
+                game_type: game_settings.game_type || 'casual',
+                bet_amount: game_settings.bet_amount || 0,
+                room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`
+            }
+        });
         // Send real-time notification
         const targetEmail = targetProfile.email;
         console.log('📡 Sending real-time notification to:', targetEmail);
@@ -148,7 +262,10 @@ const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function
                         inviter_name: inviterName,
                         inviter_id: userId,
                         message: message || `You've been invited to play chess!`,
-                        room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`
+                        room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
+                        // Add betting info from game_settings for notification only
+                        game_type: game_settings.game_type || 'casual',
+                        bet_amount: game_settings.bet_amount || 0
                     });
                 });
             }
@@ -212,7 +329,7 @@ const sendChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function
             data: {
                 room_id: invitation.room_id,
                 chat_id: finalChatId,
-                room_link: `${process.env.CLIENT_URL}/chess?room=${invitation.room_id}`,
+                room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess?room=${invitation.room_id}`,
                 invitation_id: invitation.id,
                 inviter_name: inviterName,
                 invitee_name: `${targetProfile.first_name} ${targetProfile.last_name || ''}`.trim(),
@@ -438,3 +555,183 @@ const getChessLeaderboard = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.getChessLeaderboard = getChessLeaderboard;
+const getAIGameStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { room_id } = req.params;
+        const { data: gameRoom, error } = yield app_1.supabase
+            .from('chess_games')
+            .select('*')
+            .eq('room_id', room_id)
+            .eq('is_ai_game', true)
+            .single();
+        if (error || !gameRoom) {
+            res.status(404).json({
+                success: false,
+                message: 'AI game not found'
+            });
+            return;
+        }
+        res.status(200).json({
+            success: true,
+            data: {
+                room_id: gameRoom.room_id,
+                ai_difficulty: gameRoom.ai_difficulty,
+                player_color: gameRoom.player_color,
+                current_turn: gameRoom.current_turn,
+                game_status: gameRoom.game_status,
+                is_ai_game: gameRoom.is_ai_game
+            }
+        });
+    }
+    catch (error) {
+        console.error('❌ Error getting AI game status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get AI game status',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.getAIGameStatus = getAIGameStatus;
+const generateAIMoveWithBoard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { room_id } = req.params;
+        const { board_state, difficulty = 'medium' } = req.body;
+        console.log('🤖 AI move requested with board state:', { room_id, difficulty });
+        const aiMove = chess_ai_service_1.chessAIService.generateAIMove(difficulty, board_state);
+        if (!aiMove) {
+            res.status(400).json({
+                success: false,
+                message: 'No valid AI moves available'
+            });
+            return;
+        }
+        if (!chess_ai_service_1.chessAIService.isValidMove(board_state, aiMove)) {
+            res.status(400).json({
+                success: false,
+                message: 'Generated invalid move'
+            });
+            return;
+        }
+        console.log('✅ AI move generated:', aiMove);
+        res.status(200).json({
+            success: true,
+            data: {
+                move: aiMove,
+                ai_move: true,
+                room_id: room_id,
+                difficulty: difficulty
+            },
+            message: 'AI move generated successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error generating AI move with board:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to generate AI move',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.generateAIMoveWithBoard = generateAIMoveWithBoard;
+const createPublicChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            res.status(401).json({ success: false, message: 'Unauthorized' });
+            return;
+        }
+        const { game_settings } = req.body;
+        if (!game_settings) {
+            res.status(400).json({
+                success: false,
+                message: 'Missing required fields: game_settings'
+            });
+            return;
+        }
+        const invitation = yield game_service_1.gameService.createPublicChessInvitation({
+            inviter_id: userId,
+            game_settings: game_settings
+        });
+        res.status(201).json({
+            success: true,
+            data: {
+                room_id: invitation.room_id,
+                room_link: `${process.env.CLIENT_URL}/chess/room/${invitation.room_id}`,
+                game_settings: game_settings
+            },
+            message: 'Public chess invitation created successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error creating public chess invitation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create public invitation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.createPublicChessInvite = createPublicChessInvite;
+const joinPublicChessInvite = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        if (!userId) {
+            res.status(401).json({ success: false, message: 'Unauthorized' });
+            return;
+        }
+        const { room_id } = req.params;
+        if (!room_id) {
+            res.status(400).json({
+                success: false,
+                message: 'Room ID is required'
+            });
+            return;
+        }
+        const gameRoom = yield game_service_1.gameService.joinPublicChessInvitation(room_id, userId);
+        res.status(200).json({
+            success: true,
+            data: {
+                room_id: gameRoom.room_id,
+                room_link: `${process.env.CLIENT_URL}/chess/room/${gameRoom.room_id}`,
+                game_room: gameRoom
+            },
+            message: 'Successfully joined public chess game'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error joining public chess invitation:', error);
+        res.status(500).json({
+            success: false,
+            message: error instanceof Error ? error.message : 'Failed to join public invitation'
+        });
+    }
+});
+exports.joinPublicChessInvite = joinPublicChessInvite;
+// NEW: Get available public invitations
+const getAvailablePublicInvitations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const limit = parseInt(req.query.limit) || 10;
+        const invitations = yield game_service_1.gameService.getAvailablePublicInvitations(limit);
+        res.status(200).json({
+            success: true,
+            data: {
+                invitations,
+                count: invitations.length
+            },
+            message: 'Available public invitations fetched successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error fetching public invitations:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch public invitations',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+exports.getAvailablePublicInvitations = getAvailablePublicInvitations;

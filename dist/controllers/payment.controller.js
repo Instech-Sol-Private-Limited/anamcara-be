@@ -23,7 +23,6 @@ const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY);
 const createCheckoutSession = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { amount, fromCurrency, toCurrency, metadata } = req.body;
-        console.log('🔄 Creating checkout session:', { amount, fromCurrency, toCurrency, userId: metadata === null || metadata === void 0 ? void 0 : metadata.userId });
         if (!amount || amount <= 0) {
             res.status(400).json({ error: "Invalid amount" });
             return;
@@ -59,7 +58,6 @@ const createCheckoutSession = (req, res) => __awaiter(void 0, void 0, void 0, fu
                     quantity: 1,
                 },
             ], mode: "payment", success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&session_id={CHECKOUT_SESSION_ID}&success=true`, cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/oasis/vault?tab=vault&cancelled=true`, metadata: sessionMetadata, expires_at: Math.floor(Date.now() / 1000) + (30 * 60) }, ((metadata === null || metadata === void 0 ? void 0 : metadata.userEmail) && { customer_email: metadata.userEmail })));
-        console.log('✅ Checkout session created:', session.id);
         res.json({ url: session.url, sessionId: session.id });
     }
     catch (error) {
@@ -71,19 +69,12 @@ exports.createCheckoutSession = createCheckoutSession;
 const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { sessionId } = req.body;
-        console.log('🔄 Processing success for session:', sessionId);
         if (!sessionId) {
             res.status(400).json({ error: "Session ID required" });
             return;
         }
-        // Retrieve session from Stripe
         const session = yield stripe.checkout.sessions.retrieve(sessionId, {
             expand: ['payment_intent']
-        });
-        console.log('📡 Session retrieved:', {
-            id: session.id,
-            payment_status: session.payment_status,
-            metadata: session.metadata
         });
         if (session.payment_status !== 'paid') {
             res.status(400).json({ error: "Payment not completed" });
@@ -94,7 +85,6 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             res.status(400).json({ error: "Session metadata not found" });
             return;
         }
-        // Extract metadata with proper null checks and defaults
         const userId = metadata['userId'] || 'anonymous';
         const fromCurrency = metadata['fromCurrency'] || 'USD';
         const toCurrency = metadata['toCurrency'] || 'AC';
@@ -109,14 +99,12 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             convertedAmount,
             conversionRate
         });
-        // Check if transaction already exists to prevent duplicates
         const { data: existingTransaction, error: checkError } = yield app_1.supabase
             .from('exchange_transactions')
             .select('*')
             .eq('transaction_id', sessionId)
             .single();
         if (existingTransaction) {
-            console.log('✅ Transaction already processed:', sessionId);
             res.json({
                 success: true,
                 transaction: existingTransaction,
@@ -129,7 +117,6 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             });
             return;
         }
-        // Save transaction to exchange_transactions table
         const transactionData = {
             transaction_id: sessionId,
             user_id: userId,
@@ -143,7 +130,6 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             created_at: new Date(session.created * 1000).toISOString(),
             metadata: metadata
         };
-        console.log('💾 Saving transaction data:', transactionData);
         const { data: transaction, error: transactionError } = yield app_1.supabase
             .from('exchange_transactions')
             .insert([transactionData])
@@ -154,29 +140,16 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             res.status(500).json({ error: 'Failed to save transaction', details: transactionError.message });
             return;
         }
-        console.log('✅ Transaction saved to database:', transaction.transaction_id);
-        // FIXED: Enhanced AnamCoins system update for AC conversion
         if (toCurrency === 'AC') {
-            console.log('🪙 Processing AnamCoins update...');
             try {
-                // First, check if user already has AnamCoins record
                 const { data: existingAnamCoins, error: fetchError } = yield app_1.supabase
                     .from('anamcoins')
                     .select('*')
                     .eq('user_id', userId)
-                    .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no record exists
-                console.log('🔍 Existing AnamCoins:', existingAnamCoins, 'Error:', fetchError);
+                    .maybeSingle();
                 if (existingAnamCoins) {
-                    // Update existing AnamCoins record
                     const newTotalCoins = (existingAnamCoins.total_coins || 0) + convertedAmount;
                     const newAvailableCoins = (existingAnamCoins.available_coins || 0) + convertedAmount;
-                    console.log('📈 Updating AnamCoins:', {
-                        oldTotal: existingAnamCoins.total_coins,
-                        oldAvailable: existingAnamCoins.available_coins,
-                        adding: convertedAmount,
-                        newTotal: newTotalCoins,
-                        newAvailable: newAvailableCoins
-                    });
                     const { data: updatedAnamCoins, error: updateError } = yield app_1.supabase
                         .from('anamcoins')
                         .update({
@@ -190,13 +163,8 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
                     if (updateError) {
                         console.error('❌ Error updating AnamCoins:', updateError);
                     }
-                    else {
-                        console.log(`✅ Updated AnamCoins for user ${userId}:`, updatedAnamCoins);
-                    }
                 }
                 else {
-                    // Create new AnamCoins record
-                    console.log('🆕 Creating new AnamCoins record...');
                     const newAnamCoinsData = {
                         user_id: userId,
                         total_coins: convertedAmount,
@@ -205,21 +173,12 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     };
-                    console.log('📝 New AnamCoins data:', newAnamCoinsData);
                     const { data: newAnamCoins, error: insertError } = yield app_1.supabase
                         .from('anamcoins')
                         .insert([newAnamCoinsData])
                         .select()
                         .single();
-                    if (insertError) {
-                        console.error('❌ Error creating AnamCoins record:', insertError);
-                    }
-                    else {
-                        console.log(`✅ Created new AnamCoins record for user ${userId}:`, newAnamCoins);
-                    }
                 }
-                // Add transaction to AnamCoins history
-                console.log('📝 Adding AnamCoins history...');
                 const historyData = {
                     user_id: userId,
                     transaction_type: 'earned',
@@ -245,8 +204,6 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
             }
         }
         else {
-            // Update user_balances for non-AC currencies
-            console.log('💰 Updating user balance for:', toCurrency);
             const { data: existingBalance } = yield app_1.supabase
                 .from('user_balances')
                 .select('amount')
@@ -262,7 +219,6 @@ const processsuccess = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 updated_at: new Date().toISOString()
             }, { onConflict: 'user_id,currency_type' });
         }
-        console.log('🎉 Payment processing completed successfully');
         res.json({
             success: true,
             transaction,
@@ -286,8 +242,7 @@ exports.processsuccess = processsuccess;
 const transactionuserid = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { userId } = req.params;
-        const { page = 1, limit = 20 } = req.query; // Increased default limit to match frontend
-        console.log('🔄 Fetching transactions for user:', userId);
+        const { page = 1, limit = 20 } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
         const { data: transactions, error, count } = yield app_1.supabase
             .from('exchange_transactions')
@@ -300,19 +255,9 @@ const transactionuserid = (req, res) => __awaiter(void 0, void 0, void 0, functi
             res.status(500).json({ error: 'Failed to fetch transactions', details: error.message });
             return;
         }
-        console.log('📊 Raw transactions from DB:', (transactions === null || transactions === void 0 ? void 0 : transactions.length) || 0, 'items');
-        // Format transactions for frontend - FIXED to match expected structure
         const formattedTransactions = (transactions || []).map((tx, index) => {
-            console.log(`📋 Formatting transaction ${index + 1}:`, {
-                id: tx.transaction_id,
-                from: tx.from_currency,
-                to: tx.to_currency,
-                original_amount: tx.original_amount,
-                converted_amount: tx.converted_amount,
-                status: tx.payment_status
-            });
             return {
-                id: tx.transaction_id, // Use transaction_id as id
+                id: tx.transaction_id,
                 transaction_id: tx.transaction_id,
                 date: new Date(tx.created_at).toLocaleDateString('en-US', {
                     year: 'numeric',
@@ -332,7 +277,6 @@ const transactionuserid = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 created_at: tx.created_at
             };
         });
-        console.log('✅ Formatted transactions:', formattedTransactions.length, 'items');
         const response = {
             transactions: formattedTransactions,
             total: count || 0,
@@ -340,11 +284,6 @@ const transactionuserid = (req, res) => __awaiter(void 0, void 0, void 0, functi
             limit: parseInt(limit),
             totalPages: Math.ceil((count || 0) / parseInt(limit))
         };
-        console.log('📤 Sending response:', {
-            transactionCount: response.transactions.length,
-            total: response.total,
-            page: response.page
-        });
         res.json(response);
     }
     catch (error) {
@@ -356,36 +295,29 @@ exports.transactionuserid = transactionuserid;
 const balanceuserid = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { userId } = req.params;
-        console.log('🔄 Fetching balances for user:', userId);
-        // Get AnamCoins data - FIXED to handle both cases properly
         const { data: anamCoinsData, error: acError } = yield app_1.supabase
             .from('anamcoins')
             .select('*')
             .eq('user_id', userId)
-            .maybeSingle(); // Use maybeSingle to avoid error if no record
-        console.log('🪙 AnamCoins query result:', { data: anamCoinsData, error: acError });
-        // Get other currency balances
+            .maybeSingle();
         const { data: balances, error: balanceError } = yield app_1.supabase
             .from('user_balances')
             .select('*')
             .eq('user_id', userId);
-        console.log('💰 User balances query result:', { data: balances, error: balanceError });
         if (balanceError) {
             console.error('❌ Error fetching balances:', balanceError);
             res.status(500).json({ error: 'Failed to fetch balances' });
             return;
         }
-        // Convert to a more usable format
         const balanceMap = (balances || []).reduce((acc, balance) => {
             acc[balance.currency_type] = balance.amount;
             return acc;
         }, {});
-        // Add AnamCoins data if available
         if (anamCoinsData && !acError) {
             balanceMap['AC'] = anamCoinsData.available_coins || 0;
         }
         else {
-            balanceMap['AC'] = 0; // Default to 0 if no AnamCoins record
+            balanceMap['AC'] = 0;
         }
         const responseData = {
             balances: balanceMap,
@@ -396,7 +328,6 @@ const balanceuserid = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 spent_coins: 0
             }
         };
-        console.log('✅ Sending balance response:', responseData);
         res.json(responseData);
     }
     catch (error) {
