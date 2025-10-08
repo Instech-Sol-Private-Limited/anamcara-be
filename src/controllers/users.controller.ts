@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { supabase } from "../app";
 import bcrypt from "bcryptjs";
 import { userSchema } from "../config/validations";
-import { sendVerificationEmail, sendResetPasswordEmail } from "../config/mailer";
+import { sendVerificationEmail, sendResetPasswordEmail, sendAdminEmail } from "../config/mailer";
 import { v4 as uuidv4 } from "uuid";
 import { generateAccessToken, generateRefreshToken, verifyResetToken } from "../config/generateTokens";
 import jwt from "jsonwebtoken";
@@ -11,6 +11,7 @@ import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { promises } from "nodemailer/lib/xoauth2";
+import { sendNotification } from '../sockets/emitNotification';
 
 
 const RESET_PASSWORD_SECRET = "anamcara_reset_password_secret";
@@ -1680,6 +1681,70 @@ export const approveUserController = async (req: Request, res: Response): Promis
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+    });
+  }
+};
+
+export const sendApprovalEmail = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { email, status, invitorName, userId } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    if (!status || (status !== 'verify' && status !== 'reject')) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required and must be either 'verify' or 'reject'",
+      });
+    }
+
+    // Send email to guardian (as before)
+    await sendAdminEmail(email, invitorName, '', status);
+
+    // Send notification to the actual user (under 18)
+    if (userId) {
+      // Get the actual user's email from database
+      const { data: user, error: userError } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', userId)
+        .single();
+
+      if (user && !userError) {
+        const message = status === 'verify' 
+          ? 'Congratulations! Your account has been approved by ANAMCARA team.'
+          : '❌ Your account application has been rejected by ANAMCARA team.';
+
+        await sendNotification({
+          recipientEmail: user.email, // MUST be actual user's email
+          recipientUserId: userId,
+          actorUserId: null,
+          threadId: null,
+          message: message,
+          type: status === 'verify' ? 'account_verified' : 'account_rejected',
+          metadata: {
+            status: status,
+            verified_at: new Date().toISOString()
+          }
+        });
+        console.log('✅ Notification sent to actual user:', user.email);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: status === 'verify' ? "Approval email sent successfully" : "Rejection email sent successfully",
+    });
+  } catch (err) {
+    console.error("Send email error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send email",
     });
   }
 };

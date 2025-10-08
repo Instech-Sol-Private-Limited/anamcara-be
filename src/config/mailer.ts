@@ -203,3 +203,41 @@ export const sendInvitationEmail = async (to: string, inviterName: string, relat
     throw error;
   }
 };
+export const sendAdminEmail = async (to: string, inviterName: string, relation: string, status: 'verify' | 'reject') => {
+  const isApproved = status === 'verify';
+  
+  const mailOptions = {
+    from: `"Anamcara Team" <${process.env.GMAIL_USER}>`,
+    to,
+    subject: isApproved 
+      ? "Congratulations! Your Account Has Been Approved" 
+      : "Account Application Update",
+    html: isApproved 
+      ? `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+          <h2 style="color: #2e6f95;">Congratulations!</h2>
+          <p>Your account for ${inviterName} under 18 years has been approved successfully.</p>
+          <p>You can now access all features of Anamcara.</p>
+          <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;" />
+          <p style="font-size: 14px; color: #999;">— The Anamcara Team</p>
+        </div>
+      `
+      : `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+          <h2 style="color: #d9534f;">Account Application Rejected</h2>
+          <p>We regret to inform you that your account application has been rejected.</p>
+          <p>If you have any questions, please contact our support team.</p>
+          <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;" />
+          <p style="font-size: 14px; color: #999;">— The Anamcara Team</p>
+        </div>
+      `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ ${isApproved ? 'Approval' : 'Rejection'} email sent to:`, to);
+  } catch (error) {
+    console.error("❌ Failed to send email:", error);
+    throw error;
+  }
+};
