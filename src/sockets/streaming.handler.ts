@@ -18,10 +18,6 @@ const messageCounts = new Map<string, number>();
 
 export const registerStreamingHandlers = (io: Server) => {
   io.on('connection', (socket: Socket) => {
-    console.log('✅ New streaming client connected:', socket.id);
-    console.log('📡 Client IP:', socket.handshake.address);
-    console.log('🌐 Client headers:', socket.handshake.headers);
-
     sendActiveStreamsToClient(socket);
 
     socket.on('create_stream', async ({ streamId, email, title, category, thumbnailUrl }: {
@@ -118,6 +114,30 @@ export const registerStreamingHandlers = (io: Server) => {
       }
     });
 
+    // socket.on('join_stream', async ({ streamId, email }: { streamId: string; email: string }) => {
+    //   console.log('👥 JOIN_STREAM event received:', { streamId, email });
+    //   const stream = activeStreams.get(streamId);
+    //   if (!stream) {
+    //     socket.emit('streamError', { message: 'Stream does not exist.' });
+    //     return;
+    //   }
+
+    //   stream.participants.add(socket.id);
+    //   socket.join(streamId);
+
+    //   await supabase.from('active_streams')
+    //     .update({ viewer_count: stream.participants.size })
+    //     .eq('stream_id', streamId);
+
+    //   io.to(stream.creator).emit('viewer-joined', { viewerSocketId: socket.id });
+
+    //   io.to(streamId).emit('newParticipant', {
+    //     email,
+    //     viewerCount: stream.participants.size,
+    //   });
+
+    //   broadcastStreamsUpdate(io);
+    // });
     socket.on('join_stream', async ({ streamId, email }: { streamId: string; email: string }) => {
       console.log('👥 JOIN_STREAM event received:', { streamId, email });
       const stream = activeStreams.get(streamId);
@@ -125,24 +145,29 @@ export const registerStreamingHandlers = (io: Server) => {
         socket.emit('streamError', { message: 'Stream does not exist.' });
         return;
       }
-
+    
       stream.participants.add(socket.id);
       socket.join(streamId);
-
+    
+      // ✅ ADD THIS LINE - Send creator socket to the viewer
+      socket.emit('stream_joined', { 
+        streamId, 
+        creatorSocketId: stream.creator 
+      });
+    
       await supabase.from('active_streams')
         .update({ viewer_count: stream.participants.size })
         .eq('stream_id', streamId);
-
+    
       io.to(stream.creator).emit('viewer-joined', { viewerSocketId: socket.id });
-
+    
       io.to(streamId).emit('newParticipant', {
         email,
         viewerCount: stream.participants.size,
       });
-
+    
       broadcastStreamsUpdate(io);
     });
-
     socket.on('stop_stream', async ({ streamId }: { streamId: string }) => {
       const stream = activeStreams.get(streamId);
       if (!stream || stream.creator !== socket.id) {
@@ -178,7 +203,6 @@ export const registerStreamingHandlers = (io: Server) => {
     socket.on('signal', ({ to, data }: { to: string; data: any }) => {
       io.to(to).emit('signal', { from: socket.id, data });
     });
-
     socket.on('stream_message', ({ streamId, message }: { streamId: string; message: string }) => {
       const stream = activeStreams.get(streamId);
       if (!stream || !stream.participants.has(socket.id)) {
@@ -320,8 +344,6 @@ function getStreamsWithViewerCount() {
 
 export const getActiveStreams = async (req: Request, res: Response) => {
   try {
-    console.log('🔍 Fetching active streams from database...');
-    
     const { data, error } = await supabase
       .from('active_streams')
       .select(`
@@ -338,14 +360,10 @@ export const getActiveStreams = async (req: Request, res: Response) => {
       `)
       .order('created_at', { ascending: false });
 
-    console.log('📊 Database response:', { data, error });
-
     if (error) {
       console.error('❌ Database error:', error);
       throw error;
     }
-
-    console.log(`✅ Found ${data?.length || 0} streams in database`);
 
     res.json({
       success: true,
