@@ -148,7 +148,21 @@ export const chessAIService = {
     let selectedMove;
     switch (difficulty) {
       case 'easy':
-        selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+        selectedMove = this.selectEasyMove(legalMoves, {
+          board,
+          currentTurn: aiColor || 'black',
+          castlingRights: {
+            whiteKing: true,
+            whiteQueen: true,
+            blackKing: true,
+            blackQueen: true
+          },
+          enPassantTarget: null,
+          halfMoveClock: 0,
+          fullMoveNumber: 1,
+          whiteKing: this.findKing(board, 'w') || undefined,
+          blackKing: this.findKing(board, 'b') || undefined
+        });
         break;
       case 'medium':
         selectedMove = this.selectMediumMove(legalMoves, {
@@ -258,19 +272,36 @@ export const chessAIService = {
     const direction = color === 'white' ? 1 : -1;
     const startRank = color === 'white' ? 2 : 7;
     const pieceNotation = color === 'white' ? 'wP' : 'bP'; // Use uppercase P
+    const promotionRank = color === 'white' ? 8 : 1;
     
     // Forward move
     const newRank = rankNum + direction;
     if (newRank >= 1 && newRank <= 8) {
       const newSquare = file + newRank;
       if (!gameState.board[newSquare]) {
-        moves.push({
-          from: square,
-          to: newSquare,
-          piece: pieceNotation,
-          captured: null,
-          san: newSquare
-        });
+        // Check for pawn promotion
+        if (newRank === promotionRank) {
+          // Promote to Queen, Rook, Bishop, or Knight
+          const promotionPieces = ['Q', 'R', 'B', 'N'];
+          for (const piece of promotionPieces) {
+            moves.push({
+              from: square,
+              to: newSquare,
+              piece: color === 'white' ? 'w' + piece : 'b' + piece,
+              captured: null,
+              san: newSquare + '=' + piece,
+              promotion: piece
+            });
+          }
+        } else {
+          moves.push({
+            from: square,
+            to: newSquare,
+            piece: pieceNotation,
+            captured: null,
+            san: newSquare
+          });
+        }
         
         // Double move from starting position
         if (rankNum === startRank) {
@@ -299,13 +330,28 @@ export const chessAIService = {
         const captureLeft = String.fromCharCode(fileNum - 1 + 97) + captureRank;
         const targetPiece = gameState.board[captureLeft];
         if (targetPiece && targetPiece.startsWith(color === 'white' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: captureLeft,
-            piece: pieceNotation,
-            captured: targetPiece,
-            san: file + 'x' + captureLeft
-          });
+          // Check for pawn promotion with capture
+          if (captureRank === promotionRank) {
+            const promotionPieces = ['Q', 'R', 'B', 'N'];
+            for (const piece of promotionPieces) {
+              moves.push({
+                from: square,
+                to: captureLeft,
+                piece: color === 'white' ? 'w' + piece : 'b' + piece,
+                captured: targetPiece,
+                san: file + 'x' + captureLeft + '=' + piece,
+                promotion: piece
+              });
+            }
+          } else {
+            moves.push({
+              from: square,
+              to: captureLeft,
+              piece: pieceNotation,
+              captured: targetPiece,
+              san: file + 'x' + captureLeft
+            });
+          }
         }
       }
       
@@ -314,13 +360,28 @@ export const chessAIService = {
         const captureRight = String.fromCharCode(fileNum + 1 + 97) + captureRank;
         const targetPiece = gameState.board[captureRight];
         if (targetPiece && targetPiece.startsWith(color === 'white' ? 'b' : 'w')) {
-          moves.push({
-            from: square,
-            to: captureRight,
-            piece: pieceNotation,
-            captured: targetPiece,
-            san: file + 'x' + captureRight
-          });
+          // Check for pawn promotion with capture
+          if (captureRank === promotionRank) {
+            const promotionPieces = ['Q', 'R', 'B', 'N'];
+            for (const piece of promotionPieces) {
+              moves.push({
+                from: square,
+                to: captureRight,
+                piece: color === 'white' ? 'w' + piece : 'b' + piece,
+                captured: targetPiece,
+                san: file + 'x' + captureRight + '=' + piece,
+                promotion: piece
+              });
+            }
+          } else {
+            moves.push({
+              from: square,
+              to: captureRight,
+              piece: pieceNotation,
+              captured: targetPiece,
+              san: file + 'x' + captureRight
+            });
+          }
         }
       }
     }
@@ -665,27 +726,7 @@ export const chessAIService = {
   },
 
   selectMediumMove(moves: ChessMove[], gameState: GameState): ChessMove {
-    // Priority: 1. Captures, 2. Center control, 3. Development, 4. Random
-    const capturingMoves = moves.filter(move => move.captured);
-    if (capturingMoves.length > 0) {
-      return capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
-    }
-    
-    const centerMoves = moves.filter(move => this.isCenterSquare(move.to));
-    if (centerMoves.length > 0) {
-      return centerMoves[Math.floor(Math.random() * centerMoves.length)];
-    }
-    
-    const developmentMoves = moves.filter(move => this.isDevelopmentMove(move));
-    if (developmentMoves.length > 0) {
-      return developmentMoves[Math.floor(Math.random() * developmentMoves.length)];
-    }
-    
-    return moves[Math.floor(Math.random() * moves.length)];
-  },
-
-  selectHardMove(moves: ChessMove[], gameState: GameState): ChessMove {
-    // Priority: 1. High-value captures, 2. Threats, 3. Center control, 4. Development
+    // Use same algorithm as hard but with simpler scoring
     const scoredMoves = moves.map(move => ({
       ...move,
       score: this.evaluateMove(move, gameState)
@@ -693,39 +734,174 @@ export const chessAIService = {
     
     scoredMoves.sort((a, b) => b.score - a.score);
     
-    // Select from top 3 moves to add some randomness
-    const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
+    // Select from top 2 moves to make AI more challenging (less random)
+    const topMoves = scoredMoves.slice(0, 2);
+    return topMoves[Math.floor(Math.random() * topMoves.length)];
+  },
+
+  selectEasyMove(moves: ChessMove[], gameState: GameState): ChessMove {
+    // Priority: 1. Checkmate (if obvious), 2. Captures, 3. Random
+    
+    // First check for obvious checkmate moves
+    for (const move of moves) {
+      const newBoard = { ...gameState.board };
+      newBoard[move.to] = move.piece;
+      newBoard[move.from] = null;
+      
+      const opponentColor = gameState.currentTurn === 'white' ? 'black' : 'white';
+      
+      if (this.isCheckmate(newBoard, opponentColor)) {
+        console.log('🎯 EASY: Checkmate detected!', move.from, '->', move.to);
+        return move;
+      }
+    }
+    
+    // Then prioritize captures
+    const capturingMoves = moves.filter(move => move.captured);
+    if (capturingMoves.length > 0) {
+      return capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
+    }
+    
+    // Otherwise random move
+    return moves[Math.floor(Math.random() * moves.length)];
+  },
+
+  selectHardMove(moves: ChessMove[], gameState: GameState): ChessMove {
+    // Priority: 1. Checkmate, 2. High-value captures, 3. Threats, 4. King safety, 5. Development
+    const scoredMoves = moves.map(move => ({
+      ...move,
+      score: this.evaluateMove(move, gameState)
+    }));
+    
+    scoredMoves.sort((a, b) => b.score - a.score);
+    
+    // Select from top 2 moves to make AI more challenging (less random)
+    const topMoves = scoredMoves.slice(0, 2);
     return topMoves[Math.floor(Math.random() * topMoves.length)];
   },
 
   evaluateMove(move: ChessMove, gameState: GameState): number {
+    console.log('🔍 Evaluating move:', move.from, '->', move.to);
+    
     let score = 0;
     
-    // Capture value
+    // Check if this move results in checkmate (highest priority)
+    const newBoard = { ...gameState.board };
+    newBoard[move.to] = move.piece;
+    newBoard[move.from] = null;
+    
+    const opponentColor = gameState.currentTurn === 'white' ? 'black' : 'white';
+    
+    // Debug: Show what we're checking for checkmate
+    console.log('🔍 Checking for checkmate against:', opponentColor);
+    
+    try {
+      if (this.isCheckmate(newBoard, opponentColor)) {
+        console.log('🎯 CHECKMATE DETECTED! Move:', move.from, '->', move.to);
+        score += 1000; // Checkmate is the highest priority
+        return score;
+      }
+      
+      // Check if this move puts opponent in check
+      if (this.isInCheck(newBoard, opponentColor)) {
+        console.log('⚡ CHECK DETECTED! Move:', move.from, '->', move.to);
+        score += 50; // Putting opponent极 in check is valuable
+      }
+    } catch (error) {
+      console.error('❌ Error in checkmate/check detection:', error);
+    }
+    
+    // Capture value - use proper piece values
     if (move.captured) {
-      const pieceValues: { [key: string]: number } = { 'p': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0 };
+      const pieceValues: { [key: string]: number } = { 
+        'P': 1, 'p': 1, 
+        'N': 3, 'n': 3, 
+        'B': 3, 'b': 3, 
+        'R': 5, 'r': 5, 
+        'Q': 9, 'q': 9, 
+        'K': 0, 'k': 0 
+      };
       const pieceType = move.captured.charAt(1);
       score += pieceValues[pieceType] || 0;
     }
     
-    // Center control
+    // Center control - more valuable squares
     if (this.isCenterSquare(move.to)) {
-      score += 0.5;
+      score += 1.0;
     }
     
     // Extended center
     if (this.isExtendedCenter(move.to)) {
-      score += 0.3;
+      score += 0.5;
+    }
+    
+    // King safety - move king to safety
+    if (move.piece.charAt(1) === 'K' && this.isKingSafeSquare(move.to, gameState)) {
+      score += 2.0;
     }
     
     // Piece development (moving from back rank)
     const fromRank = parseInt(move.from.charAt(1));
     if ((move.piece.charAt(0) === 'w' && fromRank === 1) || 
         (move.piece.charAt(0) === 'b' && fromRank === 8)) {
-      score += 0.2;
+      score += 0.3;
+    }
+    
+    // Check if move creates threats
+    if (this.createsThreat(move, gameState)) {
+      score += 1.5;
+    }
+    
+    // Penalize moving into attacked squares
+    if (this.isSquareAttacked(move.to, gameState)) {
+      score -= 1.0;
     }
     
     return score;
+  },
+
+  createsThreat(move: ChessMove, gameState: GameState): boolean {
+    // Simple threat detection - if move attacks opponent pieces
+    const newBoard = { ...gameState.board };
+    newBoard[move.to] = move.piece;
+    newBoard[move.from] = null;
+    
+    // Check if the move attacks any opponent pieces
+    const opponentColor = move.piece.charAt(0) === 'w' ? 'b' : 'w';
+    for (const [square, piece] of Object.entries(newBoard)) {
+      if (piece && piece.charAt(0) === opponentColor && this.canSquareBeAttacked(square, newBoard, move.piece.charAt(0))) {
+        return true;
+      }
+    }
+    
+    return false;
+  },
+
+  isSquareAttacked(square: string, gameState: GameState): boolean {
+    // Check if square is attacked by opponent pieces
+    const opponentColor = gameState.currentTurn === 'white' ? 'black' : 'white';
+    const opponentMoves = this.getAllMovesWithoutCheckValidation(gameState.board, opponentColor);
+    return opponentMoves.some(m => m.to === square);
+  },
+
+  isKingSafeSquare(square: string, gameState: GameState): boolean {
+    // Check if king would be safe on this square
+    return !this.isSquareAttacked(square, gameState);
+  },
+
+  canSquareBeAttacked(square: string, board: { [key: string]: string | null }, attackerColor: string): boolean {
+    // Check if a square can be attacked by pieces of given color
+    const tempGameState: GameState = {
+      board,
+      currentTurn: attackerColor === 'w' ? 'white' : 'black',
+      castlingRights: { whiteKing: true, whiteQueen: true, blackKing: true, blackQueen: true },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1
+    };
+    
+    const attackerMoves = this.getAllMovesWithoutCheckValidation(board, attackerColor === 'w' ? 'white' : 'black');
+    return attackerMoves.some(m => m.to === square);
   },
 
   isDevelopmentMove(move: ChessMove): boolean {
