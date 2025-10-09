@@ -1916,7 +1916,6 @@ const createDonation = async (req: Request, res: Response): Promise<any> => {
         }
 
         if (campaign.deadline && new Date(campaign.deadline) < new Date()) {
-            console.log(`[${transactionId}] Campaign deadline passed, closing campaign: ${campaign_id}`);
 
             const { error: updateError } = await supabase
                 .from('hope_campaigns')
@@ -2004,7 +2003,6 @@ const createDonation = async (req: Request, res: Response): Promise<any> => {
         }
 
         if (willReachGoal) {
-            console.log(`[${transactionId}] Campaign goal reached, closing campaign: ${campaign_id}`);
 
             const { error: closeError } = await supabase
                 .from('hope_campaigns')
@@ -2018,7 +2016,6 @@ const createDonation = async (req: Request, res: Response): Promise<any> => {
             if (closeError) {
                 console.error(`[${transactionId}] Failed to close campaign after goal reached:`, closeError);
             } else {
-                console.log(`[${transactionId}] Campaign ${campaign_id} closed successfully after reaching goal`);
                 try {
                     await supabase
                         .from('notifications')

@@ -16,8 +16,6 @@ export const createAIGame = async (req: Request, res: Response): Promise<void> =
 
     const { difficulty = 'medium', player_color = 'white' } = req.body;
 
-    console.log('🤖 Creating AI game:', { userId, difficulty, player_color });
-
     const aiGameData = await chessAIService.createAIGame(userId, difficulty, player_color);
 
     res.status(201).json({
@@ -46,8 +44,6 @@ export const requestAIMove = async (req: Request, res: Response): Promise<void> 
   try {
     const { room_id } = req.params;
     const { difficulty } = req.body;
-
-    console.log('🤖 AI move requested for room:', room_id);
 
     // Generate AI move
     const aiMove = chessAIService.generateAIMove(difficulty);
@@ -101,22 +97,11 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    console.log('🎮 Chess invitation request:', {
-      friend_id,
-      invitee_id,
-      targetUserId,
-      chat_id,
-      game_settings
-    });
-
-    // If targetUserId is null, this is a public invitation
-    if (targetUserId === null) {
-      console.log('🌐 Creating public invitation (no specific invitee)...');
-      
+    if (targetUserId === null) {      
       const invitation = await gameService.createChessInvitation({
         inviter_id: userId,
-        invitee_id: null, // No specific invitee
-        chat_id: null, // No chat for public invitations
+        invitee_id: null,
+        chat_id: null,
         game_settings
       });
 
@@ -155,13 +140,6 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    console.log('✅ Target user found:', {
-      id: targetProfile.id,
-      name: `${targetProfile.first_name} ${targetProfile.last_name}`,
-      email: targetProfile.email
-    });
-
-    // Check if user is trying to invite themselves
     if (targetUserId === userId) {
       res.status(400).json({
         success: false,
@@ -170,7 +148,6 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Check if target user is not an admin (optional check)
     if (targetProfile.role === 'admin') {
       res.status(403).json({
         success: false,
@@ -183,7 +160,6 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     // If no chat_id provided, check if chat exists or create one
     if (!finalChatId) {
-      console.log('🔍 No chat_id provided, checking for existing chat...');
 
       const { data: existingChat, error: chatCheckError } = await supabase
         .from('chats')
@@ -202,10 +178,7 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
       if (existingChat) {
         finalChatId = existingChat.id;
-        console.log('✅ Using existing chat:', finalChatId);
       } else {
-        console.log('🆕 Creating new chat...');
-        // Create new chat for random user invitation
         const { data: newChat, error: insertError } = await supabase
           .from('chats')
           .insert([{
@@ -225,21 +198,15 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
         }
 
         finalChatId = newChat.id;
-        console.log('✅ Created new chat:', finalChatId);
       }
-    } else {
-      console.log('✅ Using provided chat_id:', finalChatId);
     }
 
-    console.log('🎯 Creating chess invitation...');
     const invitation = await gameService.createChessInvitation({
       inviter_id: userId,
       invitee_id: targetUserId,
       chat_id: finalChatId,
       game_settings
     });
-
-    console.log('✅ Chess invitation created:', invitation);
 
     const { data: inviterProfile } = await supabase
       .from('profiles')
@@ -270,12 +237,10 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
 
     // Send real-time notification
     const targetEmail = targetProfile.email;
-    console.log('📡 Sending real-time notification to:', targetEmail);
 
     if (targetEmail) {
       const targetSockets = connectedUsers.get(targetEmail);
       if (targetSockets) {
-        console.log('📡 Found sockets for target user:', targetSockets.size);
         targetSockets.forEach(socketId => {
           io.to(socketId).emit('chess_invitation_received', {
             invitation,
@@ -283,24 +248,16 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
             inviter_id: userId,
             message: message || `You've been invited to play chess!`,
             room_link: `${process.env.CLIENT_URL || 'http://localhost:3000'}/chess/room/${invitation.room_id}`,
-            // Add betting info from game_settings for notification only
             game_type: game_settings.game_type || 'casual',
             bet_amount: game_settings.bet_amount || 0
           });
         });
-      } else {
-        console.log('⚠️ No active sockets found for target user');
       }
     }
 
-    // Send chat message about the invitation
-    // Only send message if no chat_id was provided (new chat created) or if custom message is provided
     const shouldSendMessage = !chat_id || message;
 
     if (shouldSendMessage) {
-      console.log('💬 Sending chat message...');
-
-      // Use the structured format like the working invitations
       const messageContent = message ||
         `Room ID: chess?\nroom=${invitation.room_id}\nClick to join the chess game`;
 
@@ -327,15 +284,11 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
       if (messageError) {
         console.error('❌ Error sending chat message:', messageError);
       } else {
-        console.log('✅ Chat message sent successfully');
-
-        // Update chat timestamp
         await supabase
           .from('chats')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', finalChatId);
 
-        // Send real-time message notification
         const targetEmail = targetProfile.email;
         if (targetEmail) {
           const targetSockets = connectedUsers.get(targetEmail);
@@ -346,8 +299,6 @@ export const sendChessInvite = async (req: Request, res: Response): Promise<void
           }
         }
       }
-    } else {
-      console.log('📝 No chat message sent (using existing friend chat)');
     }
 
     res.status(201).json({
@@ -642,8 +593,6 @@ export const generateAIMoveWithBoard = async (req: Request, res: Response): Prom
     const { room_id } = req.params;
     const { board_state, difficulty = 'medium' } = req.body;
 
-    console.log('🤖 AI move requested with board state:', { room_id, difficulty });
-
     const aiMove = chessAIService.generateAIMove(difficulty, board_state);
 
     if (!aiMove) {
@@ -661,8 +610,6 @@ export const generateAIMoveWithBoard = async (req: Request, res: Response): Prom
       });
       return;
     }
-
-    console.log('✅ AI move generated:', aiMove);
 
     res.status(200).json({
       success: true,

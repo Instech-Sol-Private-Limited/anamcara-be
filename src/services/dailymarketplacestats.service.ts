@@ -2,14 +2,12 @@ import { supabase } from '../app';
 
 export const collectDailyStats = async (): Promise<any> => {
     try {
-        console.log('🔄 Starting daily marketplace stats collection...');
 
         const today = new Date();
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayDate = yesterday.toISOString().split('T')[0];
 
-        // Get the single stats row
         const { data: existingStats, error: fetchError } = await supabase
             .from('marketplace_stats')
             .select('*')
@@ -77,7 +75,6 @@ export const collectDailyStats = async (): Promise<any> => {
 
         if (updateError) throw updateError;
 
-        console.log('✅ Daily stats updated successfully for:', yesterdayDate);
 
     } catch (error) {
         console.error('❌ Error collecting daily stats:', error);
@@ -87,7 +84,6 @@ export const collectDailyStats = async (): Promise<any> => {
 
 export const collectMonthlyProviderStats = async (): Promise<any> => {
     try {
-        console.log('🔄 Starting monthly provider stats collection...');
 
         const today = new Date();
         const currentMonth = today.toISOString().slice(0, 7); // YYYY-MM
@@ -154,7 +150,6 @@ export const collectMonthlyProviderStats = async (): Promise<any> => {
 
         if (updateError) throw updateError;
 
-        console.log('✅ Monthly provider stats collected successfully for:', currentMonth);
         return monthlyProviderData;
 
     } catch (error) {
@@ -308,7 +303,6 @@ const calculateProviderStats = async (months: number) => {
 
 export const initializeStats = async () => {
     try {
-        console.log('📊 Initializing marketplace stats...');
 
         const { data: existingStats, error: checkError } = await supabase
             .from('marketplace_stats')
@@ -323,7 +317,6 @@ export const initializeStats = async () => {
             const bookingStats = await calculateBookingStats(30);
 
             const providerStats = await calculateProviderStats(12);
-            console.log(bookingStats,providerStats)
 
             const { error: insertError } = await supabase
                 .from('marketplace_stats')
@@ -338,8 +331,6 @@ export const initializeStats = async () => {
             if (insertError) {
                 throw insertError;
             }
-
-            console.log('✅ Created initial marketplace stats with real 30 days booking and 12 months provider data');
 
         } else if (checkError) {
             throw checkError;
@@ -363,9 +354,6 @@ export const initializeStats = async () => {
                 throw insertError;
             }
 
-            console.log('✅ Created initial marketplace stats with real 30 days booking and 12 months provider data');
-        } else {
-            console.log('✅ Marketplace stats already initialized');
         }
 
     } catch (error) {

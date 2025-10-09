@@ -23,7 +23,5 @@ export async function ensureThreadsTableExists() {
 
   if (error) {
     console.error('❌ Failed to create "threads" table:', error.message);
-  } else {
-    console.log('✅ "threads" table exists or was created successfully.');
   }
 }

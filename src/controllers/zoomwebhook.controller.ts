@@ -12,9 +12,6 @@ export const handleZoomWebhook = async (req: Request, res: Response): Promise<an
         const payload = req.body.payload;
         const meetingId = payload.object.id;
 
-        console.log(`Received Zoom webhook event: ${event} for meeting ${meetingId}`);
-
-        // Find the booking associated with this Zoom meeting
         const { data: bookingData, error: bookingError } = await supabase
             .from('slots_booking')
             .select('*')
@@ -57,7 +54,6 @@ export const handleZoomWebhook = async (req: Request, res: Response): Promise<an
                 throw new Error(`Failed to create meeting track record: ${insertError?.message}`);
             }
             meetingTrack = newMeeting;
-            console.log(`Created new meeting track record for meeting ${meetingId}`);
         }
 
         // Now we're sure meetingTrack exists with all required fields
@@ -315,8 +311,6 @@ const handleRefund = async (booking: any) => {
             .eq('id', booking.id);
 
         if (bookingError) throw bookingError
-
-        console.log(`Successfully processed refund for booking ${booking.id}`);
 
     } catch (error) {
         console.error(`Failed to process refund for booking ${booking.id}:`, error);

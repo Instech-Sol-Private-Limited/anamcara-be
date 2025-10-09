@@ -110,8 +110,6 @@ export const updateProfile = async (req: Request, res: Response) => {
       gender: gender || null,
       updated_at: new Date().toISOString()
     };
-
-    console.log(updateData)
     
     if (username) updateData.username = username;
     if (profile_type) updateData.profile_type = profile_type;

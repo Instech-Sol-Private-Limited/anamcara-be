@@ -54,7 +54,6 @@ const updateDailyInsights = async () => {
 
         if (error) throw error;
 
-        console.log(`Updated daily insights for ${today}`);
     } catch (error) {
         console.error('Error updating daily insights:', error);
     }

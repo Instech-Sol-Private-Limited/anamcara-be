@@ -40,7 +40,6 @@
 
 //   try {
 //     await sgMail.send(msg);
-//     console.log("✅ Verification email sent to:", to);
 //   } catch (error) {
 //     console.error("❌ Failed to send verification email:", error);
 //     throw error;
@@ -83,7 +82,6 @@
 
 //   try {
 //     await sgMail.send(msg);
-//     console.log("✅ Verification email sent to:", to);
 //   } catch (error) {
 //     console.error("❌ Failed to send verification email:", error);
 //     throw error;

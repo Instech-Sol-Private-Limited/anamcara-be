@@ -163,7 +163,6 @@ const getReactionCounts = async (targetId: string, targetType: 'story' | 'commen
       .eq('target_type', targetType);
 
     if (error) {
-      console.log('Error getting reaction counts:', error);
       return {
         total_likes: 0,
         total_dislikes: 0,

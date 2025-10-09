@@ -9,7 +9,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.log('Unauthorized: No valid auth header found');
     res.status(401).json({
       success: false,
       message: 'Unauthorized: No token provided',
@@ -23,7 +22,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
-      console.log('Invalid token error:', error?.message);
       res.status(401).json({
         success: false,
         message: 'Unauthorized: Invalid token',
@@ -39,7 +37,6 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
       .single();
     
     if (profileError || !profile) {
-      console.log('Profile error:', profileError?.message);
       res.status(401).json({ 
         success: false, 
         message: 'Unauthorized: User profile not found' 
@@ -105,17 +102,11 @@ export const optionalAuthMiddleware = async (
             ...profile
           };
 
-        } else {
-          console.log('Optional auth: profile not found or error');
-        }
-      } else {
-        console.log('Optional auth: invalid token');
-      }
+        } 
+      } 
     } catch (err: any) {
       console.warn('Optional auth middleware error:', err.message);
     }
-  } else {
-    console.log('Optional auth: No auth header provided');
   }
 
   next();

@@ -136,7 +136,6 @@ export const getUserFriends = async (req: Request, res: Response): Promise<any> 
     }
 };
 
-
 // ----------------------- chambers & chats ----------------------
 // get conversion
 export const getUserConversations = async (req: Request, res: Response): Promise<any> => {
@@ -172,9 +171,10 @@ export const getUserConversations = async (req: Request, res: Response): Promise
 
         const chatIds = chats.map(chat => chat.id);
 
+        // Fetch all messages for these chats
         const { data: messages, error: messagesError } = await supabase
             .from('chatmessages')
-            .select('id, chat_id, sender, message, created_at, has_media, media')
+            .select('id, chat_id, sender, message, created_at, has_media, media, status')
             .in('chat_id', chatIds)
             .order('created_at', { ascending: false });
 
@@ -187,6 +187,13 @@ export const getUserConversations = async (req: Request, res: Response): Promise
         if (chatsWithMessages.length === 0) {
             return res.json({ success: true, data: [] });
         }
+
+        const unseenCountsMap = new Map<string, number>();
+        messages?.forEach(msg => {
+            if (msg.status === 'delivered' && msg.sender !== userId) {
+                unseenCountsMap.set(msg.chat_id, (unseenCountsMap.get(msg.chat_id) || 0) + 1);
+            }
+        });
 
         const recentMessageMap = new Map<string, any>();
         messages?.forEach(msg => {
@@ -209,6 +216,7 @@ export const getUserConversations = async (req: Request, res: Response): Promise
             const otherUserId = chat.user_1 === userId ? chat.user_2 : chat.user_1;
             const profile = profileMap.get(otherUserId);
             const lastMessage = recentMessageMap.get(chat.id);
+            const unseenCount = unseenCountsMap.get(chat.id) || 0;
 
             return {
                 chat_id: chat.id,
@@ -220,6 +228,7 @@ export const getUserConversations = async (req: Request, res: Response): Promise
                     created_at: lastMessage.created_at,
                     sender: lastMessage.sender
                 } : null,
+                unseen_count: unseenCount, // Add unseen count here
                 user: {
                     id: otherUserId,
                     user_name: profile
@@ -262,7 +271,6 @@ export const createChamber = async (req: Request, res: Response): Promise<any> =
             members = [],
             is_public = false
         } = req.body;
-        console.log(req.body)
         const { id: userId } = req.user!;
 
         if (!name || !userId) {

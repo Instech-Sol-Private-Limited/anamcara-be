@@ -390,7 +390,6 @@ export const getBookedSlots = async (req: Request, res: Response): Promise<void>
 
         const currentDate = new Date().toISOString().split('T')[0];
 
-        console.log(userId)
         const { data: slotsData, error: slotsError } = await supabase
             .from('slots_booking')
             .select(`*`)
@@ -400,7 +399,6 @@ export const getBookedSlots = async (req: Request, res: Response): Promise<void>
             .order('meeting_start_time', { ascending: true })
             .limit(20);
 
-            console.log(slotsData)
         if (slotsError) {
             throw slotsError;
         }

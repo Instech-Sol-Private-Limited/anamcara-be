@@ -5,7 +5,6 @@ import { supabase } from '../app';
 export const setupPaymentCron = () => {
     cron.schedule('0 2 * * *', async () => {
         try {
-            console.log('Running payment processing cron job...');
             await processPendingPayments();
         } catch (error) {
             console.error('Error in payment cron job:', error);
@@ -72,7 +71,6 @@ export const processPendingPayments = async () => {
                     })
                     .eq('id', payment.id);
 
-                console.log(`Transferred ${payment.amount} coins to seller ${payment.seller_id}`);
 
             } catch (err) {
                 console.error(`Failed to process payment ${payment.id}:`, err);
@@ -89,6 +87,4 @@ export const processPendingPayments = async () => {
 
         processedCount += payments.length;
     }
-
-    console.log(`Payment processing completed. Processed ${processedCount} payments.`);
 };

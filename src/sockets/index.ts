@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { supabase } from '../app';
-import { getChatParticipants, getUnseenMessagesCount, getUserEmailFromId, getUserFriends, getUserIdFromEmail, updateUnseenCountForChatParticipants, updateUnseenCountForUser } from './getUserFriends';
+import { getUnseenMessagesCount, getUserEmailFromId, getUserFriends, getUserIdFromEmail, updateUnseenCountForChatParticipants, updateUnseenCountForUser } from './getUserFriends';
 import { notifyChamberMembers, verifyChamberPermissions } from './manageChambers';
 import { registerChessHandlers } from './chess.handler';
 import { registerChessAIHandlers } from './chess-ai.handler';
@@ -48,7 +48,6 @@ interface Chamber {
 export const connectedUsers = new Map<string, Set<string>>();
 
 export const registerSocketHandlers = (io: Server) => {
-  console.log(connectedUsers);
 
   io.on('connection', (socket: Socket) => {
     console.log('🔌 Socket connected:', socket.id);
@@ -144,7 +143,6 @@ export const registerSocketHandlers = (io: Server) => {
     // --------------------- Story Views ------------------
     socket.on('record_story_view', async ({ storyId }: { storyId: string }) => {
       try {
-        console.log('story_view', storyId)
         let userEmail: string | null = null;
         let userId: string | null = null;
 
@@ -375,9 +373,7 @@ export const registerSocketHandlers = (io: Server) => {
     // Get unseen messages count
     socket.on('get_unseen_count', async (userId: string) => {
       try {
-        console.log('userId',userId)
         const unseenCount = await getUnseenMessagesCount(userId);
-        console.log(unseenCount)
         socket.emit('unseen_count_update', { count: unseenCount });
       } catch (error) {
         console.error('Unseen count error:', error);
@@ -1877,7 +1873,6 @@ export const registerSocketHandlers = (io: Server) => {
       adder_id: string;
     }) => {
       const { chamber_id, user_ids, adder_id } = payload;
-      console.log('Adding members:', { chamber_id, user_ids, adder_id });
 
       try {
         const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, adder_id);
@@ -1971,7 +1966,6 @@ export const registerSocketHandlers = (io: Server) => {
     }) => {
       try {
         const { chamber_id, user_id, removed_by } = payload;
-        console.log('Removing member:', { chamber_id, user_id, removed_by });
 
         const { isCreator, isModerator } = await verifyChamberPermissions(chamber_id, removed_by);
         if (!isCreator && !isModerator) {
@@ -2097,7 +2091,6 @@ export const registerSocketHandlers = (io: Server) => {
     }, callback) => {
       try {
         const { chamber_id, deleted_by } = payload;
-        console.log('Deleting chamber:', { chamber_id, deleted_by });
 
         const { isCreator } = await verifyChamberPermissions(chamber_id, deleted_by);
         if (!isCreator) {
@@ -2225,8 +2218,6 @@ export const registerSocketHandlers = (io: Server) => {
 
       if (error) {
         console.error(`❌ mark_as_read error:`, error.message);
-      } else {
-        console.log(`📘 Notification ${id} marked as read`);
       }
     });
 
@@ -2239,8 +2230,6 @@ export const registerSocketHandlers = (io: Server) => {
 
       if (error) {
         console.error(`❌ mark_all_as_read error:`, error.message);
-      } else {
-        console.log(`📘 All notifications marked as read for user: ${userId}`);
       }
     });
 
@@ -2252,8 +2241,6 @@ export const registerSocketHandlers = (io: Server) => {
 
       if (error) {
         console.error(`❌ delete_notification error:`, error.message);
-      } else {
-        console.log(`🗑️ Notification ${id} deleted`);
       }
     });
 
@@ -2278,14 +2265,12 @@ export const registerSocketHandlers = (io: Server) => {
             }
           }
 
-          console.log(`❌ Disconnected ${socket.id} from ${email}`);
           break;
         }
       }
     });
   });
 
-  // Register chess handlers separately
   registerChessHandlers(io);
   registerChessAIHandlers(io);
 };

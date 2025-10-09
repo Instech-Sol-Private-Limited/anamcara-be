@@ -1599,6 +1599,7 @@ function generateBackupCodes(): string[] {
   return codes;
 
 }
+
 export const getUnapprovedUsersController=async(req: Request, res: Response):Promise<any>=>{
   try {
     const { data: users, error } = await supabase
@@ -1628,6 +1629,7 @@ export const getUnapprovedUsersController=async(req: Request, res: Response):Pro
     });
   }
 }
+
 export const approveUserController = async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId } = req.params;
@@ -1703,12 +1705,9 @@ export const sendApprovalEmail = async (req: Request, res: Response): Promise<an
       });
     }
 
-    // Send email to guardian (as before)
     await sendAdminEmail(email, invitorName, '', status);
 
-    // Send notification to the actual user (under 18)
     if (userId) {
-      // Get the actual user's email from database
       const { data: user, error: userError } = await supabase
         .from('profiles')
         .select('email')
@@ -1732,7 +1731,6 @@ export const sendApprovalEmail = async (req: Request, res: Response): Promise<an
             verified_at: new Date().toISOString()
           }
         });
-        console.log('✅ Notification sent to actual user:', user.email);
       }
     }
 

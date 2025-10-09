@@ -76,10 +76,7 @@ export const chessAIService = {
     if (typeof board === 'string') {
       board = this.fenToBoard(board);
     }
-    
-    console.log('🤖 AI using board state:', board);
-    
-    // Find all pieces of the AI color
+        
     const aiColorPrefix = aiColor === 'white' ? 'w' : 'b';
     const aiPieces = [];
     for (const [square, piece] of Object.entries(board)) {
@@ -87,10 +84,7 @@ export const chessAIService = {
         aiPieces.push({ square, piece: piece as string });
       }
     }
-    
-    console.log(`🤖 Found ${aiColor} pieces:`, aiPieces);
-    
-    // Get valid moves for ALL piece types
+        
     const allValidMoves = [];
     
     for (const { square, piece } of aiPieces) {
@@ -114,10 +108,7 @@ export const chessAIService = {
       allValidMoves.push(...pieceMoves);
     }
     
-    console.log('🤖 All valid moves found:', allValidMoves.length);
-    
     if (allValidMoves.length === 0) {
-      console.log('🤖 No valid moves available');
       return null;
     }
     
@@ -138,10 +129,8 @@ export const chessAIService = {
       blackKing: this.findKing(board, 'b') || undefined
     }));
     
-    console.log('🤖 Legal moves after check validation:', legalMoves.length);
     
     if (legalMoves.length === 0) {
-      console.log('🤖 No legal moves available (all would put king in check)');
       return null;
     }
     
@@ -189,11 +178,8 @@ export const chessAIService = {
     }
 
     if (!selectedMove) {
-      console.log('❌ No valid move selected');
       return null;
     }
-
-    console.log('✅ Valid AI move selected:', selectedMove);
 
     return {
       from: selectedMove.from,
