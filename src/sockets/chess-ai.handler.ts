@@ -29,6 +29,7 @@ export const registerChessAIHandlers = (io: Server) => {
       difficulty: 'easy' | 'medium' | 'hard';
       board_state?: any;
       ai_color?: 'white' | 'black';
+      current_turn?: string;
     }) => {
       try {
         console.log('🤖 AI move requested via socket:', payload);
@@ -49,6 +50,19 @@ export const registerChessAIHandlers = (io: Server) => {
         
         console.log('🤖 AI using board state:', JSON.stringify(boardState, null, 2));
         console.log('🤖 AI color:', aiColor);
+
+        // CRITICAL FIX: Check if it's actually AI's turn before generating move
+        // Use turn from payload instead of database to avoid timing issues
+        const currentTurn = payload.current_turn || (payload as any).turn;
+
+        if (currentTurn !== aiColor) {
+          console.log('🤖 Not AI\'s turn, skipping move generation. Current turn:', currentTurn, 'AI color:', aiColor);
+          // Don't send error to prevent frontend loops - just quietly ignore
+          return;
+        }
+
+        console.log('🤖 AI\'s turn detected! Generating move for:', aiColor);
+        console.log('🤖 Current turn from payload:', currentTurn);
         
         // Try to generate AI move with retry logic
         let aiMove = null;
@@ -147,6 +161,15 @@ export const registerChessAIHandlers = (io: Server) => {
         const aiColor = gameRoom?.player_color === 'white' ? 'black' : 'white';
         console.log('🤖 Determined AI color:', aiColor);
 
+        // CRITICAL FIX: Check if it's actually AI's turn before generating move
+        if (payload.current_turn !== aiColor) {
+          console.log('🤖 Not AI\'s turn, skipping move generation. Current turn:', payload.current_turn, 'AI color:', aiColor);
+          return;
+        }
+
+        console.log('🤖 AI\'s turn detected! Generating move for:', aiColor);
+        console.log('🤖 Current turn from payload:', payload.current_turn);
+
         // Generate AI move with the updated board state
         const aiMove = chessAIService.generateAIMove(
           payload.difficulty || 'medium', 
@@ -217,7 +240,7 @@ export const registerChessAIHandlers = (io: Server) => {
               error: error instanceof Error ? error.message : 'Unknown error'
             });
           }
-        }, Math.random() * 1500 + 500);
+        }, Math.random() * 2000 + 2000);
 
       } catch (error) {
         console.error('❌ Error in AI board state sync:', error);
@@ -240,11 +263,25 @@ export const registerChessAIHandlers = (io: Server) => {
         const maxRetries = 3;
         const retryCount = payload.retry_count || 0;
         
-        console.log(`�� AI move retry attempt ${retryCount + 1}/${maxRetries + 1}:`, payload.room_id);
+        console.log(`🤖 AI move retry attempt ${retryCount + 1}/${maxRetries + 1}:`, payload.room_id);
 
         if (retryCount >= maxRetries) {
           console.log('❌ Max retry attempts reached for AI move');
           socket.emit('ai_move_error', { message: 'Max retry attempts reached' });
+          return;
+        }
+
+        // CRITICAL FIX: Check if it's actually AI's turn before generating move
+        const { data: currentGame } = await supabase
+          .from('chess_games')
+          .select('current_turn, player_color')
+          .eq('room_id', payload.room_id)
+          .single();
+
+        const aiColor = currentGame?.player_color === 'white' ? 'black' : 'white';
+        if (currentGame?.current_turn !== aiColor) {
+          console.log('🤖 Not AI\'s turn, skipping retry. Current turn:', currentGame?.current_turn, 'AI color:', aiColor);
+          // Don't send error to prevent frontend loops - just quietly ignore
           return;
         }
 
@@ -324,7 +361,7 @@ export const registerChessAIHandlers = (io: Server) => {
               error: error instanceof Error ? error.message : 'Unknown error'
             });
           }
-        }, Math.random() * 1000 + 500);
+        }, Math.random() * 2000 + 2000);
 
       } catch (error) {
         console.error('❌ Error in AI move retry:', error);
