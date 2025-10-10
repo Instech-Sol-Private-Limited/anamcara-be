@@ -1,4 +1,4 @@
-import { authMiddleware } from "../middleware/auth.middleware";
+import { authMiddleware, requireRole, superAdminMiddleware } from "../middleware/auth.middleware";
 import express from 'express';
 import {
     getUserBankAccounts,
@@ -11,7 +11,8 @@ import {
     getWithdrawalRequestById,
     cancelWithdrawalRequest,
     getWithdrawalStats,
-    updateWithdrawalStatus
+    updateWithdrawalStatus,
+    getAllWithdrawalRequests
 } from '../controllers/bankaccount.controller';
 
 const router = express.Router();
@@ -36,9 +37,12 @@ router.get('/withdraw/history/:id', authMiddleware, getWithdrawalRequestById);
 
 router.patch('/withdraw/history/:id/cancel', authMiddleware, cancelWithdrawalRequest);
 
-router.get('/withdraw/stats', authMiddleware, getWithdrawalStats);
 
-// Admin routes (add proper admin middleware)
-router.patch('/admin/withdraw/:id/status', authMiddleware, updateWithdrawalStatus);
+// admin routes
+router.get('/admin/all', authMiddleware, requireRole('superadmin'), getAllWithdrawalRequests);
+
+router.patch('/admin/change-status/:id', authMiddleware, requireRole('superadmin'), updateWithdrawalStatus);
+
+router.get('/admin/stats', authMiddleware, getWithdrawalStats);
 
 export default router;
