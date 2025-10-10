@@ -12,13 +12,14 @@ interface CreateDigitalAssetRequest {
   title: string;
   description: string;
   tags: string[];
+  category?: string;
   priceAnamCoins: number;
   redeemAccessBonus: boolean;
-  visibility: string;
-  license: string;
+  license: 'resale' | 'personal';
   assets: string[];
   thumbnail: string[];
   creatorId: string;
+  disclaimers?: DisclaimerTag[] | null;
 }
 
 interface UpdateProductRequest {
@@ -47,6 +48,43 @@ interface ResaleRequest {
   currencyType: 'AC';
 }
 
+interface DisclaimerTag {
+  type: 'ai_generated' | 'sponsored' | 'nsfw' | 'kids';
+  enabled: boolean;
+}
+
+const validateDisclaimers = (disclaimers: any): disclaimers is DisclaimerTag[] | null => {
+  if (disclaimers === null || disclaimers === undefined) {
+    return true;
+  }
+
+  if (!Array.isArray(disclaimers)) {
+    return false;
+  }
+
+  const validTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids'];
+  
+  return disclaimers.every(item => {
+    return (
+      typeof item === 'object' &&
+      item !== null &&
+      'type' in item &&
+      'enabled' in item &&
+      validTypes.includes(item.type) &&
+      typeof item.enabled === 'boolean'
+    );
+  });
+};
+
+const processDisclaimers = (disclaimers: DisclaimerTag[] | null | undefined): DisclaimerTag[] | null => {
+  if (!disclaimers || !Array.isArray(disclaimers)) {
+    return null;
+  }
+
+  const enabledDisclaimers = disclaimers.filter(d => d.enabled);
+  
+  return enabledDisclaimers.length > 0 ? enabledDisclaimers : null;
+};
 
 const createDigitalAsset = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -54,33 +92,60 @@ const createDigitalAsset = async (req: Request, res: Response): Promise<void> =>
       title,
       description,
       tags,
+      category,
       priceAnamCoins,
       redeemAccessBonus,
       license,
       assets,
       thumbnail,
-      creatorId
+      creatorId,
+      disclaimers
     } = req.body as CreateDigitalAssetRequest;
 
+    // Validate required fields
+    if (!title || !description || !creatorId) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: title, description, and creatorId are required'
+      });
+      return;
+    }
+
+    // Validate disclaimers if provided
+    if (disclaimers !== undefined && disclaimers !== null && !validateDisclaimers(disclaimers)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid disclaimers format. Must be an array of objects with type and enabled properties.'
+      });
+      return;
+    }
+
+    // Process disclaimers (only store enabled ones)
+    const processedDisclaimers = processDisclaimers(disclaimers);
+
+    // Insert product into database
     const { data: product, error: dbError } = await supabase
       .from('products')
       .insert({
         title,
         description,
-        tags,
+        tags: tags || [],
+        category: category || null,
         price_anam_coins: priceAnamCoins,
-        redeem_access_bonus: redeemAccessBonus,
+        redeem_access_bonus: redeemAccessBonus || false,
         visibility: 'public',
         license,
-        assets,
-        thumbnail,
+        assets: assets || [],
+        thumbnail: thumbnail || [],
         creator_id: creatorId,
-        status: 'pending'
+        status: 'pending',
+        disclaimers: processedDisclaimers
       })
       .select()
       .single();
 
     if (dbError) {
+      console.error('Database error:', dbError);
       throw new Error(`Database error: ${dbError.message}`);
     }
 

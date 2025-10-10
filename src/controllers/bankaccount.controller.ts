@@ -419,6 +419,74 @@ export const cancelWithdrawalRequest = async (req: Request, res: Response): Prom
     }
 };
 
+// admin
+export const getAllWithdrawalRequests = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { data, error } = await supabase
+            .from('withdrawal_requests')
+            .select(`
+                *,
+                bank_accounts (
+                    user_id,
+                    bank_name,
+                    account_holder_name,
+                    account_number,
+                    country_code,
+                    currency
+                )
+            `)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Fetch profiles and coins for each user
+        const withdrawalRequestsWithUserData = await Promise.all(
+            (data || []).map(async (request) => {
+                const userId = request.bank_accounts?.user_id;
+                
+                if (!userId) {
+                    return {
+                        ...request,
+                        profiles: null,
+                        user_available_coins: 0
+                    };
+                }
+
+                // Get user profile
+                const { data: profileData, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('first_name, last_name, avatar_url, username')
+                    .eq('id', userId)
+                    .single();
+
+                // Get available coins for the user
+                const { data: coinsData, error: coinsError } = await supabase
+                    .from('anamcoins')
+                    .select('available_coins')
+                    .eq('user_id', userId)
+                    .single();
+
+                return {
+                    ...request,
+                    profiles: profileError ? null : profileData,
+                    user_available_coins: coinsError ? 0 : (coinsData?.available_coins || 0)
+                };
+            })
+        );
+
+        res.json({
+            success: true,
+            data: withdrawalRequestsWithUserData
+        });
+    } catch (error) {
+        console.error('Get withdrawal requests error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch withdrawal requests'
+        });
+    }
+};
+
 export const updateWithdrawalStatus = async (req: Request, res: Response): Promise<any> => {
     try {
         const { id } = req.params;
@@ -431,6 +499,33 @@ export const updateWithdrawalStatus = async (req: Request, res: Response): Promi
             });
         }
 
+        const { data: existingRequest, error: fetchError } = await supabase
+            .from('withdrawal_requests')
+            .select(`
+                *,
+                bank_accounts (
+                    user_id
+                )
+            `)
+            .eq('id', id)
+            .single();
+
+        if (fetchError) throw fetchError;
+        if (!existingRequest) {
+            return res.status(404).json({
+                success: false,
+                message: 'Withdrawal request not found'
+            });
+        }
+
+        const userId = existingRequest.bank_accounts?.user_id;
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bank account user not found'
+            });
+        }
+
         const updateData: any = {
             status,
             admin_notes,
@@ -440,6 +535,42 @@ export const updateWithdrawalStatus = async (req: Request, res: Response): Promi
         if (status === 'transferred') {
             updateData.transferred_at = new Date().toISOString();
             updateData.transaction_reference = transaction_reference;
+            
+            const coinsToDeduct = existingRequest.gross_amount_usd;
+
+            const { data: coinsData, error: coinsError } = await supabase
+                .from('anamcoins')
+                .select('available_coins, total_coins, spent_coins')
+                .eq('user_id', userId)
+                .single();
+
+            if (coinsError) throw coinsError;
+
+            if (!coinsData) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User anamcoins record not found'
+                });
+            }
+
+            if (coinsData.available_coins < coinsToDeduct) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Insufficient anamcoins for this withdrawal'
+                });
+            }
+
+            const { error: updateCoinsError } = await supabase
+                .from('anamcoins')
+                .update({
+                    available_coins: coinsData.available_coins - coinsToDeduct,
+                    spent_coins: coinsData.spent_coins + coinsToDeduct,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+
+            if (updateCoinsError) throw updateCoinsError;
+
         } else if (status === 'rejected') {
             updateData.rejection_reason = rejection_reason;
         } else if (status === 'approved') {
@@ -453,6 +584,7 @@ export const updateWithdrawalStatus = async (req: Request, res: Response): Promi
             .select(`
                 *,
                 bank_accounts (
+                    user_id,
                     bank_name,
                     account_holder_name,
                     account_number,
@@ -471,10 +603,29 @@ export const updateWithdrawalStatus = async (req: Request, res: Response): Promi
             });
         }
 
+        const [profileResponse, coinsResponse] = await Promise.all([
+            supabase
+                .from('profiles')
+                .select('first_name, last_name, avatar_url, username')
+                .eq('id', userId)
+                .single(),
+            supabase
+                .from('anamcoins')
+                .select('available_coins')
+                .eq('user_id', userId)
+                .single()
+        ]);
+
+        const responseData = {
+            ...data,
+            profiles: profileResponse.error ? null : profileResponse.data,
+            user_available_coins: coinsResponse.error ? 0 : (coinsResponse.data?.available_coins || 0)
+        };
+
         res.json({
             success: true,
             message: `Withdrawal request ${status} successfully`,
-            data
+            data: responseData
         });
     } catch (error) {
         console.error('Update withdrawal status error:', error);
@@ -486,13 +637,10 @@ export const updateWithdrawalStatus = async (req: Request, res: Response): Promi
 };
 
 export const getWithdrawalStats = async (req: Request, res: Response): Promise<any> => {
-    const userId = req.user?.id!;
-
     try {
         const { data, error } = await supabase
             .from('withdrawal_requests')
             .select('status, net_amount_usd, created_at')
-            .eq('user_id', userId);
 
         if (error) throw error;
 
