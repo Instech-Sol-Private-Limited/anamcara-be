@@ -428,6 +428,7 @@ const getApprovedProducts = async (req: Request, res: Response): Promise<any> =>
       creator_id: product.creator_id,
       updated_at: product.updated_at,
       average_rating: product.average_rating,
+      disclaimers:product.disclaimers,
       creator: product.creator ? {
         id: product.creator.id,
         first_name: product.creator.first_name,
