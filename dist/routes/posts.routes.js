@@ -12,12 +12,12 @@ const router = express_1.default.Router();
 router.post('/', auth_middleware_1.authMiddleware, posts_controller_1.createPost);
 router.get('/', auth_middleware_1.optionalAuthMiddleware, posts_controller_1.getPosts);
 router.get('/trending', auth_middleware_1.authMiddleware, posts_controller_1.getTrendingPosts);
-router.get('/user/:userId', auth_middleware_1.authMiddleware, posts_controller_1.getUserPosts);
-router.get('/user-media/:userId', auth_middleware_1.authMiddleware, posts_controller_1.getUserPostsMedia);
+router.get('/user/:userId', auth_middleware_1.optionalAuthMiddleware, posts_controller_1.getUserPosts);
+router.get('/user-media/:userId', posts_controller_1.getUserPostsMedia);
 router.put('/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePost);
 router.delete('/:postId', auth_middleware_1.authMiddleware, posts_controller_1.deletePost);
 router.post('/:postId/vote', auth_middleware_1.authMiddleware, posts_controller_1.voteOnPoll);
-router.get('/:postId/results', auth_middleware_1.authMiddleware, posts_controller_1.getPollResults);
+router.get('/:postId/results', auth_middleware_1.optionalAuthMiddleware, posts_controller_1.getPollResults);
 router.patch('/apply-react/:postId', auth_middleware_1.authMiddleware, posts_controller_1.updatePostReaction);
 router.post('/votes/:targetId', auth_middleware_1.authMiddleware, posts_controller_1.updateVote);
 // Toggle like on post
