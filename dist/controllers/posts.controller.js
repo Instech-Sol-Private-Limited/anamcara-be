@@ -773,14 +773,12 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 message: error.message
             });
         }
-        // Add user reactions, votes, saved posts, and comment counts
         const postsWithReactions = yield Promise.all(posts.map((post) => __awaiter(void 0, void 0, void 0, function* () {
             let userReaction = null;
             let userVote = null;
             let userSaved = false;
             let savedId = null;
             if (current_user_id) {
-                // ✅ Get user reaction
                 const { data: reactionData } = yield app_1.supabase
                     .from('thread_reactions')
                     .select('type')
@@ -791,7 +789,6 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 if (reactionData) {
                     userReaction = reactionData.type;
                 }
-                // ✅ Get user vote
                 const { data: voteData } = yield app_1.supabase
                     .from('post_votes')
                     .select('vote_type')
@@ -802,7 +799,6 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 if (voteData) {
                     userVote = voteData.vote_type;
                 }
-                // ✅ Check if the post is saved by user
                 const { data: savedData } = yield app_1.supabase
                     .from('saved_posts')
                     .select('id')
@@ -815,7 +811,6 @@ const getUserPosts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     savedId = savedData.id;
                 }
             }
-            // ✅ Get comment count
             const { data: comments } = yield app_1.supabase
                 .from('threadcomments')
                 .select('id, post_id, content, is_deleted')
@@ -1052,7 +1047,6 @@ exports.voteOnPoll = voteOnPoll;
 const getPollResults = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { postId } = req.params;
-        // Verify it's a poll post
         const { data: post } = yield app_1.supabase
             .from('posts')
             .select('post_type, poll_options')
@@ -1074,13 +1068,11 @@ const getPollResults = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 message: error.message
             });
         }
-        // Count votes for each option
         const voteCounts = {};
         data === null || data === void 0 ? void 0 : data.forEach((vote) => {
             voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + 1;
         });
         const totalVotes = (data === null || data === void 0 ? void 0 : data.length) || 0;
-        // Format results with percentages
         const results = post.poll_options.map((option, index) => ({
             option,
             votes: voteCounts[index] || 0,

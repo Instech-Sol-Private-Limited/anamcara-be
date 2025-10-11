@@ -924,7 +924,6 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
       });
     }
 
-    // Add user reactions, votes, saved posts, and comment counts
     const postsWithReactions = await Promise.all(
       posts.map(async (post) => {
         let userReaction = null;
@@ -933,7 +932,6 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
         let savedId = null;
 
         if (current_user_id) {
-          // ✅ Get user reaction
           const { data: reactionData } = await supabase
             .from('thread_reactions')
             .select('type')
@@ -946,7 +944,6 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
             userReaction = reactionData.type;
           }
 
-          // ✅ Get user vote
           const { data: voteData } = await supabase
             .from('post_votes')
             .select('vote_type')
@@ -959,7 +956,6 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
             userVote = voteData.vote_type;
           }
 
-          // ✅ Check if the post is saved by user
           const { data: savedData } = await supabase
             .from('saved_posts')
             .select('id')
@@ -974,7 +970,6 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
           }
         }
 
-        // ✅ Get comment count
         const { data: comments } = await supabase
           .from('threadcomments')
           .select('id, post_id, content, is_deleted')
@@ -1249,7 +1244,6 @@ export const getPollResults = async (req: Request, res: Response): Promise<any> 
   try {
     const { postId } = req.params;
 
-    // Verify it's a poll post
     const { data: post } = await supabase
       .from('posts')
       .select('post_type, poll_options')
@@ -1275,7 +1269,6 @@ export const getPollResults = async (req: Request, res: Response): Promise<any> 
       });
     }
 
-    // Count votes for each option
     const voteCounts: { [key: number]: number } = {};
     data?.forEach((vote) => {
       voteCounts[vote.option_index] = (voteCounts[vote.option_index] || 0) + 1;
@@ -1283,7 +1276,6 @@ export const getPollResults = async (req: Request, res: Response): Promise<any> 
 
     const totalVotes = data?.length || 0;
 
-    // Format results with percentages
     const results = post.poll_options.map((option: string, index: number) => ({
       option,
       votes: voteCounts[index] || 0,

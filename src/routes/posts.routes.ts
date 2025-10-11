@@ -38,9 +38,9 @@ router.get('/', optionalAuthMiddleware, getPosts);
 
 router.get('/trending', authMiddleware, getTrendingPosts);
 
-router.get('/user/:userId', authMiddleware, getUserPosts);
+router.get('/user/:userId', optionalAuthMiddleware, getUserPosts);
 
-router.get('/user-media/:userId', authMiddleware, getUserPostsMedia);
+router.get('/user-media/:userId', getUserPostsMedia);
 
 router.put('/:postId', authMiddleware, updatePost);
 
@@ -48,7 +48,7 @@ router.delete('/:postId', authMiddleware, deletePost);
 
 router.post('/:postId/vote', authMiddleware, voteOnPoll);
 
-router.get('/:postId/results', authMiddleware, getPollResults);
+router.get('/:postId/results', optionalAuthMiddleware, getPollResults);
 
 router.patch('/apply-react/:postId', authMiddleware, updatePostReaction);
 

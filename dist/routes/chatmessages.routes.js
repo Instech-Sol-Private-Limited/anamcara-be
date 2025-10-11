@@ -19,7 +19,7 @@ router.post('/create-chamber', auth_middleware_1.authMiddleware, chatmessages_co
 // join chamber
 router.post('/join-chamber/:invite_code', auth_middleware_1.authMiddleware, chatmessages_controller_1.joinChamberByInvite);
 // get chambers
-router.get('/get-chambers/:userId', auth_middleware_1.authMiddleware, chatmessages_controller_1.getUserChambers);
+router.get('/get-chambers/:userId', auth_middleware_1.optionalAuthMiddleware, chatmessages_controller_1.getUserChambers);
 // get chambers
 router.get('/get-all-chambers', auth_middleware_1.optionalAuthMiddleware, chatmessages_controller_1.getAllChambers);
 // get chambers
