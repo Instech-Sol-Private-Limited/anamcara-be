@@ -12,7 +12,8 @@ import {
   updatePost,
   updatePostReaction,
   getUserPostsMedia,
-  updateVote
+  updateVote,
+  getSinglePost
 } from '../controllers/posts.controller';
 import {
   createComment,
@@ -35,6 +36,8 @@ const router = express.Router();
 router.post('/', authMiddleware, createPost);
 
 router.get('/', optionalAuthMiddleware, getPosts);
+
+router.get('/:postId', optionalAuthMiddleware, getSinglePost);
 
 router.get('/trending', authMiddleware, getTrendingPosts);
 
