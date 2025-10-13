@@ -612,6 +612,265 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
+export const getSinglePost = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { postId } = req.params;
+    const user_id = req.user?.id;
+
+    if (!postId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Post ID is required'
+      });
+    }
+
+    const { data: postData, error: postError } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          username,
+          email
+        )
+      `)
+      .eq('id', postId)
+      .eq('is_active', true)
+      .single();
+
+    if (postError || !postData) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
+
+    let userReaction = null;
+    let userVote = null;
+    let userSaved = false;
+    let savedId = null;
+    let chamberInfo = null;
+
+    if (user_id) {
+      const { data: reactionData } = await supabase
+        .from('thread_reactions')
+        .select('type')
+        .eq('user_id', user_id)
+        .eq('target_id', postData.id)
+        .eq('target_type', 'post')
+        .maybeSingle();
+
+      if (reactionData) {
+        userReaction = reactionData.type;
+      }
+
+      const { data: voteData } = await supabase
+        .from('post_votes')
+        .select('vote_type')
+        .eq('user_id', user_id)
+        .eq('target_id', postData.id)
+        .eq('target_type', 'post')
+        .maybeSingle();
+
+      if (voteData) {
+        userVote = voteData.vote_type;
+      }
+
+      const { data: savedData } = await supabase
+        .from('saved_posts')
+        .select('id')
+        .eq('target_id', postData.id)
+        .eq('target_type', 'post')
+        .eq('user_id', user_id)
+        .maybeSingle();
+
+      if (savedData) {
+        userSaved = true;
+        savedId = savedData.id;
+      }
+    }
+
+    if (postData.is_chamber_post && postData.chamber_id) {
+      const { data: chamberData } = await supabase
+        .from('custom_chambers')
+        .select('id, name, custom_url, logo, member_count, color_theme, is_public, monetization')
+        .eq('id', postData.chamber_id)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (chamberData) {
+        chamberInfo = {
+          id: chamberData.id,
+          name: chamberData.name,
+          logo: chamberData.logo,
+          custom_url: chamberData.custom_url,
+          member_count: chamberData.member_count,
+          color_theme: chamberData.color_theme,
+          is_public: chamberData.is_public,
+          monetization: chamberData.monetization
+        };
+      }
+    }
+
+    const { data: comments, error: commentsError } = await supabase
+      .from('threadcomments')
+      .select(`
+        *,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          username,
+          email
+        )
+      `)
+      .eq('post_id', postData.id)
+      .eq('is_deleted', false)
+      .order('created_at', { ascending: true });
+
+    if (commentsError) {
+      return res.status(500).json({
+        success: false,
+        message: commentsError.message
+      });
+    }
+
+    const commentsWithReplies = await Promise.all(
+      comments.map(async (comment) => {
+        const { data: subcomments, error: subcommentsError } = await supabase
+          .from('threadsubcomments')
+          .select(`
+            *,
+            profiles (
+              id,
+              first_name,
+              last_name,
+              avatar_url,
+              username,
+              email
+            )
+          `)
+          .eq('comment_id', comment.id)
+          .eq('is_deleted', false)
+          .order('created_at', { ascending: true });
+
+        let commentUserReaction = null;
+        if (user_id) {
+          const { data: commentReactionData } = await supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', user_id)
+            .eq('target_id', comment.id)
+            .eq('target_type', 'comment')
+            .maybeSingle();
+
+          if (commentReactionData) {
+            commentUserReaction = commentReactionData.type;
+          }
+        }
+
+        const subcommentsWithReactions = await Promise.all(
+          (subcomments || []).map(async (subcomment) => {
+            let subcommentUserReaction = null;
+            if (user_id) {
+              const { data: subcommentReactionData } = await supabase
+                .from('thread_reactions')
+                .select('type')
+                .eq('user_id', user_id)
+                .eq('target_id', subcomment.id)
+                .eq('target_type', 'subcomment')
+                .maybeSingle();
+
+              if (subcommentReactionData) {
+                subcommentUserReaction = subcommentReactionData.type;
+              }
+            }
+
+            return {
+              ...subcomment,
+              user_reaction: subcommentUserReaction
+            };
+          })
+        );
+
+        return {
+          ...comment,
+          user_reaction: commentUserReaction,
+          replies: subcommentsWithReactions || []
+        };
+      })
+    );
+
+    const totalCommentsCount = commentsWithReplies.reduce((total, comment) => {
+      return total + 1 + (comment.replies?.length || 0);
+    }, 0);
+
+    const { data: reactionCounts } = await supabase
+      .from('thread_reactions')
+      .select('type')
+      .eq('target_id', postData.id)
+      .eq('target_type', 'post');
+
+    const reactionStats = {
+      total_likes: reactionCounts?.filter(r => r.type === 'like').length || 0,
+      total_supports: reactionCounts?.filter(r => r.type === 'support').length || 0,
+      total_valuables: reactionCounts?.filter(r => r.type === 'valuable').length || 0,
+      total_funnies: reactionCounts?.filter(r => r.type === 'funny').length || 0,
+      total_shockeds: reactionCounts?.filter(r => r.type === 'shocked').length || 0,
+      total_moveds: reactionCounts?.filter(r => r.type === 'moved').length || 0,
+      total_triggereds: reactionCounts?.filter(r => r.type === 'triggered').length || 0,
+    };
+
+    const { data: voteCounts } = await supabase
+      .from('post_votes')
+      .select('vote_type')
+      .eq('target_id', postData.id)
+      .eq('target_type', 'post');
+
+    const voteStats = {
+      total_upvotes: voteCounts?.filter(v => v.vote_type === 'upvote').length || 0,
+      total_downvotes: voteCounts?.filter(v => v.vote_type === 'downvote').length || 0,
+    };
+
+    const { data: echoData } = await supabase
+      .from('post_echos')
+      .select('id')
+      .eq('post_id', postData.id);
+
+    const completePostData = {
+      ...postData,
+      user_reaction: userReaction,
+      user_vote: userVote,
+      user_saved: userSaved,
+      saved_id: savedId,
+      chamber: chamberInfo,
+      comments_count: totalCommentsCount,
+      comments: commentsWithReplies,
+      ...reactionStats,
+      ...voteStats,
+      total_echos: echoData?.length || 0,
+      total_upvotes: voteStats.total_upvotes,
+      total_downvotes: voteStats.total_downvotes,
+      net_score: voteStats.total_upvotes - voteStats.total_downvotes
+    };
+
+    res.status(200).json({
+      success: true,
+      data: completePostData
+    });
+  } catch (error: any) {
+    console.error('Error fetching single post:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error fetching post'
+    });
+  }
+};
+
 export const addComment = async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.user?.id!;
@@ -1415,6 +1674,9 @@ export const updateVote = async (
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
+  const UPVOTE_WEIGHT = 20;
+  const DOWNVOTE_WEIGHT = 1;
+
   try {
     const { data: existingVote, error: fetchError } = await supabase
       .from('post_votes')
@@ -1431,7 +1693,7 @@ export const updateVote = async (
     const tableName = targetType === 'post' ? 'posts' : 'threads';
     const { data: targetData, error: targetError } = await supabase
       .from(tableName)
-      .select('total_upvotes, total_downvotes, user_id')
+      .select('total_upvotes, total_downvotes')
       .eq('id', targetId)
       .single();
 
@@ -1439,59 +1701,83 @@ export const updateVote = async (
       return res.status(404).json({ error: `${targetType} not found!` });
     }
 
-    const currentUpvotes = targetData.total_upvotes || 0;
-    const currentDownvotes = targetData.total_downvotes || 0;
+    const currentUpvotes = Math.max(0, targetData.total_upvotes || 0);
+    const currentDownvotes = Math.max(0, targetData.total_downvotes || 0);
 
     let newUpvotes = currentUpvotes;
     let newDownvotes = currentDownvotes;
+    let user_vote: 'upvote' | 'downvote' | null = voteType;
 
     if (existingVote) {
       if (existingVote.vote_type === voteType) {
+        // removing same vote
         const { error: deleteError } = await supabase
           .from('post_votes')
           .delete()
           .eq('id', existingVote.id);
-
         if (deleteError) return res.status(500).json({ error: deleteError.message });
 
         if (voteType === 'upvote') {
-          newUpvotes = Math.max(0, currentUpvotes - 20);
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
         } else {
-          newDownvotes = Math.max(0, currentDownvotes - 5);
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
+
+        user_vote = null;
       } else {
+        // switching votes
         const { error: updateError } = await supabase
           .from('post_votes')
           .update({ vote_type: voteType, updated_at: new Date().toISOString() })
           .eq('id', existingVote.id);
-
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         if (existingVote.vote_type === 'upvote') {
-          newUpvotes = Math.max(0, currentUpvotes - 20);
-          newDownvotes = currentDownvotes + 5;
+          // from upvote → downvote
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT; // Downvotes can increase freely
         } else {
-          newUpvotes = currentUpvotes + 20;
-          newDownvotes = Math.max(0, currentDownvotes - 5);
+          // from downvote → upvote
+          newUpvotes = currentUpvotes + UPVOTE_WEIGHT; // Upvotes can increase freely
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
       }
     } else {
+      // new vote
+      // Prevent downvote if both counts are already at zero
+      if (voteType === 'downvote' && currentUpvotes === 0 && currentDownvotes === 0) {
+        return res.status(400).json({ 
+          error: 'Cannot downvote when score is already at zero' 
+        });
+      }
+
       const { error: insertError } = await supabase
         .from('post_votes')
-        .insert([{ 
-          user_id, 
-          target_id: targetId, 
-          target_type: targetType, 
-          vote_type: voteType 
+        .insert([{
+          user_id,
+          target_id: targetId,
+          target_type: targetType,
+          vote_type: voteType
         }]);
-
       if (insertError) return res.status(500).json({ error: insertError.message });
 
       if (voteType === 'upvote') {
-        newUpvotes = currentUpvotes + 20;
+        newUpvotes = currentUpvotes + UPVOTE_WEIGHT; // Upvotes can increase freely
       } else {
-        newDownvotes = currentDownvotes + 5;
+        newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT; // Downvotes can increase freely
       }
+    }
+
+    // Final protection: ensure values never go below zero
+    newUpvotes = Math.max(0, newUpvotes);
+    newDownvotes = Math.max(0, newDownvotes);
+
+    // Additional protection: if both are zero, prevent downvote from having any effect
+    const netScore = newUpvotes - newDownvotes;
+    if (netScore < 0) {
+      // Reset to zero state if net score would be negative
+      newUpvotes = 0;
+      newDownvotes = 0;
     }
 
     const { error: updateTargetError } = await supabase
@@ -1502,18 +1788,15 @@ export const updateVote = async (
         updated_at: new Date().toISOString()
       })
       .eq('id', targetId);
-
     if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
-
-    const netScore = newUpvotes - newDownvotes;
 
     return res.status(200).json({
       message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
       data: {
         total_upvotes: newUpvotes,
         total_downvotes: newDownvotes,
-        net_score: netScore,
-        user_vote: existingVote?.vote_type === voteType ? null : voteType
+        net_score: Math.max(0, newUpvotes - newDownvotes), // Ensure net score is never negative
+        user_vote: netScore < 0 ? null : user_vote // Reset user_vote if we had to correct the values
       }
     });
 
