@@ -270,11 +270,7 @@ const { data: actorProfile, error: actorError } = await supabase
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-<<<<<<< HEAD
-        message: `**@${  actorProfile?.first_name    } ${ actorProfile?.last_name}** reacted with _${getReactionDisplayName(type)}_ on your post. +${soulpoints} soulpoints added!`,
-=======
         message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
->>>>>>> 1789d017350f0d12d05676f8ed07b5c1ac8ab587
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,

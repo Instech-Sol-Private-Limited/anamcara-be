@@ -1,67 +1,69 @@
 import express from 'express';
 
 import {
-    createDigitalAsset,
-    getProductsByUser,
-    getApprovedProducts,
-    getAllProductsForAdmin,
-    getProductDetails,
-    updateProduct,
-    deleteProduct,
-    processPurchase,
-    getMyLibraryProducts,
-    initiateResale,
-    completeResale,
-    getProductReviews,
-    getUserReviews,
-    createReview,
-    updateReview,
-    deleteReview,
-    voteOnReview,
-    createBoost,
-    getActiveBoosts,
-    getUserBoosts,
-    getActiveFeaturedProducts
-  } from '../controllers/products.controller';
+  createDigitalAsset,
+  getProductsByUser,
+  getApprovedProducts,
+  getAllProductsForAdmin,
+  getProductDetails,
+  updateProduct,
+  deleteProduct,
+  processPurchase,
+  getMyLibraryProducts,
+  initiateResale,
+  completeResale,
+  getProductReviews,
+  getUserReviews,
+  createReview,
+  updateReview,
+  deleteReview,
+  voteOnReview,
+  createBoost,
+  getActiveBoosts,
+  getUserBoosts,
+  getActiveFeaturedProducts
+} from '../controllers/products.controller';
 import { rateLimitMiddleware } from '../middleware/ratelimit.middleware';
+import { authMiddleware } from '../middleware/auth.middleware';
 const router = express.Router();
 
-router.post('/create-asset', createDigitalAsset);
+router.post('/create-asset', authMiddleware, createDigitalAsset);
 
 router.get('/marketplace', getApprovedProducts);
 
 router.get('/get-asset-details/:id', getProductDetails);
 
-router.get('/get-user-assets/:userId', getProductsByUser);
+router.get('/get-user-assets/:userId', authMiddleware, getProductsByUser);
 
-router.put('/update-asset/:id', updateProduct);
+router.put('/update-asset/:id', authMiddleware, updateProduct);
 
-router.get('/admin/all', getAllProductsForAdmin);
+router.get('/admin/all', authMiddleware, getAllProductsForAdmin);
 
-router.put('/admin/update/:id', updateProduct);
+router.put('/admin/update/:id', authMiddleware, updateProduct);
 
-router.delete('/delete-asset/:id', deleteProduct);
+router.delete('/delete-asset/:id', authMiddleware, deleteProduct);
 
 
 // -------------- Product purchase Route --------------
-router.post('/purchase', processPurchase);
+router.post('/purchase', authMiddleware, processPurchase);
 
-router.get('/my-library', getMyLibraryProducts);
+router.get('/my-library', authMiddleware, getMyLibraryProducts);
 
-router.post('/resale/initiate', initiateResale);
+router.post('/resale/initiate', authMiddleware, initiateResale);
 
-router.post('/resale/complete', completeResale);
+router.post('/resale/complete', authMiddleware, completeResale);
 
 
 
 // -------------- Product review and rating Route --------------
 router.get('/get-product-reviews/:productId', getProductReviews);
 
-router.get('/get-user-reviews', getUserReviews);
+router.get('/get-user-reviews', authMiddleware, getUserReviews);
 
 
 router.post(
   '/create-review/:productId/review',
+  authMiddleware,
   rateLimitMiddleware({
     windowMs: 15 * 60 * 1000,
     max: 5,
@@ -73,6 +75,7 @@ router.post(
 
 router.put(
   '/update-review/:reviewId',
+  authMiddleware,
   rateLimitMiddleware({
     windowMs: 15 * 60 * 1000,
     max: 10,
@@ -84,6 +87,7 @@ router.put(
 
 router.delete(
   '/delete-review/:reviewId',
+  authMiddleware,
   rateLimitMiddleware({
     windowMs: 15 * 60 * 1000,
     max: 5,
@@ -95,6 +99,7 @@ router.delete(
 
 router.post(
   '/review/:reviewId/vote',
+  authMiddleware,
   rateLimitMiddleware({
     windowMs: 15 * 60 * 1000,
     max: 20,
@@ -106,14 +111,13 @@ router.post(
 
 
 // -------------- Product boost and promotion Route --------------
-router.post('/boost/create', createBoost);
+router.post('/boost/create', authMiddleware, createBoost);
 
 router.get('/get-featured-products', getActiveFeaturedProducts);
 
 // admin route
-router.get('/boost/active/:productId', getActiveBoosts);
+router.get('/boost/active/:productId', authMiddleware, getActiveBoosts);
 
-router.get('/boost/user-boosts', getUserBoosts);
+router.get('/boost/user-boosts', authMiddleware, getUserBoosts);
 
 export default router;
-

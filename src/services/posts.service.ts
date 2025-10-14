@@ -269,7 +269,6 @@ export const notifyChamberMembers = async (chamberId: string, postId: string, au
             });
 
             await Promise.all(notificationPromises);
-            console.log(`Notified ${members.length} chamber members about new post`);
         }
     } catch (error) {
         console.error('Error notifying chamber members:', error);

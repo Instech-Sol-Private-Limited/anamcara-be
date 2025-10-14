@@ -114,15 +114,6 @@ export const processsuccess = async (req: Request, res: Response) => {
     const convertedAmount = parseFloat(metadata['convertedAmount'] || '0');
     const conversionRate = parseFloat(metadata['conversionRate'] || '1');
 
-    console.log('💰 Transaction details:', {
-      userId,
-      fromCurrency,
-      toCurrency,
-      originalAmount,
-      convertedAmount,
-      conversionRate
-    });
-
     const { data: existingTransaction, error: checkError } = await supabase
       .from('exchange_transactions')
       .select('*')
@@ -229,8 +220,6 @@ export const processsuccess = async (req: Request, res: Response) => {
 
         if (historyError) {
           console.error('❌ Error adding AnamCoins history:', historyError);
-        } else {
-          console.log('✅ AnamCoins history added:', historyRecord);
         }
 
       } catch (anamCoinsError) {
@@ -388,8 +377,6 @@ export const sessionuserid = async (req: Request, res: Response) => {
   try {
     const sessionId = req.params.id;
 
-    console.log('🔄 Retrieving session:', sessionId);
-
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ['payment_intent', 'customer']
     });
@@ -407,12 +394,6 @@ export const sessionuserid = async (req: Request, res: Response) => {
       success_url: session.success_url,
       cancel_url: session.cancel_url
     };
-
-    console.log("✅ Session retrieved:", {
-      sessionId,
-      paymentStatus: session.payment_status,
-      metadata: session.metadata
-    });
 
     res.json(sessionDetails);
   } catch (error: any) {

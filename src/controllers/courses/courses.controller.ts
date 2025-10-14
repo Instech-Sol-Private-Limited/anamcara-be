@@ -31,9 +31,6 @@ export const getAllCourses = async (req: Request, res: Response): Promise<void> 
       featured
     } = req.query;
 
-    console.log(req.query);
-
-    // For rating and popular sorts, we need to fetch all data first
     const needsClientSorting = sort === 'rating' || sort === 'popular';
 
     let query = supabase

@@ -11,10 +11,8 @@ export const gameService = {
       difficulty?: 'easy' | 'medium' | 'hard';
     };
   }) {
-    console.log('🎮 Creating chess invitation with data:', data);
     
     const roomId = `chess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    console.log('🏠 Generated room ID:', roomId);
     
     const invitationData = {
       room_id: roomId,
@@ -27,7 +25,6 @@ export const gameService = {
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     };
 
-    console.log('📋 Invitation data to insert:', invitationData);
 
     // Create invitation
     const { data: invitation, error: inviteError } = await supabase
@@ -45,7 +42,6 @@ export const gameService = {
       throw inviteError;
     }
 
-    console.log('✅ Invitation created successfully:', invitation);
 
     // Create room directly
     const gameRoomData = {
@@ -59,7 +55,6 @@ export const gameService = {
       created_at: new Date().toISOString()
     };
 
-    console.log('🏠 Creating game room:', gameRoomData);
 
     const { data: gameRoom, error: roomError } = await supabase
       .from('chess_games')
@@ -69,9 +64,6 @@ export const gameService = {
 
     if (roomError) {
       console.error('❌ Error creating game room:', roomError);
-      console.log('⚠️ Continuing without room creation...');
-    } else {
-      console.log('✅ Game room created successfully:', gameRoom);
     }
 
     return {
@@ -89,7 +81,6 @@ export const gameService = {
   },
 
   async acceptChessInvitation(inviteId: string, userId: string) {
-    console.log('✅ Accepting chess invitation:', { inviteId, userId });
 
     // First, get the invitation to check if invitee_id is null (public invitation)
     const { data: invitationData, error: getInviteError } = await supabase
@@ -103,17 +94,10 @@ export const gameService = {
       throw new Error('Invitation not found');
     }
 
-    console.log('📋 Found invitation:', {
-      id: invitationData.id,
-      invitee_id: invitationData.invitee_id,
-      status: invitationData.status
-    });
-
     let invitation;
 
     // Check if this is a public invitation (null invitee_id)
     if (invitationData.invitee_id === null) {
-      console.log('🌐 Public invitation - allowing any user to join');
       
       // Update invitation with the joining user's ID
       const { data: updatedInvitation, error: updateError } = await supabase
@@ -132,10 +116,8 @@ export const gameService = {
       }
 
       invitation = updatedInvitation;
-      console.log('✅ Public invitation updated with joining user:', userId);
       
     } else {
-      console.log('👥 Regular invitation - checking if user is the intended invitee');
       
       // Regular invitation - only the specific invitee can accept
       const { data: updatedInvitation, error: updateError } = await supabase
@@ -152,7 +134,6 @@ export const gameService = {
       }
 
       invitation = updatedInvitation;
-      console.log('✅ Regular invitation accepted by intended user:', userId);
     }
 
     // Update existing room instead of creating new one
@@ -175,8 +156,6 @@ export const gameService = {
       console.error('❌ Error updating game room:', gameError);
       throw gameError;
     }
-
-    console.log('✅ Game room updated successfully:', gameRoom);
 
     return {
       id: gameRoom.id,
@@ -401,19 +380,11 @@ export const gameService = {
       })
       .eq('user_id', result.loser);
 
-    // Log rating changes
-    console.log(`🏆 ELO Rating Update:`);
-    console.log(`Winner ${result.winner}: ${winnerRating.rating} → ${eloUpdate.newWinnerRating} (+${eloUpdate.winnerChange})`);
-    console.log(`Loser ${result.loser}: ${loserRating.rating} → ${eloUpdate.newLoserRating} (${eloUpdate.loserChange})`);
-
-    // Award soul points using the provided user IDs directly
-    // Award 300 soul points to winner
     try {
       await supabase.rpc('increment_soulpoints', {
         p_user_id: result.winner,
         p_points: 300
       });
-      console.log(`✅ Awarded 300 soul points to winner ${result.winner}`);
     } catch (error) {
       console.error('❌ Error awarding winner soul points:', error);
     }
@@ -424,7 +395,6 @@ export const gameService = {
         p_user_id: result.loser,
         p_points: 100
       });
-      console.log(`✅ Awarded 100 soul points to loser ${result.loser}`);
     } catch (error) {
       console.error('❌ Error awarding loser soul points:', error);
     }
@@ -582,10 +552,8 @@ export const gameService = {
       difficulty?: 'easy' | 'medium' | 'hard';
     };
   }) {
-    console.log('🎮 Creating public chess invitation with data:', data);
     
     const roomId = `public_chess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    console.log('🏠 Generated public room ID:', roomId);
     
     const invitationData = {
       room_id: roomId,
@@ -599,9 +567,7 @@ export const gameService = {
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     };
 
-    console.log('📋 Public invitation data to insert:', invitationData);
 
-    // Create public invitation
     const { data: invitation, error: inviteError } = await supabase
       .from('chess_invitations')
       .insert([invitationData])
@@ -616,8 +582,6 @@ export const gameService = {
       throw inviteError;
     }
 
-    console.log('✅ Public invitation created successfully:', invitation);
-
     // Create room with WAITING status (not active)
     const gameRoomData = {
       room_id: roomId,
@@ -631,7 +595,6 @@ export const gameService = {
       created_at: new Date().toISOString()
     };
 
-    console.log('🏠 Creating public game room (waiting for player):', gameRoomData);
 
     const { data: gameRoom, error: roomError } = await supabase
       .from('chess_games')
@@ -643,8 +606,6 @@ export const gameService = {
       console.error('❌ Error creating public game room:', roomError);
       throw roomError;
     }
-
-    console.log('✅ Public game room created successfully (waiting for player):', gameRoom);
 
     return {
       id: invitation.id,
@@ -661,7 +622,6 @@ export const gameService = {
 
   // NEW: Join public chess invitation
   async joinPublicChessInvitation(roomId: string, userId: string) {
-    console.log('🎮 Joining public chess invitation:', { roomId, userId });
 
     // Find the public invitation
     const { data: invitation, error: inviteError } = await supabase
@@ -682,7 +642,6 @@ export const gameService = {
     //   throw new Error('Cannot join your own invitation');
     // }
 
-    // console.log('✅ Found public invitation:', invitation);
 
     // Update invitation status to accepted
     const { error: updateInviteError } = await supabase
@@ -719,7 +678,6 @@ export const gameService = {
       throw gameError;
     }
 
-    console.log('✅ Public game room updated successfully:', gameRoom);
 
     return {
       id: gameRoom.id,
@@ -749,7 +707,6 @@ export const gameService = {
 
   // NEW: Get available public chess invitations
   async getAvailablePublicInvitations(limit: number = 10) {
-    console.log('🔍 Fetching available public chess invitations');
 
     const { data: invitations, error } = await supabase
       .from('chess_invitations')
@@ -767,7 +724,6 @@ export const gameService = {
       throw error;
     }
 
-    console.log(`✅ Found ${invitations?.length || 0} public invitations`);
 
     return invitations?.map(invitation => ({
       id: invitation.id,
@@ -785,7 +741,6 @@ export const gameService = {
 
   // NEW: Clean up expired public invitations
   async cleanupExpiredPublicInvitations() {
-    console.log('🧹 Cleaning up expired public invitations');
 
     const { data: expiredInvitations, error: fetchError } = await supabase
       .from('chess_invitations')
@@ -800,13 +755,9 @@ export const gameService = {
     }
 
     if (!expiredInvitations || expiredInvitations.length === 0) {
-      console.log('✅ No expired public invitations found');
       return;
     }
 
-    console.log(`🗑️ Found ${expiredInvitations.length} expired invitations to clean up`);
-
-    // Delete expired invitations
     const { error: deleteInviteError } = await supabase
       .from('chess_invitations')
       .delete()
@@ -827,7 +778,5 @@ export const gameService = {
     if (deleteRoomError) {
       console.error('❌ Error deleting expired game rooms:', deleteRoomError);
     }
-
-    console.log(`✅ Cleaned up ${expiredInvitations.length} expired public invitations`);
   }
 };

@@ -14,7 +14,5 @@ export async function ensureThreadCategoryTableExists() {
 
   if (error) {
     console.error('Failed to create "threadcategory" table:', error.message);
-  } else {
-    console.log('"threadcategory" table exists or was created successfully.');
   }
 }

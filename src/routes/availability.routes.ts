@@ -1,5 +1,4 @@
 import express from 'express';
-
 import { bookingASlot, getAvailability, getBookedSlots, getUserSlots, updateAvailability, updateBookingStatus } from '../controllers/availableslots.controller';
 
 const router = express.Router();

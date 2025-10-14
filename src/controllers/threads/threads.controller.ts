@@ -708,60 +708,7 @@ const updateReaction = async (
       return res.status(200).json({ message: `Reaction updated to ${type}!` });
     }
 
-<<<<<<< HEAD
-    const prevField = fieldMap[existing.type as ReactionType];
-    const currentField = fieldMap[type];
-
-    updates[prevField] = Math.max(0, updates[prevField] - 1);
-    updates[currentField] += 1;
-
-    const { error: updateReactionError } = await supabase
-      .from('thread_reactions')
-      .update({ type, updated_by: user_id })
-      .eq('id', existing.id);
-
-    if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
-
-    const { error: updateThreadError } = await supabase
-      .from('threads')
-      .update({
-        [prevField]: updates[prevField],
-        [currentField]: updates[currentField],
-      })
-      .eq('id', thread_id);
-
-    if (updateThreadError) return res.status(500).json({ error: updateThreadError.message });
-const { data: actorProfile, error: actorError } = await supabase
-  .from('profiles')
-  .select('first_name, last_name')
-  .eq('id', user_id)  // this is the user who reacted
-  .single();
-    if (shouldSendNotification && authorProfile) {
-      await sendNotification({
-        recipientEmail: authorProfile.email,
-        recipientUserId: threadData.author_id,
-        actorUserId: user_id,
-        threadId: thread_id,
-        message: `${actorProfile?.first_name} ${ actorProfile?.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.split(' ').length > 3
-          ? threadData.title.split(' ').slice(0, 3).join(' ') + '...'
-          : threadData.title
-          }**`,
-        type: 'reaction_updated',
-        metadata: {
-          previous_reaction_type: existing.type,
-          new_reaction_type: type,
-          thread_id: thread_id,
-          thread_title: threadData.title,
-          actor_user_id: user_id
-        }
-      });
-    }
-
-    return res.status(200).json({ message: `Reaction updated to ${type}!` });
-  } else {
-=======
     // CASE B: No existing reaction -> insert new reaction
->>>>>>> 1789d017350f0d12d05676f8ed07b5c1ac8ab587
     const field = fieldMap[type];
     updates[field] = updates[field] + 1;
 

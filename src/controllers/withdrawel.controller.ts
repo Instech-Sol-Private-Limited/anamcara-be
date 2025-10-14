@@ -178,7 +178,6 @@
 //       console.error('Error adding withdrawal to history:', historyError);
 //     }
 
-//     console.log(`✅ Withdrawal processed for user ${userId}: -${acAmount} AC → $${netAmountUSD.toFixed(2)} USD`);
 
 //     res.json({
 //       success: true,

@@ -385,7 +385,6 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
         }
 
         const bookingData = req.body;
-        console.log('Booking request data:', bookingData);
 
         // Validate request data
         const validation = validateBookingRequest(bookingData);
@@ -463,15 +462,12 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
         }
 
         // Create Zoom meeting
-        console.log('Creating Zoom meeting...');
         const zoomMeeting = await createZoomMeeting({
             topic: `${title} - 1:1 Consultation`,
             startTime: meetingStartTime,
             duration: duration,
             timezone: 'UTC'
         });
-
-        console.log('Zoom meeting created successfully:', zoomMeeting.id);
 
         // Store the meeting in database
         const meetingRecord = {
@@ -519,8 +515,6 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
 
             throw new Error(`Failed to save meeting: ${saveError.message}`);
         }
-
-        console.log('Meeting saved successfully:', savedMeeting.id);
 
         // Return success response
         res.status(201).json({

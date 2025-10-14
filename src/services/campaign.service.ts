@@ -14,7 +14,6 @@ const transferProductToWinner = async (campaignId: string): Promise<void> => {
         }
 
         if (!campaign.current_winner_id || !campaign.offer_product_id) {
-            console.log('No winner or product to transfer for campaign:', campaignId);
             return;
         }
 
@@ -42,8 +41,6 @@ const transferProductToWinner = async (campaignId: string): Promise<void> => {
             console.error('Failed to add product to user library:', libraryError);
             return;
         }
-
-        console.log(`Product ${product.title} transferred to winner ${campaign.current_winner_id} for campaign ${campaignId}`);
 
     } catch (error: any) {
         console.error('Error in transferProductToWinner:', error);

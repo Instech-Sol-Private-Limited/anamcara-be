@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { soulStoriesServices } from "../../services/soulStories.services"; 
+import { soulStoriesServices } from "../../services/soulStories.services";
 import 'dotenv/config';
 import multer from 'multer';
 import path from 'path';
@@ -33,9 +33,9 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
 
     // Basic validation
     if (!title?.trim() || !category?.trim() || !description?.trim() || !story_type?.trim()) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Missing required fields: title, category, description, story_type' 
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: title, category, description, story_type'
       });
       return;
     }
@@ -43,7 +43,7 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
     // Determine content structure based on story_type and episodes
     const content_structure = story_type === 'episodes' ? 'episodes' : 'single_asset';
 
-   
+
     if (content_structure === 'single_asset') {
       if (!asset_url?.trim() || !asset_type?.trim()) {
         res.status(400).json({
@@ -64,7 +64,7 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       if (episodes && episodes.length > 0) {
         // Validate each episode only if episodes are provided
         for (const [index, episode] of episodes.entries()) {
-          if ( !episode.video_url?.trim()) {
+          if (!episode.video_url?.trim()) {
             res.status(400).json({
               success: false,
               message: `Episode ${index + 1} is missing required fields: title, video_url`
@@ -124,16 +124,15 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       ...(co_authors && co_authors.length > 0 && { co_authors })
     };
 
-    console.log(storyData, "storyData");
     const story = await soulStoriesServices.createStory(storyData, episodes, userId);
-    res.status(201).json({ 
+    res.status(201).json({
       success: true,
       message: 'Story created successfully',
-      story 
+      story
     });
   } catch (error) {
     console.error('Error creating story:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Internal server error',
       message: 'Failed to create story'
@@ -151,7 +150,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
 
     // Use service instead of direct Supabase call
     const analytics = await soulStoriesServices.getAnalytics(userId);
-    
+
     res.json({
       success: true,
       data: analytics
@@ -159,7 +158,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
 
   } catch (error) {
     console.error('Error fetching analytics:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Internal server error',
       message: 'Failed to fetch analytics'
@@ -176,9 +175,9 @@ export const getStories = async (req: Request, res: Response) => {
     }
 
     const { type } = req.params; // 'all', 'animation', 'book', 'video-drama', etc.
-    const { 
-      page ,       // page number
-      limit ,     // items per page
+    const {
+      page,       // page number
+      limit,     // items per page
       sort = 'newest' // sorting: 'newest', 'oldest', 'popular', 'rating'
     } = req.query;
 
@@ -196,7 +195,7 @@ export const getStories = async (req: Request, res: Response) => {
 
   } catch (error) {
     console.error('Error fetching stories:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Internal server error',
       message: 'Failed to fetch stories'
@@ -213,7 +212,7 @@ export const deleteeStory = async (req: Request, res: Response) => {
     }
 
     const { story_id } = req.params; // Changed from req.body to req.params
-    
+
     if (!story_id) {
       res.status(400).json({
         success: false,
@@ -223,7 +222,7 @@ export const deleteeStory = async (req: Request, res: Response) => {
     }
 
     await soulStoriesServices.deleteStory(userId, story_id);
-    
+
     res.status(200).json({
       success: true,
       message: 'Story deleted successfully'
@@ -247,7 +246,6 @@ export const purchaseContent = async (req: Request, res: Response): Promise<void
     }
 
     const { storyId, contentData } = req.body;
-    console.log('Controller received:', { storyId, contentData }); // Add this log
 
     if (!storyId || !contentData || !Array.isArray(contentData)) {
       res.status(400).json({
@@ -267,8 +265,8 @@ export const purchaseContent = async (req: Request, res: Response): Promise<void
 
     // Validate each content item
     for (const item of contentData) {
-      if (!item.type || !['page', 'episode'].includes(item.type) || 
-          item.identifier === undefined || item.coins <= 0) {
+      if (!item.type || !['page', 'episode'].includes(item.type) ||
+        item.identifier === undefined || item.coins <= 0) {
         res.status(400).json({
           success: false,
           message: 'Each content item must have: type (page/episode), identifier, coins > 0'
@@ -299,7 +297,6 @@ export const getStoryAccess = async (req: Request, res: Response): Promise<void>
     }
 
     const { storyId } = req.params;
-    console.log('Controller received storyId:', storyId); // Add this log
 
     if (!storyId) {
       res.status(400).json({
@@ -354,8 +351,7 @@ export const getUserRevenue = async (req: Request, res: Response): Promise<void>
 export const searchAllContent = async (req: Request, res: Response) => {
   try {
     const { query, category } = req.body;
-    console.log('Received query:', query, 'category:', category);
-    
+
     const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ error: "unauthorized" });
@@ -363,9 +359,9 @@ export const searchAllContent = async (req: Request, res: Response) => {
     }
 
     if (!query) {
-      res.status(400).json({ 
+      res.status(400).json({
         success: false,
-        message: 'Query is required' 
+        message: 'Query is required'
       });
       return;
     }
@@ -374,14 +370,14 @@ export const searchAllContent = async (req: Request, res: Response) => {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
 
     const searchResults = await soulStoriesServices.searchAllContent(
-      query as string, 
-      category as string, 
+      query as string,
+      category as string,
       userId as string,
       isUUID ? query : undefined // ✅ Pass as storyId if it's a UUID
     );
-    
+
     res.status(200).json(searchResults);
-    
+
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({
@@ -403,15 +399,15 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
     const { soul_story_id, content, imgs = [] } = req.body;
 
     if (!content?.trim() || !soul_story_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Missing required fields: content, soul_story_id' 
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: content, soul_story_id'
       });
       return;
     }
 
     const result = await soulStoriesServices.createComment(userId, soul_story_id, content, imgs);
-    
+
     if (result.success) {
       res.status(201).json(result);
     } else {
@@ -434,20 +430,20 @@ export const getComments = async (req: Request, res: Response): Promise<void> =>
     const userId = req.user?.id;
 
     if (!soul_story_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'soul_story_id is required' 
+      res.status(400).json({
+        success: false,
+        message: 'soul_story_id is required'
       });
       return;
     }
 
     const result = await soulStoriesServices.getComments(
-      soul_story_id as string, 
-      Number(page), 
-      Number(limit), 
+      soul_story_id as string,
+      Number(page),
+      Number(limit),
       userId
     );
-    
+
     res.status(200).json(result);
 
   } catch (error) {
@@ -472,15 +468,15 @@ export const updateComment = async (req: Request, res: Response): Promise<void> 
     const { content, imgs } = req.body;
 
     if (!content?.trim()) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Content is required' 
+      res.status(400).json({
+        success: false,
+        message: 'Content is required'
       });
       return;
     }
 
     const result = await soulStoriesServices.updateComment(userId, comment_id, content, imgs);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {
@@ -508,7 +504,7 @@ export const deleteComment = async (req: Request, res: Response): Promise<void> 
     const { comment_id } = req.params;
 
     const result = await soulStoriesServices.deleteComment(userId, comment_id);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {
@@ -536,36 +532,32 @@ export const updateCommentReaction = async (req: Request, res: Response): Promis
     const { comment_id } = req.params;
     const { type } = req.body;
 
-    console.log('updateCommentReaction called with:', { userId, comment_id, type, body: req.body });
-
     if (!type) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Reaction type is required' 
+      res.status(400).json({
+        success: false,
+        message: 'Reaction type is required'
       });
       return;
     }
 
     if (!['like', 'dislike', 'insightful', 'heart', 'hug', 'soul'].includes(type)) {
-      res.status(400).json({ 
-        success: false, 
-        message: `Invalid reaction type: ${type}. Must be one of: like, dislike, insightful, heart, hug, soul` 
+      res.status(400).json({
+        success: false,
+        message: `Invalid reaction type: ${type}. Must be one of: like, dislike, insightful, heart, hug, soul`
       });
       return;
     }
 
     if (!comment_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Comment ID is required' 
+      res.status(400).json({
+        success: false,
+        message: 'Comment ID is required'
       });
       return;
     }
 
     const result = await soulStoriesServices.updateCommentReaction(userId, comment_id, type);
-    
-    console.log('Service result:', result);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {
@@ -594,19 +586,16 @@ export const updateStoryReaction = async (req: Request, res: Response): Promise<
     const { type } = req.body;
 
     if (!['like', 'dislike', 'insightful', 'heart', 'hug', 'soul'].includes(type)) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Invalid reaction type' 
+      res.status(400).json({
+        success: false,
+        message: 'Invalid reaction type'
       });
       return;
     }
 
     const result = await soulStoriesServices.updateStoryReaction(userId, story_id, type);
-    
-    console.log('Service result:', result);
-    
+
     if (result.success && result.data) {
-      // TypeScript now knows both success and data exist
       res.status(200).json({
         success: true,
         message: result.message,
@@ -644,15 +633,15 @@ export const createReply = async (req: Request, res: Response): Promise<void> =>
     const { comment_id, content, imgs = [] } = req.body;
 
     if (!content?.trim() || !comment_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Missing required fields: content, comment_id' 
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: content, comment_id'
       });
       return;
     }
 
     const result = await soulStoriesServices.createReply(userId, comment_id, content, imgs);
-    
+
     if (result.success) {
       res.status(201).json(result);
     } else {
@@ -675,15 +664,15 @@ export const getStoryWithReactions = async (req: Request, res: Response): Promis
     const userId = req.user?.id;
 
     if (!story_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Story ID is required' 
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
       });
       return;
     }
 
     const result = await soulStoriesServices.getStoryWithReactions(story_id, userId);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {
@@ -705,15 +694,15 @@ export const getCommentReactions = async (req: Request, res: Response): Promise<
     const { comment_id } = req.params;
     const userId = req.user?.id;
     if (!comment_id) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Comment ID is required' 
+      res.status(400).json({
+        success: false,
+        message: 'Comment ID is required'
       });
       return;
     }
 
     const result = await soulStoriesServices.getCommentReactions(comment_id, userId);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {
@@ -748,7 +737,6 @@ export const getTrendingStories = async (req: Request, res: Response): Promise<v
 
     res.status(200).json(result);
   } catch (error) {
-    console.log('Error in getTrendingStories controller:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -764,9 +752,9 @@ export const boostSoulStory = async (req: Request, res: Response): Promise<void>
     const { story_id, boost_type } = req.body;
 
     if (!story_id || !boost_type || !['weekly', 'monthly'].includes(boost_type)) {
-      res.status(400).json({ 
-        success: false, 
-        message: 'Missing required fields: story_id, boost_type (weekly/monthly)' 
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: story_id, boost_type (weekly/monthly)'
       });
       return;
     }
@@ -780,7 +768,6 @@ export const boostSoulStory = async (req: Request, res: Response): Promise<void>
 
     res.status(200).json(result);
   } catch (error) {
-    console.log('Error in boostSoulStory controller:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -802,7 +789,6 @@ export const getUserSoulStoryBoosts = async (req: Request, res: Response): Promi
 
     res.status(200).json(result);
   } catch (error) {
-    console.log('Error in getUserSoulStoryBoosts controller:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -810,7 +796,7 @@ export const getUserSoulStoryBoosts = async (req: Request, res: Response): Promi
 export const getProductDetails = async (req: Request, res: Response): Promise<void> => {
   try {
     const { storyId } = req.params;
-    
+
     if (!storyId) {
       res.status(400).json({
         success: false,
@@ -820,7 +806,7 @@ export const getProductDetails = async (req: Request, res: Response): Promise<vo
     }
 
     const result = await soulStoriesServices.getProductDetails(storyId);
-    
+
     if (!result.success) {
       res.status(400).json(result);
       return;
@@ -829,8 +815,8 @@ export const getProductDetails = async (req: Request, res: Response): Promise<vo
     res.status(200).json(result);
   } catch (error) {
     console.error('Error in getProductDetails controller:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: 'Internal server error',
       message: 'Failed to fetch product details'
     });
@@ -840,7 +826,7 @@ export const getProductDetails = async (req: Request, res: Response): Promise<vo
 export const getAllUsersStoriesData = async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await soulStoriesServices.getAllUsersStoriesData();
-    
+
     if (!result.success) {
       res.status(400).json(result);
       return;
@@ -849,8 +835,8 @@ export const getAllUsersStoriesData = async (req: Request, res: Response): Promi
     res.status(200).json(result);
   } catch (error) {
     console.error('Error in getAllUsersStoriesData controller:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: 'Internal server error',
       message: 'Failed to fetch users stories data'
     });
@@ -876,13 +862,13 @@ export const createStoryReport = async (req: Request, res: Response): Promise<vo
     }
 
     const result = await soulStoriesServices.createStoryReport(userId, storyId, reportContent, reportReason);
-    
+
     if (result.success === false && result.already_reported) {
       // Return 200 for already reported
       res.status(200).json(result);
       return;
     }
-    
+
     if (!result.success) {
       res.status(400).json(result);
       return;
@@ -891,8 +877,8 @@ export const createStoryReport = async (req: Request, res: Response): Promise<vo
     res.status(201).json(result);
   } catch (error) {
     console.error('Error in createStoryReport controller:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: 'Internal server error',
       message: 'Failed to create report'
     });
@@ -902,7 +888,7 @@ export const createStoryReport = async (req: Request, res: Response): Promise<vo
 export const getStoryReports = async (req: Request, res: Response): Promise<void> => {
   try {
     const { storyId } = req.params;
-    
+
     if (!storyId) {
       res.status(400).json({
         success: false,
@@ -912,7 +898,7 @@ export const getStoryReports = async (req: Request, res: Response): Promise<void
     }
 
     const result = await soulStoriesServices.getStoryReports(storyId);
-    
+
     if (!result.success) {
       res.status(400).json(result);
       return;
@@ -921,8 +907,8 @@ export const getStoryReports = async (req: Request, res: Response): Promise<void
     res.status(200).json(result);
   } catch (error) {
     console.error('Error in getStoryReports controller:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: 'Internal server error',
       message: 'Failed to fetch reports'
     });
@@ -932,7 +918,7 @@ export const getStoryReports = async (req: Request, res: Response): Promise<void
 export const getUserFriends = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    
+
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized - User ID not found in token' });
       return;
@@ -951,9 +937,9 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
   try {
     const userId = req.user?.id;
     if (!userId) {
-      res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized" 
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
       });
       return;
     }
@@ -997,7 +983,7 @@ export const generateThumbnailSuggestions = async (req: Request, res: Response):
     }
 
     const suggestions = await soulStoriesServices.generateMultipleSuggestions(
-      content, 
+      content,
       Math.min(suggestionCount, 3)
     );
 
@@ -1036,9 +1022,9 @@ export const generateQuickSuggestion = async (req: Request, res: Response): Prom
   try {
     const userId = req.user?.id;
     if (!userId) {
-      res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized" 
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
       });
       return;
     }
@@ -1117,9 +1103,9 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
     // Title validation (if provided)
     if (title !== undefined) {
       if (!title?.trim()) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Title cannot be empty if provided' 
+        res.status(400).json({
+          success: false,
+          message: 'Title cannot be empty if provided'
         });
         return;
       }
@@ -1129,9 +1115,9 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
     // Description validation (if provided)
     if (description !== undefined) {
       if (!description?.trim()) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Description cannot be empty if provided' 
+        res.status(400).json({
+          success: false,
+          message: 'Description cannot be empty if provided'
         });
         return;
       }
@@ -1146,9 +1132,9 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
     // Category validation (if provided)
     if (category !== undefined) {
       if (!category?.trim()) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Category cannot be empty if provided' 
+        res.status(400).json({
+          success: false,
+          message: 'Category cannot be empty if provided'
         });
         return;
       }
@@ -1158,9 +1144,9 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
     // Story type validation (if provided)
     if (story_type !== undefined) {
       if (!story_type?.trim()) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Story type cannot be empty if provided' 
+        res.status(400).json({
+          success: false,
+          message: 'Story type cannot be empty if provided'
         });
         return;
       }
@@ -1180,7 +1166,7 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
       if (asset_type !== undefined) {
         updateData.asset_type = asset_type;
       }
-      
+
       // Validate asset type if provided
       if (asset_type && !['video', 'document'].includes(asset_type)) {
         res.status(400).json({
@@ -1264,19 +1250,17 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
 
     // Add updated timestamp
     updateData.updated_at = new Date().toISOString();
-
-    console.log(updateData, "updateData (partial update)");
     const result = await soulStoriesServices.updateStory(story_id, updateData, episodes, userId);
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       success: true,
       message: 'Story updated successfully',
-      story: result.story 
+      story: result.story
     });
 
   } catch (error) {
     console.error('Error updating story:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Internal server error',
       message: 'Failed to update story'
@@ -1287,14 +1271,14 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
 export const getKeywordSuggestions = async (req: Request, res: Response): Promise<void> => {
   try {
     const { query } = req.query;
-    
+
     if (!query || typeof query !== 'string' || !query.trim()) {
       res.status(400).json({ suggestions: [] });
       return;
     }
 
     const cleanQuery = query.trim();
-    
+
     if (cleanQuery.length < 1 || cleanQuery.length > 100) {
       res.status(400).json({
         success: false,
@@ -1310,7 +1294,7 @@ export const getKeywordSuggestions = async (req: Request, res: Response): Promis
     };
 
     const response = await fetch(googleSuggestUrl, { headers });
-    
+
     if (!response.ok) {
       res.status(503).json({
         success: false,
@@ -1320,16 +1304,16 @@ export const getKeywordSuggestions = async (req: Request, res: Response): Promis
     }
 
     const data = await response.json();
-    
+
     let suggestions: string[] = [];
     if (data && Array.isArray(data) && data.length >= 2 && Array.isArray(data[1])) {
       suggestions = data[1].slice(0, 10);
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       success: true,
-      suggestions, 
-      query: cleanQuery 
+      suggestions,
+      query: cleanQuery
     });
 
   } catch (error) {
@@ -1345,9 +1329,9 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
   try {
     const userId = req.user?.id;
     if (!userId) {
-      res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized" 
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
       });
       return;
     }
@@ -1390,7 +1374,7 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
 export const checkPdfQuality = async (req: Request, res: Response): Promise<void> => {
   try {
     const { pdfUrl } = req.body;
-    
+
     if (!pdfUrl) {
       res.status(400).json({
         success: false,
@@ -1400,7 +1384,7 @@ export const checkPdfQuality = async (req: Request, res: Response): Promise<void
     }
 
     const qualityCheck = await soulStoriesServices.checkPdfQualityFromBucket(pdfUrl);
-    
+
     if (qualityCheck.success) {
       res.json({
         success: true,
@@ -1437,7 +1421,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: {
     fileSize: 50 * 1024 * 1024
@@ -1446,12 +1430,10 @@ const upload = multer({
 
 export const uploadPdfMiddleware = upload.single('pdf');
 
-export const uploadPdf = async (req: any, res: any): Promise<void> => {  
+export const uploadPdf = async (req: any, res: any): Promise<void> => {
   upload.single('pdf')(req, res, async (err) => {
-    console.log('🔍 Multer callback executed');
-    
+
     if (err) {
-      console.log('❌ Multer error:', err);
       res.status(400).json({
         success: false,
         message: err.message
@@ -1461,7 +1443,6 @@ export const uploadPdf = async (req: any, res: any): Promise<void> => {
 
     try {
       if (!req.file) {
-        console.log('❌ No file found in req.file');
         res.status(400).json({
           success: false,
           message: 'No file uploaded'
@@ -1469,18 +1450,16 @@ export const uploadPdf = async (req: any, res: any): Promise<void> => {
         return;
       }
 
-      console.log('✅ File found:', req.file);
       const filePath = `/uploads/pdfs/${req.file.filename}`;
       const fullFilePath = path.join(__dirname, '../../../uploads/pdfs', req.file.filename);
-      
+
       // Add quality check here
       const qualityCheck = await soulStoriesServices.checkPdfQualityFromBucket(filePath);
-      
+
       // Clean up file BEFORE sending response
       try {
         if (fs.existsSync(fullFilePath)) {
           fs.unlinkSync(fullFilePath);
-          console.log('🗑️ File cleaned up:', req.file.filename);
         }
       } catch (cleanupError) {
         console.error('❌ Error cleaning up file:', cleanupError);
@@ -1500,20 +1479,19 @@ export const uploadPdf = async (req: any, res: any): Promise<void> => {
 
     } catch (error) {
       console.error('❌ Error in upload logic:', error);
-      
+
       // Clean up file even on error
       if (req.file) {
         const fullFilePath = path.join(__dirname, '../../../uploads/pdfs', req.file.filename);
         try {
           if (fs.existsSync(fullFilePath)) {
             fs.unlinkSync(fullFilePath);
-            console.log('🗑️ File cleaned up after error:', req.file.filename);
           }
         } catch (cleanupError) {
           console.error('❌ Error cleaning up file after error:', cleanupError);
         }
       }
-      
+
       res.status(500).json({
         success: false,
         message: 'Failed to upload file'
@@ -1544,7 +1522,7 @@ export const shareStory = async (req: any, res: any): Promise<void> => {
     }
 
     const result = await soulStoriesServices.shareStory(userId, storyId, shareType);
-    
+
     if (result.success) {
       res.json(result);
     } else {
@@ -1564,9 +1542,9 @@ export const purchaseAIToolAccess = async (req: Request, res: Response): Promise
   try {
     const userId = req.user?.id;
     if (!userId) {
-      res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized" 
+      res.status(401).json({
+        success: false,
+        message: "Unauthorized"
       });
       return;
     }
@@ -1574,7 +1552,7 @@ export const purchaseAIToolAccess = async (req: Request, res: Response): Promise
     const { coinsRequired } = req.body;
     const toolType = req.body.toolType || req.body.type;
 
-    if (!toolType || !['title_suggestion','description_suggestion','tags_suggestion','grammar_correction'].includes(toolType)) {
+    if (!toolType || !['title_suggestion', 'description_suggestion', 'tags_suggestion', 'grammar_correction'].includes(toolType)) {
       res.status(400).json({ success: false, message: 'Invalid tool type' });
       return;
     }
@@ -1588,7 +1566,7 @@ export const purchaseAIToolAccess = async (req: Request, res: Response): Promise
     }
 
     const result = await soulStoriesServices.purchaseAIToolAccess(userId, toolType, coinsRequired);
-    
+
     if (result.success) {
       res.status(200).json(result);
     } else {

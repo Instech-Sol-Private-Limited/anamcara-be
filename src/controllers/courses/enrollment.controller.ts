@@ -5,12 +5,12 @@ import Stripe from 'stripe';
 // Initialize Stripe with proper error handling
 const initializeStripe = () => {
   const secretKey = process.env.STRIPE_SECRET_KEY;
-  
+
   if (!secretKey || secretKey === 'sk_test_your_stripe_secret_key_here') {
     console.warn('⚠️  Stripe secret key not provided. Payment features will be disabled.');
     return null;
   }
-  
+
   return new Stripe(secretKey, {
     apiVersion: '2025-06-30.basil',
   });
@@ -18,7 +18,6 @@ const initializeStripe = () => {
 
 const stripe = initializeStripe();
 
-// POST /api/enrollment/create-payment-intent
 export const createPaymentIntent = async (req: Request, res: Response): Promise<void> => {
   try {
     if (!stripe) {
@@ -30,7 +29,7 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
     }
 
     const { courseId, paymentMethod, couponCode } = req.body;
-    const userId = req.user?.id; // Assuming you have auth middleware that sets req.user
+    const userId = req.user?.id;
 
     if (!userId) {
       res.status(401).json({
@@ -40,7 +39,6 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
       return;
     }
 
-    // Check if user is already enrolled
     const { data: existingEnrollment } = await supabase
       .from('course_enrollments')
       .select('id')
@@ -57,7 +55,6 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
       return;
     }
 
-    // Get course details
     const { data: course, error: courseError } = await supabase
       .from('courses')
       .select('id, title, price, discounted_price, currency')
@@ -73,12 +70,10 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
       return;
     }
 
-    // Calculate final price
     let finalPrice = course.discounted_price || course.price;
     let discountAmount = 0;
     let appliedCoupon = null;
 
-    // Apply coupon if provided
     if (couponCode) {
       const couponResult = await applyCoupon(courseId, couponCode, finalPrice);
       if (couponResult.success) {
@@ -88,61 +83,35 @@ export const createPaymentIntent = async (req: Request, res: Response): Promise<
       }
     }
 
-    // Convert to cents for Stripe
     const amountInCents = Math.round(finalPrice * 100);
 
-    // Create order record
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
-// ADD LOGGING HERE
-console.log('Order insert payload:', {
-  user_id: userId,
-  order_number: orderNumber,
-  status: 'pending',
-  payment_method: paymentMethod,
-  subtotal: course.discounted_price || course.price,
-  discount_amount: discountAmount,
-  total_amount: finalPrice,
-  currency: course.currency || 'USD',
-  coupon_code: appliedCoupon?.code
-});
-console.log('Types:', {
-  user_id: typeof userId,
-  order_number: typeof orderNumber,
-  payment_method: typeof paymentMethod,
-  subtotal: typeof (course.discounted_price || course.price),
-  discount_amount: typeof discountAmount,
-  total_amount: typeof finalPrice,
-  currency: typeof (course.currency || 'USD'),
-  coupon_code: typeof (appliedCoupon?.code)
-});
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        user_id: userId,
+        order_number: orderNumber,
+        status: 'pending',
+        payment_method: paymentMethod,
+        subtotal: course.discounted_price || course.price,
+        discount_amount: discountAmount,
+        total_amount: finalPrice,
+        currency: course.currency || 'USD',
+        coupon_code: appliedCoupon?.code
+      })
+      .select()
+      .single();
 
-// This is the insert you want to debug:
-const { data: order, error: orderError } = await supabase
-  .from('orders')
-  .insert({
-    user_id: userId,
-    order_number: orderNumber,
-    status: 'pending',
-    payment_method: paymentMethod,
-    subtotal: course.discounted_price || course.price,
-    discount_amount: discountAmount,
-    total_amount: finalPrice,
-    currency: course.currency || 'USD',
-    coupon_code: appliedCoupon?.code
-  })
-  .select()
-  .single();
-  
-if (orderError || !order) {
-  console.error('Order creation error:', orderError);
-  res.status(500).json({
-    success: false,
-    message: 'Failed to create order',
-    error: orderError // Add this for debugging, remove in production
-  });
-  return;
-}
+    if (orderError || !order) {
+      console.error('Order creation error:', orderError);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create order',
+        error: orderError // Add this for debugging, remove in production
+      });
+      return;
+    }
 
     // Create order item
     await supabase
@@ -194,7 +163,6 @@ if (orderError || !order) {
   }
 };
 
-// POST /api/enrollment/confirm
 export const confirmEnrollment = async (req: Request, res: Response): Promise<void> => {
   try {
     if (!stripe) {
@@ -218,7 +186,7 @@ export const confirmEnrollment = async (req: Request, res: Response): Promise<vo
 
     // Verify payment with Stripe
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    
+
     if (paymentIntent.status !== 'succeeded') {
       res.status(400).json({
         success: false,
