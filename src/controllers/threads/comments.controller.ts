@@ -260,6 +260,7 @@ const getComments = async (
   try {
     const user_id = req.user?.id!;
     const { thread_id, post_id } = req.query;
+    console.log(thread_id, post_id)
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = parseInt(req.query.offset as string) || 0;
 
