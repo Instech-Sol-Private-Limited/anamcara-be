@@ -483,6 +483,42 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
+    // Get all post IDs for batch operations
+    const postIds = allPosts.map(post => post.id);
+
+    // ✅ Batch fetch comments count for all posts
+    const { data: commentsCount } = await supabase
+      .from('threadcomments')
+      .select('post_id, id')
+      .in('post_id', postIds)
+      .eq('is_deleted', false);
+
+    // ✅ Batch fetch replies count for all comments
+    const commentIds = commentsCount?.map(c => c.id) || [];
+    const { data: repliesCount } = commentIds.length > 0 
+      ? await supabase
+          .from('threadsubcomments')
+          .select('comment_id')
+          .in('comment_id', commentIds)
+          .eq('is_deleted', false)
+      : { data: null };
+
+    // Create lookup maps for faster access
+    const commentsCountMap = new Map();
+    const repliesCountMap = new Map();
+
+    // Count comments per post
+    commentsCount?.forEach(comment => {
+      const count = commentsCountMap.get(comment.post_id) || 0;
+      commentsCountMap.set(comment.post_id, count + 1);
+    });
+
+    // Count replies per comment
+    repliesCount?.forEach(reply => {
+      const count = repliesCountMap.get(reply.comment_id) || 0;
+      repliesCountMap.set(reply.comment_id, count + 1);
+    });
+
     const postsWithReactions = await Promise.all(
       allPosts.map(async (post) => {
         let userReaction = null;
@@ -492,45 +528,35 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
         let chamberInfo = null;
 
         if (user_id) {
-          // ✅ Get user reaction
-          const { data: reactionData } = await supabase
-            .from('thread_reactions')
-            .select('type')
-            .eq('user_id', user_id)
-            .eq('target_id', post.id)
-            .eq('target_type', 'post')
-            .maybeSingle();
+          // ✅ Get user reaction, vote, and saved status in parallel
+          const [reactionResult, voteResult, savedResult] = await Promise.all([
+            supabase
+              .from('thread_reactions')
+              .select('type')
+              .eq('user_id', user_id)
+              .eq('target_id', post.id)
+              .eq('target_type', 'post')
+              .maybeSingle(),
+            supabase
+              .from('post_votes')
+              .select('vote_type')
+              .eq('user_id', user_id)
+              .eq('target_id', post.id)
+              .eq('target_type', 'post')
+              .maybeSingle(),
+            supabase
+              .from('saved_posts')
+              .select('id')
+              .eq('target_id', post.id)
+              .eq('target_type', 'post')
+              .eq('user_id', user_id)
+              .maybeSingle()
+          ]);
 
-          if (reactionData) {
-            userReaction = reactionData.type;
-          }
-
-          // ✅ Get user vote
-          const { data: voteData } = await supabase
-            .from('post_votes')
-            .select('vote_type')
-            .eq('user_id', user_id)
-            .eq('target_id', post.id)
-            .eq('target_type', 'post')
-            .maybeSingle();
-
-          if (voteData) {
-            userVote = voteData.vote_type;
-          }
-
-          // ✅ Check if post is saved by user
-          const { data: savedData } = await supabase
-            .from('saved_posts')
-            .select('id')
-            .eq('target_id', post.id)
-            .eq('target_type', 'post')
-            .eq('user_id', user_id)
-            .maybeSingle();
-
-          if (savedData) {
-            userSaved = true;
-            savedId = savedData.id;
-          }
+          userReaction = reactionResult.data?.type || null;
+          userVote = voteResult.data?.vote_type || null;
+          userSaved = !!savedResult.data;
+          savedId = savedResult.data?.id || null;
         }
 
         // ✅ Get chamber info (if applicable)
@@ -542,44 +568,24 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
             .eq('is_active', true)
             .maybeSingle();
 
-          if (chamberData) {
-            chamberInfo = {
-              id: chamberData.id,
-              name: chamberData.name,
-              logo: chamberData.logo,
-              custom_url: chamberData.custom_url,
-              member_count: chamberData.member_count,
-              color_theme: chamberData.color_theme,
-              is_public: chamberData.is_public,
-              monetization: chamberData.monetization
-            };
-          }
+          chamberInfo = chamberData ? {
+            id: chamberData.id,
+            name: chamberData.name,
+            logo: chamberData.logo,
+            custom_url: chamberData.custom_url,
+            member_count: chamberData.member_count,
+            color_theme: chamberData.color_theme,
+            is_public: chamberData.is_public,
+            monetization: chamberData.monetization
+          } : null;
         }
 
-        // ✅ Fetch comments and replies
-        const { data: comments } = await supabase
-          .from('threadcomments')
-          .select('id, post_id, content, is_deleted')
-          .eq('post_id', post.id)
-          .eq('is_deleted', false);
-
-        const commentIds = comments?.map((c) => c.id) || [];
-
-        const subcommentsResults = await Promise.all(
-          commentIds.map((commentId) =>
-            supabase
-              .from('threadsubcomments')
-              .select('id')
-              .eq('comment_id', commentId)
-              .eq('is_deleted', false)
-          )
-        );
-
-        const totalComments = comments?.length || 0;
-        const totalReplies = subcommentsResults.reduce(
-          (sum, result) => sum + (result.data?.length || 0),
-          0
-        );
+        // ✅ Calculate total comments (comments + replies) from our batch data
+        const postComments = commentsCount?.filter(c => c.post_id === post.id) || [];
+        const totalComments = postComments.length;
+        const totalReplies = postComments.reduce((sum, comment) => {
+          return sum + (repliesCountMap.get(comment.id) || 0);
+        }, 0);
 
         return {
           ...post,
@@ -587,7 +593,9 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           user_vote: userVote,
           user_saved: userSaved,
           saved_id: savedId,
-          total_comments: totalComments + totalReplies,
+          total_comments: totalComments + totalReplies, // Total comments count
+          comments_count: totalComments, // Only main comments count
+          replies_count: totalReplies, // Only replies count
           chamber: chamberInfo,
           total_upvotes: post.total_upvotes || 0,
           total_downvotes: post.total_downvotes || 0
@@ -1115,7 +1123,6 @@ export const getPostComments = async (req: Request, res: Response): Promise<any>
       });
     }
 
-    // Get replies for each comment
     const commentsWithReplies = await Promise.all(
       comments.map(async (comment) => {
         const { data: replies } = await supabase

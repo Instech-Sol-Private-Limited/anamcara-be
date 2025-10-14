@@ -117,7 +117,7 @@ app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/stories', authMiddleware, storiesRoutes);
 app.use('/api/streams', authMiddleware, streamsRoutes);
 app.use('/api/slots', authMiddleware, availableSlotsRoutes);
-app.use('/api/products', authMiddleware, productsRoutes);
+app.use('/api/products', productsRoutes);
 app.use('/api/boostcampaign', authMiddleware, campaignRoutes);
 app.use('/api/soul-stories', soulStoriesRoutes);
 app.use('/api/vault', authMiddleware, vaultRoutes);
