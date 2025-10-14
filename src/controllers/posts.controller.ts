@@ -20,9 +20,9 @@ interface PostVote {
 }
 
 type PostFieldMap = {
-  [key in PostReactionType]: 
-    | 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls'
-    | 'total_supports' | 'total_valuables' | 'total_funnies' | 'total_shockeds' | 'total_moveds' | 'total_triggereds';
+  [key in PostReactionType]:
+  | 'total_likes' | 'total_dislikes' | 'total_insightfuls' | 'total_hearts' | 'total_hugs' | 'total_souls'
+  | 'total_supports' | 'total_valuables' | 'total_funnies' | 'total_shockeds' | 'total_moveds' | 'total_triggereds';
 };
 
 const postFieldMap: PostFieldMap = {
@@ -334,7 +334,7 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       const invalidDisclaimers = disclaimers.filter(
         (d: any) => !validDisclaimerTypes.includes(d.type) || typeof d.enabled !== 'boolean'
       );
-      
+
       if (invalidDisclaimers.length > 0) {
         res.status(400).json({
           success: false,
@@ -361,7 +361,7 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       embedded_items
     });
 
-    const enabledDisclaimers = disclaimers 
+    const enabledDisclaimers = disclaimers
       ? disclaimers.filter((d: any) => d.enabled === true)
       : null;
 
@@ -495,12 +495,12 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
 
     // ✅ Batch fetch replies count for all comments
     const commentIds = commentsCount?.map(c => c.id) || [];
-    const { data: repliesCount } = commentIds.length > 0 
+    const { data: repliesCount } = commentIds.length > 0
       ? await supabase
-          .from('threadsubcomments')
-          .select('comment_id')
-          .in('comment_id', commentIds)
-          .eq('is_deleted', false)
+        .from('threadsubcomments')
+        .select('comment_id')
+        .in('comment_id', commentIds)
+        .eq('is_deleted', false)
       : { data: null };
 
     // Create lookup maps for faster access
@@ -1180,6 +1180,7 @@ export const getUserPosts = async (req: Request, res: Response): Promise<any> =>
       `)
       .eq('user_id', userId)
       .eq('is_active', true)
+      .neq('is_chamber_post', true)
       .order('created_at', { ascending: false })
       .range(page * limit, (page + 1) * limit - 1);
 
@@ -1753,8 +1754,8 @@ export const updateVote = async (
       // new vote
       // Prevent downvote if both counts are already at zero
       if (voteType === 'downvote' && currentUpvotes === 0 && currentDownvotes === 0) {
-        return res.status(400).json({ 
-          error: 'Cannot downvote when score is already at zero' 
+        return res.status(400).json({
+          error: 'Cannot downvote when score is already at zero'
         });
       }
 
