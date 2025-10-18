@@ -1109,7 +1109,7 @@ export const setup2FAController = async (req: Request, res: Response): Promise<a
   try {
     const userId = req.user?.id!;
     const userEmail = req.user?.email!;
-    const appName = process.env.APP_NAME || 'NIRVANA';
+    const appName = process.env.APP_NAME || 'ANAMCARA';
 
     const secret = speakeasy.generateSecret({
       name: `${appName}:${userEmail}`,
