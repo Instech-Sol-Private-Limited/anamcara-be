@@ -694,7 +694,7 @@ const updateReaction = async (
           recipientUserId: threadData.author_id,
           actorUserId: user_id,
           threadId: thread_id,
-          message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
+          message: `@${authorProfile.first_name}${authorProfile.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
           type: 'thread_reaction_updated',
           metadata: {
             previous_reaction_type: existing.type,
@@ -746,7 +746,7 @@ const updateReaction = async (
         recipientUserId: threadData.author_id,
         actorUserId: user_id,
         threadId: thread_id,
-        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} SoulPoints)` : ''}`,
+        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} SoulPoints)` : ''}`,
         type: 'thread_reaction_added',
         metadata: {
           reaction_type: type,
