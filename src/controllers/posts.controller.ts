@@ -204,7 +204,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
+        message: `@${authorProfile.first_name}${authorProfile.last_name} changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
         type: 'post_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,
@@ -264,7 +264,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
+        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} SoulPoints added!` : ''}`,
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,
@@ -951,7 +951,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
           recipientUserId: postData.user_id,
           actorUserId: userId,
           threadId: postId,
-          message: `**@someone** commented on your post. +${soulpoints} SoulPoints added!`,
+          message: `@${authorProfile.first_name}${authorProfile.last_name} commented on your post. +${soulpoints} SoulPoints added!`,
           type: 'post_comment_added',
           metadata: {
             comment_id: data.id,
@@ -1046,7 +1046,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: commentData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `**@someone** replied to your comment. +1 soulpoint added!`,
+            message: `@${commentAuthorProfile.first_name}${commentAuthorProfile.last_name}  replied to your comment. +1 soulpoint added!`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1079,7 +1079,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: postData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `**@someone** replied to a comment on your post.`,
+            message: `@${postAuthorProfile.first_name}${postAuthorProfile.last_name} replied to a comment on your post.`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1471,7 +1471,7 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
       if (post.user_id !== userId) {
         const { data: authorProfile } = await supabase
           .from('profiles')
-          .select('email')
+          .select('email , first_name ,last_name')
           .eq('id', post.user_id)
           .single();
 
@@ -1481,7 +1481,7 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: post.user_id,
             actorUserId: userId,
             threadId: postId,
-            message: `**@someone** voted on your poll. +1 soulpoint added!`,
+            message: `@${authorProfile.first_name}${authorProfile.last_name} voted on your poll. +1 soulpoint added!`,
             type: 'poll_vote_added',
             metadata: {
               post_id: postId,
