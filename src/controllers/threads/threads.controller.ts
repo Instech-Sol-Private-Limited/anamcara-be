@@ -156,7 +156,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       recipientUserId: author_id,
       actorUserId: null,
       threadId: threadId,
-      message: 'Thread created successfully! +10 soulpoints added to your profile',
+      message: 'Thread created successfully! +10 SoulPoints added to your profile',
       type: 'thread_creation',
       metadata: {
         soulpoints: 10,
@@ -694,7 +694,7 @@ const updateReaction = async (
           recipientUserId: threadData.author_id,
           actorUserId: user_id,
           threadId: thread_id,
-          message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
+          message: `@${authorProfile.first_name}${authorProfile.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
           type: 'thread_reaction_updated',
           metadata: {
             previous_reaction_type: existing.type,
@@ -738,7 +738,7 @@ const updateReaction = async (
           p_points: soulpoints,
         });
 
-        if (soulpointsError) console.error('Error updating soulpoints:', soulpointsError);
+        if (soulpointsError) console.error('Error updating SoulPoints:', soulpointsError);
       }
 
       await sendNotification({
@@ -746,7 +746,7 @@ const updateReaction = async (
         recipientUserId: threadData.author_id,
         actorUserId: user_id,
         threadId: thread_id,
-        message: `**@someone** reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} soulpoints)` : ''}`,
+        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} SoulPoints)` : ''}`,
         type: 'thread_reaction_added',
         metadata: {
           reaction_type: type,

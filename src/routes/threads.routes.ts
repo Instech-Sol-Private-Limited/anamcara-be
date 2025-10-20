@@ -6,9 +6,9 @@ import {
     getThreadDetails,
     getAllThreads,
     updateReaction,
-     getThreadsByUserId,
-     toggleThreadStatus,
-     updateVote,
+    getThreadsByUserId,
+    toggleThreadStatus,
+    updateVote,
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
@@ -16,6 +16,7 @@ import {
     getComments,
     updateComment,
     updateCommentReaction,
+    updateCommentsVote,
 } from '../controllers/threads/comments.controller';
 import {
     createReply,
@@ -76,6 +77,7 @@ router.delete('/delete-comment/:comment_id', authMiddleware, deleteComment);
 router.patch('/apply-comment-react/:comment_id', authMiddleware, updateCommentReaction);
 
 
+router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
 
 
 // ======================= comment's replies ========================
@@ -94,6 +96,8 @@ router.delete('/delete-reply/:reply_id', authMiddleware, deleteReply);
 
 // handle like/ dislike
 router.patch('/apply-reply-react/:reply_id', authMiddleware, updateReplyReaction);
+
+router.post('/subcomments/:targetId/vote', authMiddleware, updateCommentsVote);
 
 
 // ======================= Threads Spam ========================
