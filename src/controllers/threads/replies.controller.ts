@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { supabase } from '../../app';
 import { sendNotification } from '../../sockets/emitNotification';
 
+type CommentReactionType = 'like' | 'dislike' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
+
 const getCommentPreview = (content: string): string => {
     const words = content.split(' ');
     return words.length > 5
@@ -313,225 +315,338 @@ const getReplies = async (
 
 // apply like/dislike
 const updateReplyReaction = async (
-    req: Request<{ reply_id: string }, {}, { type: 'like' | 'dislike' }>,
-    res: Response
+  req: Request<{ reply_id: string }, {}, { type: CommentReactionType }>,
+  res: Response
 ): Promise<any> => {
-    const { reply_id } = req.params;
-    const { type } = req.body;
-    const user_id = req.user?.id;
+  const { reply_id } = req.params;
+  const { type } = req.body;
+  const user_id = req.user?.id;
 
-    if (!user_id) return res.status(401).json({ error: 'Unauthorized user!' });
+  if (!user_id) return res.status(401).json({ error: 'Unauthorized user!' });
 
-    // Fetch reply and parent comment to determine thread/post context
-    const { data: replyData, error: replyError } = await supabase
-        .from('threadsubcomments')
-        .select('id, user_id, content, comment_id, total_likes, total_dislikes, is_deleted')
-        .eq('id', reply_id)
-        .eq('is_deleted', false)
-        .single();
+  // Define the proper field mapping for replies
+  const replyFieldMap: Record<CommentReactionType, string> = {
+    like: 'total_likes',
+    support: 'total_supports',
+    valuable: 'total_valuables',
+    funny: 'total_funnies',
+    shocked: 'total_shockeds',
+    moved: 'total_moveds',
+    triggered: 'total_triggereds',
+    dislike: 'total_dislikes'
+  };
 
-    if (replyError || !replyData) {
-        return res.status(404).json({ error: 'Reply not found!' });
-    }
+  if (!replyFieldMap[type]) {
+    return res.status(400).json({ error: 'Invalid reaction type.' });
+  }
 
-    const { data: parentComment, error: commentError } = await supabase
-        .from('threadcomments')
-        .select('thread_id, post_id')
-        .eq('id', replyData.comment_id)
-        .single();
+  // Fetch reply and parent comment to determine thread/post context
+  const { data: replyData, error: replyError } = await supabase
+    .from('threadsubcomments')
+    .select(`
+      id, 
+      user_id, 
+      content, 
+      comment_id, 
+      total_likes, 
+      total_dislikes,
+      total_supports,
+      total_valuables,
+      total_funnies,
+      total_shockeds,
+      total_moveds,
+      total_triggereds,
+      is_deleted
+    `)
+    .eq('id', reply_id)
+    .eq('is_deleted', false)
+    .single();
 
-    if (commentError || !parentComment) {
-        return res.status(404).json({ error: 'Parent comment not found!' });
-    }
+  if (replyError || !replyData) {
+    return res.status(404).json({ error: 'Reply not found!' });
+  }
 
-    // Determine if this is a thread or post reply
-    let parentType: 'thread' | 'post', parentId: string, parentTitle: string, parentAuthorId: string;
-    if (parentComment.thread_id) {
-        parentType = 'thread';
-        parentId = parentComment.thread_id;
-        // Fetch thread info
-        const { data: threadData } = await supabase
-            .from('threads')
-            .select('title, author_id')
-            .eq('id', parentId)
-            .single();
-        parentTitle = threadData?.title || 'a thread';
-        parentAuthorId = threadData?.author_id;
-    } else if (parentComment.post_id) {
-        parentType = 'post';
-        parentId = parentComment.post_id;
-        // Fetch post info
-        const { data: postData } = await supabase
-            .from('posts')
-            .select('content, user_id')
-            .eq('id', parentId)
-            .single();
-        parentTitle = postData?.content?.slice(0, 30) || 'a post';
-        parentAuthorId = postData?.user_id;
-    } else {
-        return res.status(400).json({ error: 'Comment is not linked to a thread or post.' });
-    }
+  const { data: parentComment, error: commentError } = await supabase
+    .from('threadcomments')
+    .select('thread_id, post_id')
+    .eq('id', replyData.comment_id)
+    .single();
 
-    const truncatedTitle = parentTitle.split(' ').length > 3
-        ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
-        : parentTitle;
+  if (commentError || !parentComment) {
+    return res.status(404).json({ error: 'Parent comment not found!' });
+  }
 
-    const { data: existing, error: fetchError } = await supabase
+  // Determine if this is a thread or post reply
+  let parentType: 'thread' | 'post', parentId: string, parentTitle: string, parentAuthorId: string;
+  if (parentComment.thread_id) {
+    parentType = 'thread';
+    parentId = parentComment.thread_id;
+    // Fetch thread info
+    const { data: threadData } = await supabase
+      .from('threads')
+      .select('title, author_id')
+      .eq('id', parentId)
+      .single();
+    parentTitle = threadData?.title || 'a thread';
+    parentAuthorId = threadData?.author_id;
+  } else if (parentComment.post_id) {
+    parentType = 'post';
+    parentId = parentComment.post_id;
+    // Fetch post info
+    const { data: postData } = await supabase
+      .from('posts')
+      .select('content, user_id')
+      .eq('id', parentId)
+      .single();
+    parentTitle = postData?.content?.slice(0, 30) || 'a post';
+    parentAuthorId = postData?.user_id;
+  } else {
+    return res.status(400).json({ error: 'Comment is not linked to a thread or post.' });
+  }
+
+  const truncatedTitle = parentTitle.split(' ').length > 3
+    ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
+    : parentTitle;
+
+  // Check if reaction already exists
+  const { data: existing, error: fetchError } = await supabase
+    .from('thread_reactions')
+    .select('*')
+    .eq('user_id', user_id)
+    .eq('target_id', reply_id)
+    .eq('target_type', 'reply')
+    .single();
+
+  if (fetchError && fetchError.code !== 'PGRST116') {
+    return res.status(500).json({ error: fetchError.message });
+  }
+
+  const shouldNotify = replyData.user_id !== user_id;
+
+  let authorProfile = null;
+  if (shouldNotify) {
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('email, first_name, last_name')
+      .eq('id', replyData.user_id)
+      .single();
+    if (profileData) authorProfile = profileData;
+  }
+
+  // Initialize all reaction counts from the database
+  const currentCounts = {
+    total_likes: replyData.total_likes ?? 0,
+    total_dislikes: replyData.total_dislikes ?? 0,
+    total_supports: replyData.total_supports ?? 0,
+    total_valuables: replyData.total_valuables ?? 0,
+    total_funnies: replyData.total_funnies ?? 0,
+    total_shockeds: replyData.total_shockeds ?? 0,
+    total_moveds: replyData.total_moveds ?? 0,
+    total_triggereds: replyData.total_triggereds ?? 0,
+  };
+
+  const getReactionDisplayName = (type: CommentReactionType): string => {
+    const displayNames: Record<CommentReactionType, string> = {
+      like: 'like',
+      dislike: 'dislike',
+      support: 'support',
+      valuable: 'valuable',
+      funny: 'funny',
+      shocked: 'shocked',
+      moved: 'moved',
+      triggered: 'triggered'
+    };
+    return displayNames[type] || type;
+  };
+
+  const getContentPreview = (content: string): string =>
+    content.split(' ').length > 5
+      ? content.split(' ').slice(0, 5).join(' ') + '...'
+      : content;
+
+  // Handle existing reaction
+  if (existing) {
+    if (existing.type === type) {
+      // Remove reaction - decrease count for this type
+      const fieldToDecrease = replyFieldMap[type];
+      const newCount = Math.max(0, currentCounts[fieldToDecrease as keyof typeof currentCounts] - 1);
+
+      const { error: deleteError } = await supabase
         .from('thread_reactions')
-        .select('*')
-        .eq('user_id', user_id)
-        .eq('target_id', reply_id)
-        .eq('target_type', 'reply')
-        .single();
+        .delete()
+        .eq('id', existing.id);
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
-        return res.status(500).json({ error: fetchError.message });
+      if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+      // Update only the specific field that changed
+      const { error: updateReplyError } = await supabase
+        .from('threadsubcomments')
+        .update({ [fieldToDecrease]: newCount })
+        .eq('id', reply_id);
+
+      if (updateReplyError) return res.status(500).json({ error: updateReplyError.message });
+
+      if (shouldNotify && authorProfile) {
+        await sendNotification({
+          recipientEmail: authorProfile.email,
+          recipientUserId: replyData.user_id,
+          actorUserId: user_id,
+          threadId: parentId,
+          message: `_${getReactionDisplayName(type)}_ reaction was removed from your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
+          type: parentType === 'thread' ? 'reaction_removed' : 'post_reply_reaction_removed',
+          metadata: {
+            reaction_type: type,
+            reply_id,
+            comment_id: replyData.comment_id,
+            [`${parentType}_id`]: parentId,
+            [`${parentType}_title`]: parentTitle,
+            reply_content: replyData.content,
+            actor_user_id: user_id
+          }
+        });
+      }
+
+      return res.status(200).json({ 
+        message: `${type} removed!`,
+        updatedCounts: {
+          ...currentCounts,
+          [fieldToDecrease]: newCount
+        }
+      });
     }
 
-    const shouldNotify = replyData.user_id !== user_id;
+    // Change reaction type - decrease old type, increase new type
+    const prevField = replyFieldMap[existing.type as CommentReactionType];
+    const currentField = replyFieldMap[type];
 
-    let authorProfile = null;
-    if (shouldNotify) {
-        const { data: profileData } = await supabase
-            .from('profiles')
-            .select('email, first_name, last_name')
-            .eq('id', replyData.user_id)
-            .single();
-        if (profileData) authorProfile = profileData;
+    const prevCount = Math.max(0, currentCounts[prevField as keyof typeof currentCounts] - 1);
+    const currentCount = currentCounts[currentField as keyof typeof currentCounts] + 1;
+
+    const { error: updateReactionError } = await supabase
+      .from('thread_reactions')
+      .update({ type, updated_by: user_id })
+      .eq('id', existing.id);
+
+    if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
+
+    // Update both fields that changed
+    const { error: updateReplyError } = await supabase
+      .from('threadsubcomments')
+      .update({
+        [prevField]: prevCount,
+        [currentField]: currentCount,
+      })
+      .eq('id', reply_id);
+
+    if (updateReplyError) return res.status(500).json({ error: updateReplyError.message });
+
+    if (shouldNotify && authorProfile) {
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: replyData.user_id,
+        actorUserId: user_id,
+        threadId: parentId,
+        message: `Reaction changed to _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
+        type: parentType === 'thread' ? 'reaction_updated' : 'post_reply_reaction_updated',
+        metadata: {
+          previous_reaction_type: existing.type,
+          new_reaction_type: type,
+          reply_id,
+          comment_id: replyData.comment_id,
+          [`${parentType}_id`]: parentId,
+          [`${parentType}_title`]: parentTitle,
+          reply_content: replyData.content,
+          actor_user_id: user_id
+        }
+      });
     }
 
-    let newTotalLikes = replyData.total_likes ?? 0;
-    let newTotalDislikes = replyData.total_dislikes ?? 0;
+    return res.status(200).json({ 
+      message: `Reaction updated to ${type}!`,
+      updatedCounts: {
+        ...currentCounts,
+        [prevField]: prevCount,
+        [currentField]: currentCount
+      }
+    });
+  } else {
+    // Add new reaction - increase count for this type
+    const fieldToIncrease = replyFieldMap[type];
+    const newCount = currentCounts[fieldToIncrease as keyof typeof currentCounts] + 1;
 
-    const getReactionDisplayName = (type: 'like' | 'dislike') =>
-        type === 'like' ? 'like' : 'dislike';
+    const { error: insertError } = await supabase
+      .from('thread_reactions')
+      .insert([{ 
+        user_id, 
+        target_id: reply_id, 
+        target_type: 'reply', 
+        type 
+      }]);
 
-    const getContentPreview = (content: string): string =>
-        content.split(' ').length > 5
-            ? content.split(' ').slice(0, 5).join(' ') + '...'
-            : content;
+    if (insertError) return res.status(500).json({ error: insertError.message });
 
-    if (existing) {
-        if (existing.type === type) {
-            if (type === 'like') newTotalLikes = Math.max(0, newTotalLikes - 1);
-            if (type === 'dislike') newTotalDislikes = Math.max(0, newTotalDislikes - 1);
+    // Update only the specific field that changed
+    const { error: updateReplyError } = await supabase
+      .from('threadsubcomments')
+      .update({ [fieldToIncrease]: newCount })
+      .eq('id', reply_id);
 
-            await supabase
-                .from('thread_reactions')
-                .delete()
-                .eq('id', existing.id);
+    if (updateReplyError) return res.status(500).json({ error: updateReplyError.message });
 
-            await supabase
-                .from('threadsubcomments')
-                .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-                .eq('id', reply_id);
+    if (shouldNotify && authorProfile) {
+      // Define soulpoints for different reaction types (adjust as needed)
+      const replySoulpointsMap: Record<CommentReactionType, number> = {
+        like: 1,
+        dislike: 0,
+        support: 2,
+        valuable: 3,
+        funny: 1,
+        shocked: 1,
+        moved: 2,
+        triggered: 0
+      };
 
-            if (shouldNotify && authorProfile) {
-                await sendNotification({
-                    recipientEmail: authorProfile.email,
-                    recipientUserId: replyData.user_id,
-                    actorUserId: user_id,
-                    threadId: parentId,
-                    message: `_${getReactionDisplayName(type)}_ reaction was removed from your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
-                    type: parentType === 'thread' ? 'reaction_removed' : 'post_reply_reaction_removed',
-                    metadata: {
-                        reaction_type: type,
-                        reply_id,
-                        comment_id: replyData.comment_id,
-                        [`${parentType}_id`]: parentId,
-                        [`${parentType}_title`]: parentTitle,
-                        reply_content: replyData.content,
-                        actor_user_id: user_id
-                    }
-                });
-            }
+      const soulpoints = replySoulpointsMap[type] || 0;
 
-            return res.status(200).json({ message: `${type} removed!` });
+      if (soulpoints > 0) {
+        const { error: soulpointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: replyData.user_id,
+          p_points: soulpoints
+        });
+
+        if (soulpointsError) {
+          console.error('Error updating SoulPoints:', soulpointsError);
         }
+      }
 
-        // Changing reaction
-        if (existing.type === 'like') {
-            newTotalLikes = Math.max(0, newTotalLikes - 1);
-            newTotalDislikes += 1;
-        } else {
-            newTotalDislikes = Math.max(0, newTotalDislikes - 1);
-            newTotalLikes += 1;
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: replyData.user_id,
+        actorUserId: user_id,
+        threadId: parentId,
+        message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
+        type: parentType === 'thread' ? 'reaction_added' : 'post_reply_reaction_added',
+        metadata: {
+          reaction_type: type,
+          soulpoints: soulpoints,
+          reply_id,
+          comment_id: replyData.comment_id,
+          [`${parentType}_id`]: parentId,
+          [`${parentType}_title`]: parentTitle,
+          reply_content: replyData.content,
+          actor_user_id: user_id
         }
-
-        await supabase
-            .from('thread_reactions')
-            .update({ type, updated_by: user_id })
-            .eq('id', existing.id);
-
-        await supabase
-            .from('threadsubcomments')
-            .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-            .eq('id', reply_id);
-
-        if (shouldNotify && authorProfile) {
-            await sendNotification({
-                recipientEmail: authorProfile.email,
-                recipientUserId: replyData.user_id,
-                actorUserId: user_id,
-                threadId: parentId,
-                message: `Reaction changed to _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
-                type: parentType === 'thread' ? 'reaction_updated' : 'post_reply_reaction_updated',
-                metadata: {
-                    previous_reaction_type: existing.type,
-                    new_reaction_type: type,
-                    reply_id,
-                    comment_id: replyData.comment_id,
-                    [`${parentType}_id`]: parentId,
-                    [`${parentType}_title`]: parentTitle,
-                    reply_content: replyData.content,
-                    actor_user_id: user_id
-                }
-            });
-        }
-
-        return res.status(200).json({ message: `Reaction updated to ${type}!` });
-    } else {
-        // New reaction
-        if (type === 'like') newTotalLikes += 1;
-        if (type === 'dislike') newTotalDislikes += 1;
-
-        await supabase
-            .from('thread_reactions')
-            .insert([{ user_id, target_id: reply_id, target_type: 'reply', type }]);
-
-        await supabase
-            .from('threadsubcomments')
-            .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
-            .eq('id', reply_id);
-
-        if (shouldNotify && authorProfile) {
-            const soulpointsMap: Record<'like' | 'dislike', number> = {
-                like: 1,
-                dislike: 0
-            };
-
-            await sendNotification({
-                recipientEmail: authorProfile.email,
-                recipientUserId: replyData.user_id,
-                actorUserId: user_id,
-                threadId: parentId,
-                message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}**`,
-                type: parentType === 'thread' ? 'reaction_added' : 'post_reply_reaction_added',
-                metadata: {
-                    reaction_type: type,
-                    soulpoints: soulpointsMap[type],
-                    reply_id,
-                    comment_id: replyData.comment_id,
-                    [`${parentType}_id`]: parentId,
-                    [`${parentType}_title`]: parentTitle,
-                    reply_content: replyData.content,
-                    actor_user_id: user_id
-                }
-            });
-        }
-
-        return res.status(200).json({ message: `${type} added!` });
+      });
     }
+
+    return res.status(200).json({ 
+      message: `${type} added!`,
+      updatedCounts: {
+        ...currentCounts,
+        [fieldToIncrease]: newCount
+      }
+    });
+  }
 };
 
 export {

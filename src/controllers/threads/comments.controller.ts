@@ -2,6 +2,32 @@ import { Request, Response } from 'express';
 import { supabase } from '../../app';
 import { sendNotification } from '../../sockets/emitNotification';
 
+type CommentReactionType = 'like' | 'dislike' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
+
+type VoteTargetType = 'post' | 'thread' | 'comment' | 'subcomment';
+type VoteType = 'upvote' | 'downvote';
+
+const commentFieldMap: Record<CommentReactionType, string> = {
+  like: 'total_likes',
+  dislike: 'total_dislikes',
+  support: 'total_supports',
+  valuable: 'total_valuables',
+  funny: 'total_funnies',
+  shocked: 'total_shockeds',
+  moved: 'total_moveds',
+  triggered: 'total_triggereds'
+};
+
+const commentSoulpointsMap: Record<CommentReactionType, number> = {
+  like: 1,
+  dislike: 0,
+  support: 2,
+  valuable: 3,
+  funny: 1,
+  shocked: 1,
+  moved: 2,
+  triggered: 1
+};
 
 function getTargetInfo(req: Request) {
   const { thread_id, post_id } = req.body;
@@ -82,7 +108,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
 
       if (authorProfile) {
         let soulpoints = targetType === 'thread' ? 5 : 3;
-        
+
         if (targetType === 'post' && isChamberPost && chamberId) {
           const { data: chamberData } = await supabase
             .from('custom_chambers')
@@ -104,7 +130,7 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
           console.error('Error updating soulpoints:', soulpointsError);
         }
 
-        const message = targetType === 'thread' 
+        const message = targetType === 'thread'
           ? `Comment posted on your thread "${parentTitle}"! +${soulpoints} soulpoints added to your profile`
           : `Comment posted on your post! +${soulpoints} soulpoints added to your profile`;
 
@@ -311,19 +337,47 @@ const getComments = async (
   }
 };
 
-// apply like/dislike
+// Get reaction display name
+const getCommentReactionDisplayName = (reactionType: CommentReactionType): string => {
+  const displayNames = {
+    like: 'like',
+    dislike: 'dislike',
+    support: 'support',
+    valuable: 'valuable',
+    funny: 'funny',
+    shocked: 'shocked',
+    moved: 'moved',
+    triggered: 'triggered'
+  };
+  return displayNames[reactionType];
+};
+
+// Main comment reaction API
 const updateCommentReaction = async (
-  req: Request<{ comment_id: string }, {}, { type: 'like' | 'dislike' }>,
+  req: Request<{ comment_id: string }, {}, { type: CommentReactionType }>,
   res: Response
 ): Promise<any> => {
   const { comment_id } = req.params;
   const { type } = req.body;
   const { id: user_id } = req.user!;
 
-  if (!user_id) {
-    return res.status(400).json({ error: 'Invalid user.' });
+  // Define the proper field mapping
+  const commentFieldMap: Record<CommentReactionType, string> = {
+    like: 'total_likes',
+    dislike: 'total_dislikes',
+    support: 'total_supports',
+    valuable: 'total_valuables',
+    funny: 'total_funnies',
+    shocked: 'total_shockeds',
+    moved: 'total_moveds',
+    triggered: 'total_triggereds',
+  };
+
+  if (!user_id || !commentFieldMap[type]) {
+    return res.status(400).json({ error: 'Invalid user or reaction type.' });
   }
 
+  // Check if reaction already exists
   const { data: existing, error: fetchError } = await supabase
     .from('thread_reactions')
     .select('*')
@@ -336,12 +390,18 @@ const updateCommentReaction = async (
     return res.status(500).json({ error: fetchError.message });
   }
 
-  // Fetch comment, including both thread_id and post_id
+  // Fetch comment with all reaction counts
   const { data: commentData, error: commentError } = await supabase
     .from('threadcomments')
     .select(`
       total_likes, 
-      total_dislikes, 
+      total_dislikes,
+      total_supports,
+      total_valuables,
+      total_funnies,
+      total_shockeds,
+      total_moveds,
+      total_triggereds,
       user_id, 
       content,
       thread_id,
@@ -356,12 +416,12 @@ const updateCommentReaction = async (
     return res.status(404).json({ error: 'Comment not found!' });
   }
 
-  // Determine if this is a thread or post comment
+  // Determine parent context (thread or post)
   let parentType: 'thread' | 'post', parentId: string, parentTitle: string, parentAuthorId: string;
+
   if (commentData.thread_id) {
     parentType = 'thread';
     parentId = commentData.thread_id;
-    // Fetch thread info
     const { data: threadData, error: threadError } = await supabase
       .from('threads')
       .select('title, author_id')
@@ -375,7 +435,6 @@ const updateCommentReaction = async (
   } else if (commentData.post_id) {
     parentType = 'post';
     parentId = commentData.post_id;
-    // Fetch post info
     const { data: postData, error: postError } = await supabase
       .from('posts')
       .select('content, user_id')
@@ -406,11 +465,16 @@ const updateCommentReaction = async (
     if (profileData) authorProfile = profileData;
   }
 
-  let newTotalLikes = commentData?.total_likes ?? 0;
-  let newTotalDislikes = commentData?.total_dislikes ?? 0;
-
-  const getReactionDisplayName = (reactionType: 'like' | 'dislike'): string => {
-    return reactionType === 'like' ? 'like' : 'dislike';
+  // Initialize all reaction counts from the database
+  const currentCounts = {
+    total_likes: commentData.total_likes ?? 0,
+    total_dislikes: commentData.total_dislikes ?? 0,
+    total_supports: commentData.total_supports ?? 0,
+    total_valuables: commentData.total_valuables ?? 0,
+    total_funnies: commentData.total_funnies ?? 0,
+    total_shockeds: commentData.total_shockeds ?? 0,
+    total_moveds: commentData.total_moveds ?? 0,
+    total_triggereds: commentData.total_triggereds ?? 0,
   };
 
   const getCommentPreview = (content: string): string => {
@@ -420,10 +484,12 @@ const updateCommentReaction = async (
       : content;
   };
 
+  // Handle existing reaction
   if (existing) {
     if (existing.type === type) {
-      if (type === 'like') newTotalLikes = Math.max(0, newTotalLikes - 1);
-      if (type === 'dislike') newTotalDislikes = Math.max(0, newTotalDislikes - 1);
+      // Remove reaction - decrease count for this type
+      const fieldToDecrease = commentFieldMap[type];
+      const newCount = Math.max(0, currentCounts[fieldToDecrease as keyof typeof currentCounts] - 1);
 
       const { error: deleteError } = await supabase
         .from('thread_reactions')
@@ -432,9 +498,10 @@ const updateCommentReaction = async (
 
       if (deleteError) return res.status(500).json({ error: deleteError.message });
 
+      // Update only the specific field that changed
       const { error: updateCommentError } = await supabase
         .from('threadcomments')
-        .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+        .update({ [fieldToDecrease]: newCount })
         .eq('id', comment_id);
 
       if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
@@ -444,8 +511,8 @@ const updateCommentReaction = async (
           recipientEmail: authorProfile.email,
           recipientUserId: commentData.user_id,
           actorUserId: user_id,
-          threadId: parentId, // always use threadId for NotificationInput
-          message: `_${getReactionDisplayName(type)}_ reaction was removed from your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
+          threadId: parentId,
+          message: `_${getCommentReactionDisplayName(type)}_ reaction was removed from your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
           type: parentType === 'thread' ? 'reaction_removed' : 'post_comment_reaction_removed',
           metadata: {
             reaction_type: type,
@@ -458,27 +525,36 @@ const updateCommentReaction = async (
         });
       }
 
-      return res.status(200).json({ message: `${type} removed!` });
+      return res.status(200).json({
+        message: `${type} removed!`,
+        updatedCounts: {
+          ...currentCounts,
+          [fieldToDecrease]: newCount
+        }
+      });
     }
 
-    if (existing.type === 'like') {
-      newTotalLikes = Math.max(0, newTotalLikes - 1);
-      newTotalDislikes += 1;
-    } else {
-      newTotalDislikes = Math.max(0, newTotalDislikes - 1);
-      newTotalLikes += 1;
-    }
+    // Change reaction type - decrease old type, increase new type
+    const prevField = commentFieldMap[existing.type as CommentReactionType];
+    const currentField = commentFieldMap[type];
 
-    const { error: updateError } = await supabase
+    const prevCount = Math.max(0, currentCounts[prevField as keyof typeof currentCounts] - 1);
+    const currentCount = currentCounts[currentField as keyof typeof currentCounts] + 1;
+
+    const { error: updateReactionError } = await supabase
       .from('thread_reactions')
       .update({ type, updated_by: user_id })
       .eq('id', existing.id);
 
-    if (updateError) return res.status(500).json({ error: updateError.message });
+    if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
 
+    // Update both fields that changed
     const { error: updateCommentError } = await supabase
       .from('threadcomments')
-      .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+      .update({
+        [prevField]: prevCount,
+        [currentField]: currentCount,
+      })
       .eq('id', comment_id);
 
     if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
@@ -489,7 +565,7 @@ const updateCommentReaction = async (
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `**@someone** changed their reaction to _${getReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
+        message: `**@someone** changed their reaction to _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
         type: parentType === 'thread' ? 'reaction_updated' : 'post_comment_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,
@@ -503,38 +579,58 @@ const updateCommentReaction = async (
       });
     }
 
-    return res.status(200).json({ message: `Reaction updated to ${type}!` });
+    return res.status(200).json({
+      message: `Reaction updated to ${type}!`,
+      updatedCounts: {
+        ...currentCounts,
+        [prevField]: prevCount,
+        [currentField]: currentCount
+      }
+    });
   } else {
-    if (type === 'like') newTotalLikes += 1;
-    if (type === 'dislike') newTotalDislikes += 1;
+    // Add new reaction - increase count for this type
+    const fieldToIncrease = commentFieldMap[type];
+    const newCount = currentCounts[fieldToIncrease as keyof typeof currentCounts] + 1;
 
     const { error: insertError } = await supabase
       .from('thread_reactions')
-      .insert([{ user_id, target_id: comment_id, target_type: 'comment', type }]);
+      .insert([{
+        user_id,
+        target_id: comment_id,
+        target_type: 'comment',
+        type
+      }]);
 
     if (insertError) return res.status(500).json({ error: insertError.message });
 
+    // Update only the specific field that changed
     const { error: updateCommentError } = await supabase
       .from('threadcomments')
-      .update({ total_likes: newTotalLikes, total_dislikes: newTotalDislikes })
+      .update({ [fieldToIncrease]: newCount })
       .eq('id', comment_id);
 
     if (updateCommentError) return res.status(500).json({ error: updateCommentError.message });
 
     if (shouldSendNotification && authorProfile) {
-      const soulpointsMap: Record<'like' | 'dislike', number> = {
-        'like': 1,
-        'dislike': 0
-      };
+      const soulpoints = commentSoulpointsMap[type] || 0;
 
-      const soulpoints = soulpointsMap[type] || 0;
+      if (soulpoints > 0) {
+        const { error: soulpointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: commentData.user_id,
+          p_points: soulpoints
+        });
+
+        if (soulpointsError) {
+          console.error('Error updating SoulPoints:', soulpointsError);
+        }
+      }
 
       await sendNotification({
         recipientEmail: authorProfile.email,
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `Received _${getReactionDisplayName(type)}_ reaction on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
+        message: `**@someone** reacted with _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
         type: parentType === 'thread' ? 'reaction_added' : 'post_comment_reaction_added',
         metadata: {
           reaction_type: type,
@@ -548,7 +644,314 @@ const updateCommentReaction = async (
       });
     }
 
-    return res.status(200).json({ message: `${type} added!` });
+    return res.status(200).json({
+      message: `${type} added!`,
+      updatedCounts: {
+        ...currentCounts,
+        [fieldToIncrease]: newCount
+      }
+    });
+  }
+};
+
+const updateCommentsVote = async (
+  req: Request<{ targetId: string }, {}, { voteType: VoteType; targetType: VoteTargetType }>,
+  res: Response
+): Promise<any> => {
+  const { targetId } = req.params;
+  const { voteType, targetType } = req.body;
+  const { id: user_id } = req.user!;
+
+  // Define valid target types and vote types
+  const validTargetTypes = ['post', 'thread', 'comment', 'subcomment'];
+  const validVoteTypes = ['upvote', 'downvote'];
+
+  if (!user_id || !validVoteTypes.includes(voteType) || !validTargetTypes.includes(targetType)) {
+    return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
+  }
+
+  // Define table names and field mappings for different target types
+  const tableConfig: Record<string, { table: string; upvoteField: string; downvoteField: string }> = {
+    post: { table: 'posts', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
+    thread: { table: 'threads', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
+    comment: { table: 'threadcomments', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
+    subcomment: { table: 'threadsubcomments', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' }
+  };
+
+  const config = tableConfig[targetType];
+  if (!config) {
+    return res.status(400).json({ error: 'Invalid target type.' });
+  }
+
+  // Define vote weights - comments/subcomments use +1/-1, posts/threads use +20/-1
+  const UPVOTE_WEIGHT = 20;
+  const DOWNVOTE_WEIGHT = 1;
+
+  try {
+    // Check if vote already exists
+    const { data: existingVote, error: fetchError } = await supabase
+      .from('comment_votes')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('target_id', targetId)
+      .eq('target_type', targetType)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      return res.status(500).json({ error: fetchError.message });
+    }
+
+    // Fetch target data with appropriate fields
+    const { data: targetData, error: targetError } = await supabase
+      .from(config.table)
+      .select('*')
+      .eq('id', targetId)
+      .single();
+
+    if (targetError || !targetData) {
+      return res.status(404).json({ error: `${targetType} not found!` });
+    }
+
+    // For comments and subcomments, check if they're deleted
+    if ((targetType === 'comment' || targetType === 'subcomment') && targetData.is_deleted) {
+      return res.status(400).json({ error: 'Cannot vote on deleted content.' });
+    }
+
+    const currentUpvotes = Math.max(0, targetData[config.upvoteField] || 0);
+    const currentDownvotes = Math.max(0, targetData[config.downvoteField] || 0);
+    const currentNetScore = currentUpvotes - currentDownvotes;
+
+    let newUpvotes = currentUpvotes;
+    let newDownvotes = currentDownvotes;
+    let user_vote: 'upvote' | 'downvote' | null = voteType;
+
+    // Handle notification logic for comments and subcomments
+    let shouldSendNotification = false;
+    let authorProfile = null;
+    let parentType: 'thread' | 'post' | null = null;
+    let parentId: string | null = null;
+    let parentTitle = '';
+    let contentPreview = '';
+
+    if (targetType === 'comment' || targetType === 'subcomment') {
+      const authorId = targetData.user_id;
+      shouldSendNotification = authorId !== user_id;
+
+      if (shouldSendNotification) {
+        // Get author profile
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('email, first_name, last_name')
+          .eq('id', authorId)
+          .single();
+        if (profileData) authorProfile = profileData;
+
+        // Determine parent context for comments
+        if (targetType === 'comment' && targetData.thread_id) {
+          parentType = 'thread';
+          parentId = targetData.thread_id;
+          const { data: threadData } = await supabase
+            .from('threads')
+            .select('title, author_id')
+            .eq('id', parentId)
+            .single();
+          parentTitle = threadData?.title || 'a thread';
+        }
+        // For subcomments, find the parent comment first, then the thread
+        else if (targetType === 'subcomment' && targetData.comment_id) {
+          const { data: parentComment } = await supabase
+            .from('threadcomments')
+            .select('thread_id')
+            .eq('id', targetData.comment_id)
+            .single();
+
+          if (parentComment?.thread_id) {
+            parentType = 'thread';
+            parentId = parentComment.thread_id;
+            const { data: threadData } = await supabase
+              .from('threads')
+              .select('title, author_id')
+              .eq('id', parentId)
+              .single();
+            parentTitle = threadData?.title || 'a thread';
+          }
+        }
+
+        // Truncate titles and content for notification
+        const truncatedTitle = parentTitle.split(' ').length > 3
+          ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
+          : parentTitle;
+
+        contentPreview = targetData.content?.split(' ').slice(0, 5).join(' ') + '...' || 'a comment';
+      }
+    }
+
+    // VOTE LOGIC
+    if (existingVote) {
+      if (existingVote.vote_type === voteType) {
+        // Remove vote - user clicked the same vote again
+        const { error: deleteError } = await supabase
+          .from('comment_votes')
+          .delete()
+          .eq('id', existingVote.id);
+        if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+        if (voteType === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+        } else {
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
+        }
+
+        user_vote = null;
+
+        // Notification for vote removal
+        if (shouldSendNotification && authorProfile && parentType) {
+          await sendNotification({
+            recipientEmail: authorProfile.email,
+            recipientUserId: targetData.user_id,
+            actorUserId: user_id,
+            threadId: parentId,
+            message: `_${voteType}_ was removed from your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
+            type: parentType === 'thread' ? 'vote_removed' : 'post_comment_vote_removed',
+            metadata: {
+              vote_type: voteType,
+              target_type: targetType,
+              target_id: targetId,
+              [`${parentType}_id`]: parentId,
+              [`${parentType}_title`]: parentTitle,
+              content: targetData.content,
+              actor_user_id: user_id
+            }
+          });
+        }
+      } else {
+        // Switch vote - user changed from upvote to downvote or vice versa
+        const { error: updateError } = await supabase
+          .from('comment_votes')
+          .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+          .eq('id', existingVote.id);
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        if (existingVote.vote_type === 'upvote') {
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        } else {
+          newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
+        }
+
+        // Notification for vote change
+        if (shouldSendNotification && authorProfile && parentType) {
+          await sendNotification({
+            recipientEmail: authorProfile.email,
+            recipientUserId: targetData.user_id,
+            actorUserId: user_id,
+            threadId: parentId,
+            message: `**@someone** changed their vote to _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
+            type: parentType === 'thread' ? 'vote_updated' : 'post_comment_vote_updated',
+            metadata: {
+              previous_vote_type: existingVote.vote_type,
+              new_vote_type: voteType,
+              target_type: targetType,
+              target_id: targetId,
+              [`${parentType}_id`]: parentId,
+              [`${parentType}_title`]: parentTitle,
+              content: targetData.content,
+              actor_user_id: user_id
+            }
+          });
+        }
+      }
+    } else {
+      // New vote - user is voting for the first time
+
+      // Prevent downvote if net score would go negative (only for posts/threads)
+      if (voteType === 'downvote' && currentNetScore <= 0 &&
+        (targetType === 'post' || targetType === 'thread')) {
+        return res.status(400).json({
+          error: 'Cannot downvote when score is already at or below zero'
+        });
+      }
+
+      // For comments/subcomments, allow downvotes even at zero since they use +1/-1
+      const { error: insertError } = await supabase
+        .from('comment_votes')
+        .insert([{
+          user_id,
+          target_id: targetId,
+          target_type: targetType,
+          vote_type: voteType
+        }]);
+      if (insertError) return res.status(500).json({ error: insertError.message });
+
+      if (voteType === 'upvote') {
+        newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
+      } else {
+        newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+      }
+
+      // Notification for new vote
+      if (shouldSendNotification && authorProfile && parentType) {
+        await sendNotification({
+          recipientEmail: authorProfile.email,
+          recipientUserId: targetData.user_id,
+          actorUserId: user_id,
+          threadId: parentId,
+          message: `**@someone** voted with _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
+          type: parentType === 'thread' ? 'vote_added' : 'post_comment_vote_added',
+          metadata: {
+            vote_type: voteType,
+            target_type: targetType,
+            target_id: targetId,
+            [`${parentType}_id`]: parentId,
+            [`${parentType}_title`]: parentTitle,
+            content: targetData.content,
+            actor_user_id: user_id
+          }
+        });
+      }
+    }
+
+    // Final validation - ensure counts never go below zero
+    newUpvotes = Math.max(0, newUpvotes);
+    newDownvotes = Math.max(0, newDownvotes);
+
+    // For posts/threads, prevent negative net scores
+    const netScore = newUpvotes - newDownvotes;
+    if (netScore < 0 && (targetType === 'post' || targetType === 'thread')) {
+      newUpvotes = 0;
+      newDownvotes = 0;
+      user_vote = null; // Remove user vote if we had to reset to zero
+    }
+
+    // Update the target with new vote counts
+    const { error: updateTargetError } = await supabase
+      .from(config.table)
+      .update({
+        [config.upvoteField]: newUpvotes,
+        [config.downvoteField]: newDownvotes,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', targetId);
+    if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
+
+    return res.status(200).json({
+      success: true,
+      message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
+      data: {
+        total_upvotes: newUpvotes,
+        total_downvotes: newDownvotes,
+        net_score: Math.max(0, netScore), // Ensure net score is never negative
+        user_vote: user_vote
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error updating vote:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to process vote'
+    });
   }
 };
 
@@ -558,5 +961,6 @@ export {
   updateComment,
   getComments,
   updateCommentReaction,
+  updateCommentsVote,
 };
 

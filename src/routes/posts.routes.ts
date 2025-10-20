@@ -21,6 +21,7 @@ import {
   getComments,
   updateComment,
   updateCommentReaction,
+  updateCommentsVote,
 } from '../controllers/threads/comments.controller';
 import {
   createReply,
@@ -98,6 +99,7 @@ router.delete('/comments/:comment_id', optionalAuthMiddleware, deleteComment);
 
 router.patch('/comments/:comment_id/apply-react', authMiddleware, updateCommentReaction);
 
+router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
 
 
 
@@ -111,5 +113,7 @@ router.put('/replies/:reply_id', authMiddleware, updateReply);
 router.delete('/replies/:reply_id', authMiddleware, deleteReply);
 
 router.patch('/replies/:reply_id/apply-react', authMiddleware, updateReplyReaction);
+
+router.post('/subcomments/:targetId/vote', authMiddleware, updateCommentsVote);
 
 export default router;
