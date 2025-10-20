@@ -255,7 +255,7 @@ export const updatePostReaction = async (
         });
 
         if (soulpointsError) {
-          console.error('Error updating soulpoints:', soulpointsError);
+          console.error('Error updating SoulPoints:', soulpointsError);
         }
       }
 
@@ -943,7 +943,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
         });
 
         if (soulpointsError) {
-          console.error('Error updating soulpoints:', soulpointsError);
+          console.error('Error updating SoulPoints:', soulpointsError);
         }
 
         await sendNotification({
@@ -951,7 +951,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
           recipientUserId: postData.user_id,
           actorUserId: userId,
           threadId: postId,
-          message: `**@someone** commented on your post. +${soulpoints} soulpoints added!`,
+          message: `**@someone** commented on your post. +${soulpoints} SoulPoints added!`,
           type: 'post_comment_added',
           metadata: {
             comment_id: data.id,
