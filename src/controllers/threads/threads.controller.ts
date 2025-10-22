@@ -352,8 +352,11 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
     }
 
     let userReaction: string | null = null;
+    let userSaved = false;
+    let userVote: 'upvote' | 'downvote' | null = null;
 
     if (user_id) {
+      // Get user reaction
       const { data: reactionData, error: reactionError } = await supabase
         .from('thread_reactions')
         .select('type')
@@ -365,6 +368,28 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
       if (!reactionError && reactionData) {
         userReaction = reactionData.type;
       }
+
+      // Get user saved status
+      const { data: savedData } = await supabase
+        .from('saved_posts')
+        .select('id')
+        .eq('user_id', user_id)
+        .eq('target_id', thread_id)
+        .eq('target_type', 'thread')
+        .maybeSingle();
+
+      if (savedData) userSaved = true;
+
+      // Get user vote
+      const { data: voteData } = await supabase
+        .from('post_votes')
+        .select('vote_type')
+        .eq('user_id', user_id)
+        .eq('target_id', thread_id)
+        .eq('target_type', 'thread')
+        .maybeSingle();
+
+      if (voteData) userVote = voteData.vote_type;
     }
 
     const { data: comments, error: commentsError } = await supabase
@@ -401,7 +426,19 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
     return res.json({
       ...thread,
       user_reaction: userReaction,
+      user_saved: userSaved,
+      user_vote: userVote,
       total_comments: (comments?.length || 0) + total_subcomments,
+      total_supports: thread.total_supports || 0,
+      total_valuables: thread.total_valuables || 0,
+      total_funnies: thread.total_funnies || 0,
+      total_shockeds: thread.total_shockeds || 0,
+      total_moveds: thread.total_moveds || 0,
+      total_triggereds: thread.total_triggereds || 0,
+      total_upvotes: thread.total_upvotes || 0,
+      total_downvotes: thread.total_downvotes || 0,
+      total_echos: thread.total_echos || 0,
+      total_saved: thread.total_saved || 0,
     });
   } catch (err) {
     console.error('getThreadDetails error:', err);
@@ -451,8 +488,10 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
       paginatedThreads.map(async (thread) => {
         let userReaction: string | null = null;
         let userSaved = false;
+        let userVote: 'upvote' | 'downvote' | null = null;
 
         if (user_id) {
+          // Get user reaction
           const { data: reactionData } = await supabase
             .from('thread_reactions')
             .select('type')
@@ -463,6 +502,7 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
           if (reactionData) userReaction = reactionData.type;
 
+          // Get user saved status
           const { data: savedData } = await supabase
             .from('saved_posts')
             .select('id')
@@ -472,6 +512,17 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
             .maybeSingle();
 
           if (savedData) userSaved = true;
+
+          // Get user vote
+          const { data: voteData } = await supabase
+            .from('post_votes')
+            .select('vote_type')
+            .eq('user_id', user_id)
+            .eq('target_id', thread.id)
+            .eq('target_type', 'thread')
+            .maybeSingle();
+
+          if (voteData) userVote = voteData.vote_type;
         }
 
         const { data: comments } = await supabase
@@ -499,6 +550,7 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
           ...thread,
           user_reaction: userReaction,
           user_saved: userSaved,
+          user_vote: userVote,
           total_comments: totalComments + totalReplies,
           total_supports: thread.total_supports || 0,
           total_valuables: thread.total_valuables || 0,
@@ -776,6 +828,9 @@ const updateVote = async (
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
+  const UPVOTE_WEIGHT = 20;
+  const DOWNVOTE_WEIGHT = 1;
+
   try {
     const { data: existingVote, error: fetchError } = await supabase
       .from('post_votes')
@@ -800,11 +855,13 @@ const updateVote = async (
       return res.status(404).json({ error: `${targetType} not found!` });
     }
 
-    const currentUpvotes = targetData.total_upvotes || 0;
-    const currentDownvotes = targetData.total_downvotes || 0;
+    const currentUpvotes = Math.max(0, targetData.total_upvotes || 0);
+    const currentDownvotes = Math.max(0, targetData.total_downvotes || 0);
+    const currentNetScore = currentUpvotes - currentDownvotes;
 
     let newUpvotes = currentUpvotes;
     let newDownvotes = currentDownvotes;
+    let user_vote: 'upvote' | 'downvote' | null = voteType;
 
     if (existingVote) {
       if (existingVote.vote_type === voteType) {
@@ -816,11 +873,14 @@ const updateVote = async (
         if (deleteError) return res.status(500).json({ error: deleteError.message });
 
         if (voteType === 'upvote') {
-          newUpvotes = Math.max(0, currentUpvotes - 20);
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
         } else {
-          newDownvotes = Math.max(0, currentDownvotes - 5);
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
+
+        user_vote = null;
       } else {
+        // switching votes
         const { error: updateError } = await supabase
           .from('post_votes')
           .update({ vote_type: voteType, updated_at: new Date().toISOString() })
@@ -829,14 +889,23 @@ const updateVote = async (
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         if (existingVote.vote_type === 'upvote') {
-          newUpvotes = Math.max(0, currentUpvotes - 20);
-          newDownvotes = currentDownvotes + 5;
+          // from upvote → downvote
+          newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+          // Only allow downvote increment if it won't make net score negative
+          const potentialNetScore = newUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+          if (potentialNetScore >= 0) {
+            newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+          } else {
+            newDownvotes = currentDownvotes;
+          }
         } else {
-          newUpvotes = currentUpvotes + 20;
-          newDownvotes = Math.max(0, currentDownvotes - 5);
+          // from downvote → upvote
+          newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
+          newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
       }
     } else {
+      // new vote
       const { error: insertError } = await supabase
         .from('post_votes')
         .insert([{ 
@@ -849,10 +918,23 @@ const updateVote = async (
       if (insertError) return res.status(500).json({ error: insertError.message });
 
       if (voteType === 'upvote') {
-        newUpvotes = currentUpvotes + 20;
+        newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
       } else {
-        newDownvotes = currentDownvotes + 5;
+        const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+        if (potentialNetScore >= 0) {
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        } else {
+          newDownvotes = currentDownvotes;
+        }
       }
+    }
+
+    newUpvotes = Math.max(0, newUpvotes);
+    newDownvotes = Math.max(0, newDownvotes);
+    
+    const netScore = newUpvotes - newDownvotes;
+    if (netScore < 0) {
+      newDownvotes = newUpvotes;
     }
 
     const { error: updateTargetError } = await supabase
@@ -866,15 +948,13 @@ const updateVote = async (
 
     if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
 
-    const netScore = newUpvotes - newDownvotes;
-
     return res.status(200).json({
       message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
       data: {
         total_upvotes: newUpvotes,
         total_downvotes: newDownvotes,
-        net_score: netScore,
-        user_vote: existingVote?.vote_type === voteType ? null : voteType
+        net_score: Math.max(0, netScore),
+        user_vote: user_vote
       }
     });
 

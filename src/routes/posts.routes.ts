@@ -58,8 +58,6 @@ router.patch('/apply-react/:postId', authMiddleware, updatePostReaction);
 
 router.post('/votes/:targetId', authMiddleware, updateVote);
 
-router.get('/get-comments', optionalAuthMiddleware, getComments);
-
 
 // Toggle like on post
 // router.post('/:postId/like', authMiddleware, async (req, res, next) => {
@@ -91,6 +89,8 @@ router.get('/get-comments', optionalAuthMiddleware, getComments);
 
 
 // ========== Post Comments ==========
+router.get('/get-comments', optionalAuthMiddleware, getComments);
+
 router.post('/:postId/comments', optionalAuthMiddleware, createComment);
 
 router.put('/comments/:comment_id', optionalAuthMiddleware, updateComment);

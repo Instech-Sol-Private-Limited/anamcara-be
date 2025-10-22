@@ -258,7 +258,7 @@ const updateReply = async (
     }
 };
 
-// get all comment by thread_id
+// get all replies
 const getReplies = async (
     req: Request<{ comment_id: string }>,
     res: Response
@@ -295,19 +295,67 @@ const getReplies = async (
         return res.status(500).json({ error: error.message });
     }
 
+    // Get all reply IDs for batch vote count operations
+    const replyIds = replies.map(reply => reply.id);
+
+    // ✅ Batch fetch vote counts for all replies
+    const { data: allVotes } = await supabase
+        .from('comment_votes')
+        .select('target_id, vote_type')
+        .in('target_id', replyIds)
+        .eq('target_type', 'subcomment');
+
+    // Create lookup maps for vote counts
+    const upvotesCountMap = new Map();
+    const downvotesCountMap = new Map();
+
+    // Count votes per reply
+    allVotes?.forEach(vote => {
+        if (vote.vote_type === 'upvote') {
+            const count = upvotesCountMap.get(vote.target_id) || 0;
+            upvotesCountMap.set(vote.target_id, count + 1);
+        } else if (vote.vote_type === 'downvote') {
+            const count = downvotesCountMap.get(vote.target_id) || 0;
+            downvotesCountMap.set(vote.target_id, count + 1);
+        }
+    });
+
     const repliesWithReactions = await Promise.all(replies.map(async (reply) => {
         let userReaction = null;
+        let userVote = null;
+
         if (user_id) {
-            const { data: reactionData } = await supabase
-                .from('thread_reactions')
-                .select('type')
-                .eq('user_id', user_id)
-                .eq('target_type', 'reply')
-                .eq('target_id', reply.id)
-                .maybeSingle();
-            if (reactionData) userReaction = reactionData.type;
+            const [reactionResult, voteResult] = await Promise.all([
+                supabase
+                    .from('thread_reactions')
+                    .select('type')
+                    .eq('user_id', user_id)
+                    .eq('target_type', 'reply')
+                    .eq('target_id', reply.id)
+                    .maybeSingle(),
+                supabase
+                    .from('comment_votes')
+                    .select('vote_type')
+                    .eq('user_id', user_id)
+                    .eq('target_type', 'subcomment')
+                    .eq('target_id', reply.id)
+                    .maybeSingle()
+            ]);
+
+            if (reactionResult.data) userReaction = reactionResult.data.type;
+            if (voteResult.data) userVote = voteResult.data.vote_type;
         }
-        return { ...reply, user_reaction: userReaction };
+
+        const totalUpvotes = upvotesCountMap.get(reply.id) || 0;
+        const totalDownvotes = downvotesCountMap.get(reply.id) || 0;
+        const netScore = Math.max(0, totalUpvotes - totalDownvotes);
+
+        return { 
+            ...reply, 
+            user_reaction: userReaction,
+            user_vote: userVote,
+            net_score: netScore
+        };
     }));
 
     return res.status(200).json({ replies: repliesWithReactions });
