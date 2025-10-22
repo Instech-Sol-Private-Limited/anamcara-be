@@ -313,19 +313,63 @@ const getComments = async (
       return res.status(500).json({ error: "Comment fetching failed!" });
     }
 
+    const commentIds = comments.map(comment => comment.id);
+
+    const { data: allVotes } = await supabase
+      .from('comment_votes')
+      .select('target_id, vote_type')
+      .in('target_id', commentIds)
+      .eq('target_type', 'comment');
+
+    const upvotesCountMap = new Map();
+    const downvotesCountMap = new Map();
+
+    allVotes?.forEach(vote => {
+      if (vote.vote_type === 'upvote') {
+        const count = upvotesCountMap.get(vote.target_id) || 0;
+        upvotesCountMap.set(vote.target_id, count + 1);
+      } else if (vote.vote_type === 'downvote') {
+        const count = downvotesCountMap.get(vote.target_id) || 0;
+        downvotesCountMap.set(vote.target_id, count + 1);
+      }
+    });
+
     const commentsWithReactions = await Promise.all(comments.map(async (comment) => {
       let userReaction = null;
+      let userVote = null;
+
       if (user_id) {
-        const { data: reactionData } = await supabase
-          .from('thread_reactions')
-          .select('type')
-          .eq('user_id', user_id)
-          .eq('target_type', 'comment')
-          .eq('target_id', comment.id)
-          .maybeSingle();
-        if (reactionData) userReaction = reactionData.type;
+        const [reactionResult, voteResult] = await Promise.all([
+          supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', user_id)
+            .eq('target_type', 'comment')
+            .eq('target_id', comment.id)
+            .maybeSingle(),
+          supabase
+            .from('comment_votes')
+            .select('vote_type')
+            .eq('user_id', user_id)
+            .eq('target_type', 'comment')
+            .eq('target_id', comment.id)
+            .maybeSingle()
+        ]);
+
+        if (reactionResult.data) userReaction = reactionResult.data.type;
+        if (voteResult.data) userVote = voteResult.data.vote_type;
       }
-      return { ...comment, user_reaction: userReaction };
+
+      const totalUpvotes = upvotesCountMap.get(comment.id) || 0;
+      const totalDownvotes = downvotesCountMap.get(comment.id) || 0;
+      const netScore = Math.max(0, totalUpvotes - totalDownvotes);
+
+      return { 
+        ...comment, 
+        user_reaction: userReaction,
+        user_vote: userVote,
+        net_score: netScore
+      };
     }));
 
     return res.status(200).json({ comments: commentsWithReactions });
@@ -662,7 +706,6 @@ const updateCommentsVote = async (
   const { voteType, targetType } = req.body;
   const { id: user_id } = req.user!;
 
-  // Define valid target types and vote types
   const validTargetTypes = ['post', 'thread', 'comment', 'subcomment'];
   const validVoteTypes = ['upvote', 'downvote'];
 
@@ -670,7 +713,6 @@ const updateCommentsVote = async (
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
-  // Define table names and field mappings for different target types
   const tableConfig: Record<string, { table: string; upvoteField: string; downvoteField: string }> = {
     post: { table: 'posts', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
     thread: { table: 'threads', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
@@ -683,12 +725,11 @@ const updateCommentsVote = async (
     return res.status(400).json({ error: 'Invalid target type.' });
   }
 
-  // Define vote weights - comments/subcomments use +1/-1, posts/threads use +20/-1
+  
   const UPVOTE_WEIGHT = 20;
   const DOWNVOTE_WEIGHT = 1;
 
   try {
-    // Check if vote already exists
     const { data: existingVote, error: fetchError } = await supabase
       .from('comment_votes')
       .select('*')
@@ -701,7 +742,6 @@ const updateCommentsVote = async (
       return res.status(500).json({ error: fetchError.message });
     }
 
-    // Fetch target data with appropriate fields
     const { data: targetData, error: targetError } = await supabase
       .from(config.table)
       .select('*')
@@ -712,7 +752,6 @@ const updateCommentsVote = async (
       return res.status(404).json({ error: `${targetType} not found!` });
     }
 
-    // For comments and subcomments, check if they're deleted
     if ((targetType === 'comment' || targetType === 'subcomment') && targetData.is_deleted) {
       return res.status(400).json({ error: 'Cannot vote on deleted content.' });
     }
@@ -725,7 +764,6 @@ const updateCommentsVote = async (
     let newDownvotes = currentDownvotes;
     let user_vote: 'upvote' | 'downvote' | null = voteType;
 
-    // Handle notification logic for comments and subcomments
     let shouldSendNotification = false;
     let authorProfile = null;
     let parentType: 'thread' | 'post' | null = null;
@@ -738,7 +776,6 @@ const updateCommentsVote = async (
       shouldSendNotification = authorId !== user_id;
 
       if (shouldSendNotification) {
-        // Get author profile
         const { data: profileData } = await supabase
           .from('profiles')
           .select('email, first_name, last_name')
@@ -746,7 +783,6 @@ const updateCommentsVote = async (
           .single();
         if (profileData) authorProfile = profileData;
 
-        // Determine parent context for comments
         if (targetType === 'comment' && targetData.thread_id) {
           parentType = 'thread';
           parentId = targetData.thread_id;
@@ -757,7 +793,6 @@ const updateCommentsVote = async (
             .single();
           parentTitle = threadData?.title || 'a thread';
         }
-        // For subcomments, find the parent comment first, then the thread
         else if (targetType === 'subcomment' && targetData.comment_id) {
           const { data: parentComment } = await supabase
             .from('threadcomments')
@@ -777,7 +812,6 @@ const updateCommentsVote = async (
           }
         }
 
-        // Truncate titles and content for notification
         const truncatedTitle = parentTitle.split(' ').length > 3
           ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
           : parentTitle;
@@ -789,7 +823,6 @@ const updateCommentsVote = async (
     // VOTE LOGIC
     if (existingVote) {
       if (existingVote.vote_type === voteType) {
-        // Remove vote - user clicked the same vote again
         const { error: deleteError } = await supabase
           .from('comment_votes')
           .delete()
@@ -833,9 +866,17 @@ const updateCommentsVote = async (
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         if (existingVote.vote_type === 'upvote') {
+          // from upvote → downvote
           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
-          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+          // Only allow downvote increment if it won't make net score negative
+          const potentialNetScore = newUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+          if (potentialNetScore >= 0) {
+            newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+          } else {
+            newDownvotes = currentDownvotes;
+          }
         } else {
+          // from downvote → upvote
           newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
@@ -864,16 +905,6 @@ const updateCommentsVote = async (
       }
     } else {
       // New vote - user is voting for the first time
-
-      // Prevent downvote if net score would go negative (only for posts/threads)
-      if (voteType === 'downvote' && currentNetScore <= 0 &&
-        (targetType === 'post' || targetType === 'thread')) {
-        return res.status(400).json({
-          error: 'Cannot downvote when score is already at or below zero'
-        });
-      }
-
-      // For comments/subcomments, allow downvotes even at zero since they use +1/-1
       const { error: insertError } = await supabase
         .from('comment_votes')
         .insert([{
@@ -887,7 +918,14 @@ const updateCommentsVote = async (
       if (voteType === 'upvote') {
         newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
       } else {
-        newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        // For downvote: only increment if it won't make net score negative
+        const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+        if (potentialNetScore >= 0) {
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        } else {
+          // If downvote would make net score negative, don't increment downvotes
+          newDownvotes = currentDownvotes;
+        }
       }
 
       // Notification for new vote
@@ -912,16 +950,14 @@ const updateCommentsVote = async (
       }
     }
 
-    // Final validation - ensure counts never go below zero
+    // Final protection: ensure values never go below zero and net score is never negative
     newUpvotes = Math.max(0, newUpvotes);
     newDownvotes = Math.max(0, newDownvotes);
 
-    // For posts/threads, prevent negative net scores
     const netScore = newUpvotes - newDownvotes;
-    if (netScore < 0 && (targetType === 'post' || targetType === 'thread')) {
-      newUpvotes = 0;
-      newDownvotes = 0;
-      user_vote = null; // Remove user vote if we had to reset to zero
+    if (netScore < 0) {
+      // Adjust downvotes to prevent negative net score
+      newDownvotes = newUpvotes;
     }
 
     // Update the target with new vote counts

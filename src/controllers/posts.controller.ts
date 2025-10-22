@@ -528,7 +528,6 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
         let chamberInfo = null;
 
         if (user_id) {
-          // ✅ Get user reaction, vote, and saved status in parallel
           const [reactionResult, voteResult, savedResult] = await Promise.all([
             supabase
               .from('thread_reactions')
@@ -580,7 +579,6 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           } : null;
         }
 
-        // ✅ Calculate total comments (comments + replies) from our batch data
         const postComments = commentsCount?.filter(c => c.post_id === post.id) || [];
         const totalComments = postComments.length;
         const totalReplies = postComments.reduce((sum, comment) => {
@@ -859,10 +857,10 @@ export const getSinglePost = async (req: Request, res: Response): Promise<any> =
       comments_count: totalCommentsCount,
       comments: commentsWithReplies,
       ...reactionStats,
-      ...voteStats,
+      // ...voteStats,
       total_echos: echoData?.length || 0,
-      total_upvotes: voteStats.total_upvotes,
-      total_downvotes: voteStats.total_downvotes,
+      // total_upvotes: voteStats.total_upvotes,
+      // total_downvotes: voteStats.total_downvotes,
       net_score: voteStats.total_upvotes - voteStats.total_downvotes
     };
 
@@ -1711,6 +1709,7 @@ export const updateVote = async (
 
     const currentUpvotes = Math.max(0, targetData.total_upvotes || 0);
     const currentDownvotes = Math.max(0, targetData.total_downvotes || 0);
+    const currentNetScore = currentUpvotes - currentDownvotes;
 
     let newUpvotes = currentUpvotes;
     let newDownvotes = currentDownvotes;
@@ -1743,22 +1742,16 @@ export const updateVote = async (
         if (existingVote.vote_type === 'upvote') {
           // from upvote → downvote
           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
-          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT; // Downvotes can increase freely
+          // Only allow downvote increment if it won't make net score negative
+          newDownvotes = Math.max(currentDownvotes, currentDownvotes + DOWNVOTE_WEIGHT);
         } else {
           // from downvote → upvote
-          newUpvotes = currentUpvotes + UPVOTE_WEIGHT; // Upvotes can increase freely
+          newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
       }
     } else {
       // new vote
-      // Prevent downvote if both counts are already at zero
-      if (voteType === 'downvote' && currentUpvotes === 0 && currentDownvotes === 0) {
-        return res.status(400).json({
-          error: 'Cannot downvote when score is already at zero'
-        });
-      }
-
       const { error: insertError } = await supabase
         .from('post_votes')
         .insert([{
@@ -1770,22 +1763,27 @@ export const updateVote = async (
       if (insertError) return res.status(500).json({ error: insertError.message });
 
       if (voteType === 'upvote') {
-        newUpvotes = currentUpvotes + UPVOTE_WEIGHT; // Upvotes can increase freely
+        newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
       } else {
-        newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT; // Downvotes can increase freely
+        // For downvote: only increment if it won't make net score negative
+        const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+        if (potentialNetScore >= 0) {
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        } else {
+          // If downvote would make net score negative, don't increment downvotes
+          newDownvotes = currentDownvotes;
+        }
       }
     }
 
-    // Final protection: ensure values never go below zero
+    // Final protection: ensure values never go below zero and net score is never negative
     newUpvotes = Math.max(0, newUpvotes);
     newDownvotes = Math.max(0, newDownvotes);
-
-    // Additional protection: if both are zero, prevent downvote from having any effect
+    
     const netScore = newUpvotes - newDownvotes;
     if (netScore < 0) {
-      // Reset to zero state if net score would be negative
-      newUpvotes = 0;
-      newDownvotes = 0;
+      // Adjust downvotes to prevent negative net score
+      newDownvotes = newUpvotes;
     }
 
     const { error: updateTargetError } = await supabase
@@ -1803,8 +1801,8 @@ export const updateVote = async (
       data: {
         total_upvotes: newUpvotes,
         total_downvotes: newDownvotes,
-        net_score: Math.max(0, newUpvotes - newDownvotes), // Ensure net score is never negative
-        user_vote: netScore < 0 ? null : user_vote // Reset user_vote if we had to correct the values
+        net_score: Math.max(0, netScore),
+        user_vote: user_vote
       }
     });
 
