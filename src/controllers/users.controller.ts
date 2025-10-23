@@ -1600,7 +1600,7 @@ function generateBackupCodes(): string[] {
 
 }
 
-export const getUnapprovedUsersController=async(req: Request, res: Response):Promise<any>=>{
+export const getUnapprovedUsersController = async (req: Request, res: Response): Promise<any> => {
   try {
     const { data: users, error } = await supabase
       .from("profiles")
@@ -1715,7 +1715,7 @@ export const sendApprovalEmail = async (req: Request, res: Response): Promise<an
         .single();
 
       if (user && !userError) {
-        const message = status === 'verify' 
+        const message = status === 'verify'
           ? 'Congratulations! Your account has been approved by ANAMCARA team.'
           : '❌ Your account application has been rejected by ANAMCARA team.';
 
@@ -1743,6 +1743,123 @@ export const sendApprovalEmail = async (req: Request, res: Response): Promise<an
     return res.status(500).json({
       success: false,
       message: "Failed to send email",
+    });
+  }
+};
+
+export const createProfile = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { user } = req.body;
+
+    if (!user || !user.id || !user.email) {
+      return res.status(400).json({
+        success: false,
+        message: 'User data is required',
+        error: 'Missing user ID or email'
+      });
+    }
+
+    console.log('Processing profile for user:', user.id, user.email);
+
+    // Extract user data for both Google OAuth and normal email users
+    const userMetadata = user.user_metadata || {};
+    const appMetadata = user.app_metadata || {};
+
+    // Determine if this is a Google OAuth user or normal email user
+    const isGoogleOAuth = appMetadata.provider === 'google';
+
+    let firstName = '';
+    let lastName = '';
+    const referralCode = userMetadata.referral_code || null;
+
+    if (isGoogleOAuth) {
+      // Handle Google OAuth user - extract names from full_name
+      if (userMetadata.full_name) {
+        const nameParts = userMetadata.full_name.trim().split(/\s+/);
+        if (nameParts.length === 1) {
+          firstName = nameParts[0];
+          lastName = '';
+        } else {
+          firstName = nameParts[0];
+          lastName = nameParts.slice(1).join(' ');
+        }
+      } else if (userMetadata.name) {
+        const nameParts = userMetadata.name.trim().split(/\s+/);
+        if (nameParts.length === 1) {
+          firstName = nameParts[0];
+          lastName = '';
+        } else {
+          firstName = nameParts[0];
+          lastName = nameParts.slice(1).join(' ');
+        }
+      } else {
+        firstName = user.email?.split('@')[0] || 'User';
+        lastName = '';
+      }
+      console.log('Google OAuth user - Name extracted:', { firstName, lastName });
+    } else {
+      // Handle normal email user - use first_name and last_name from metadata
+      firstName = userMetadata.first_name || '';
+      lastName = userMetadata.last_name || '';
+
+      // If no names provided, use email username
+      if (!firstName && !lastName) {
+        firstName = user.email?.split('@')[0] || 'User';
+      }
+      console.log('Normal email user - Name extracted:', { firstName, lastName });
+    }
+
+    const profileData = {
+      id: user.id,
+      email: user.email,
+      first_name: firstName,
+      last_name: lastName,
+      referral_code: referralCode,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Use upsert to handle both create and update scenarios
+    // This will create if doesn't exist, or update if exists
+    const { data: profile, error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(profileData, {
+        onConflict: 'id',
+        ignoreDuplicates: false
+      })
+      .select()
+      .single();
+
+    if (upsertError) {
+      console.error('Profile upsert error:', upsertError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to process profile',
+        error: upsertError.message
+      });
+    }
+
+    // Check if this was an insert or update
+    const wasCreated = !profile?.created_at || 
+                      new Date(profile.created_at).getTime() > Date.now() - 10000; // Within last 10 seconds
+
+    console.log('Profile processed successfully for user:', user.id);
+    console.log('User type:', isGoogleOAuth ? 'Google OAuth' : 'Normal Email');
+    console.log('Action:', wasCreated ? 'Created' : 'Updated');
+
+    return res.status(200).json({
+      success: true,
+      message: wasCreated ? 'Profile created successfully' : 'Profile already exists',
+      profile: profile,
+      userType: isGoogleOAuth ? 'google' : 'email',
+      action: wasCreated ? 'created' : 'exists'
+    });
+
+  } catch (error) {
+    console.error('Unexpected error in createProfile:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
     });
   }
 };

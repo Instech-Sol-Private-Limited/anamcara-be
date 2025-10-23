@@ -7,6 +7,17 @@ type CommentReactionType = 'like' | 'dislike' | 'support' | 'valuable' | 'funny'
 type VoteTargetType = 'post' | 'thread' | 'comment' | 'subcomment';
 type VoteType = 'upvote' | 'downvote';
 
+type ContentType = 'post' | 'thread' | 'comment' | 'subcomment';
+
+interface SaveContentRequest {
+  targetId: string;
+  contentType: ContentType;
+  postId?: string;
+  threadId?: string;
+  commentId?: string;
+  subcommentId?: string;
+}
+
 const commentFieldMap: Record<CommentReactionType, string> = {
   like: 'total_likes',
   dislike: 'total_dislikes',
@@ -313,19 +324,81 @@ const getComments = async (
       return res.status(500).json({ error: "Comment fetching failed!" });
     }
 
+    const commentIds = comments.map(comment => comment.id);
+
+    // Fetch all votes for these comments
+    const { data: allVotes } = await supabase
+      .from('comment_votes')
+      .select('target_id, vote_type')
+      .in('target_id', commentIds)
+      .eq('target_type', 'comment');
+
+    // Fetch saved status for these comments
+    const { data: savedComments } = await supabase
+      .from('saved_content')
+      .select('target_id')
+      .in('target_id', commentIds)
+      .eq('user_id', user_id)
+      .eq('content_type', 'comment');
+
+    const upvotesCountMap = new Map();
+    const downvotesCountMap = new Map();
+    const savedStatusMap = new Map();
+
+    // Process votes
+    allVotes?.forEach(vote => {
+      if (vote.vote_type === 'upvote') {
+        const count = upvotesCountMap.get(vote.target_id) || 0;
+        upvotesCountMap.set(vote.target_id, count + 1);
+      } else if (vote.vote_type === 'downvote') {
+        const count = downvotesCountMap.get(vote.target_id) || 0;
+        downvotesCountMap.set(vote.target_id, count + 1);
+      }
+    });
+
+    // Process saved status
+    savedComments?.forEach(saved => {
+      savedStatusMap.set(saved.target_id, true);
+    });
+
     const commentsWithReactions = await Promise.all(comments.map(async (comment) => {
       let userReaction = null;
+      let userVote = null;
+
       if (user_id) {
-        const { data: reactionData } = await supabase
-          .from('thread_reactions')
-          .select('type')
-          .eq('user_id', user_id)
-          .eq('target_type', 'comment')
-          .eq('target_id', comment.id)
-          .maybeSingle();
-        if (reactionData) userReaction = reactionData.type;
+        const [reactionResult, voteResult] = await Promise.all([
+          supabase
+            .from('thread_reactions')
+            .select('type')
+            .eq('user_id', user_id)
+            .eq('target_type', 'comment')
+            .eq('target_id', comment.id)
+            .maybeSingle(),
+          supabase
+            .from('comment_votes')
+            .select('vote_type')
+            .eq('user_id', user_id)
+            .eq('target_type', 'comment')
+            .eq('target_id', comment.id)
+            .maybeSingle()
+        ]);
+
+        if (reactionResult.data) userReaction = reactionResult.data.type;
+        if (voteResult.data) userVote = voteResult.data.vote_type;
       }
-      return { ...comment, user_reaction: userReaction };
+
+      const totalUpvotes = upvotesCountMap.get(comment.id) || 0;
+      const totalDownvotes = downvotesCountMap.get(comment.id) || 0;
+      const netScore = Math.max(0, totalUpvotes - totalDownvotes);
+      const user_saved = savedStatusMap.get(comment.id) || false;
+
+      return { 
+        ...comment, 
+        user_reaction: userReaction,
+        user_vote: userVote,
+        net_score: netScore,
+        user_saved: user_saved
+      };
     }));
 
     return res.status(200).json({ comments: commentsWithReactions });
@@ -662,7 +735,6 @@ const updateCommentsVote = async (
   const { voteType, targetType } = req.body;
   const { id: user_id } = req.user!;
 
-  // Define valid target types and vote types
   const validTargetTypes = ['post', 'thread', 'comment', 'subcomment'];
   const validVoteTypes = ['upvote', 'downvote'];
 
@@ -670,7 +742,6 @@ const updateCommentsVote = async (
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
-  // Define table names and field mappings for different target types
   const tableConfig: Record<string, { table: string; upvoteField: string; downvoteField: string }> = {
     post: { table: 'posts', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
     thread: { table: 'threads', upvoteField: 'total_upvotes', downvoteField: 'total_downvotes' },
@@ -683,12 +754,11 @@ const updateCommentsVote = async (
     return res.status(400).json({ error: 'Invalid target type.' });
   }
 
-  // Define vote weights - comments/subcomments use +1/-1, posts/threads use +20/-1
+  
   const UPVOTE_WEIGHT = 20;
   const DOWNVOTE_WEIGHT = 1;
 
   try {
-    // Check if vote already exists
     const { data: existingVote, error: fetchError } = await supabase
       .from('comment_votes')
       .select('*')
@@ -701,7 +771,6 @@ const updateCommentsVote = async (
       return res.status(500).json({ error: fetchError.message });
     }
 
-    // Fetch target data with appropriate fields
     const { data: targetData, error: targetError } = await supabase
       .from(config.table)
       .select('*')
@@ -712,7 +781,6 @@ const updateCommentsVote = async (
       return res.status(404).json({ error: `${targetType} not found!` });
     }
 
-    // For comments and subcomments, check if they're deleted
     if ((targetType === 'comment' || targetType === 'subcomment') && targetData.is_deleted) {
       return res.status(400).json({ error: 'Cannot vote on deleted content.' });
     }
@@ -725,7 +793,6 @@ const updateCommentsVote = async (
     let newDownvotes = currentDownvotes;
     let user_vote: 'upvote' | 'downvote' | null = voteType;
 
-    // Handle notification logic for comments and subcomments
     let shouldSendNotification = false;
     let authorProfile = null;
     let parentType: 'thread' | 'post' | null = null;
@@ -738,7 +805,6 @@ const updateCommentsVote = async (
       shouldSendNotification = authorId !== user_id;
 
       if (shouldSendNotification) {
-        // Get author profile
         const { data: profileData } = await supabase
           .from('profiles')
           .select('email, first_name, last_name')
@@ -746,7 +812,6 @@ const updateCommentsVote = async (
           .single();
         if (profileData) authorProfile = profileData;
 
-        // Determine parent context for comments
         if (targetType === 'comment' && targetData.thread_id) {
           parentType = 'thread';
           parentId = targetData.thread_id;
@@ -757,7 +822,6 @@ const updateCommentsVote = async (
             .single();
           parentTitle = threadData?.title || 'a thread';
         }
-        // For subcomments, find the parent comment first, then the thread
         else if (targetType === 'subcomment' && targetData.comment_id) {
           const { data: parentComment } = await supabase
             .from('threadcomments')
@@ -777,7 +841,6 @@ const updateCommentsVote = async (
           }
         }
 
-        // Truncate titles and content for notification
         const truncatedTitle = parentTitle.split(' ').length > 3
           ? parentTitle.split(' ').slice(0, 3).join(' ') + '...'
           : parentTitle;
@@ -789,7 +852,6 @@ const updateCommentsVote = async (
     // VOTE LOGIC
     if (existingVote) {
       if (existingVote.vote_type === voteType) {
-        // Remove vote - user clicked the same vote again
         const { error: deleteError } = await supabase
           .from('comment_votes')
           .delete()
@@ -833,9 +895,17 @@ const updateCommentsVote = async (
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         if (existingVote.vote_type === 'upvote') {
+          // from upvote → downvote
           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
-          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+          // Only allow downvote increment if it won't make net score negative
+          const potentialNetScore = newUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+          if (potentialNetScore >= 0) {
+            newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+          } else {
+            newDownvotes = currentDownvotes;
+          }
         } else {
+          // from downvote → upvote
           newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
@@ -864,16 +934,6 @@ const updateCommentsVote = async (
       }
     } else {
       // New vote - user is voting for the first time
-
-      // Prevent downvote if net score would go negative (only for posts/threads)
-      if (voteType === 'downvote' && currentNetScore <= 0 &&
-        (targetType === 'post' || targetType === 'thread')) {
-        return res.status(400).json({
-          error: 'Cannot downvote when score is already at or below zero'
-        });
-      }
-
-      // For comments/subcomments, allow downvotes even at zero since they use +1/-1
       const { error: insertError } = await supabase
         .from('comment_votes')
         .insert([{
@@ -887,7 +947,14 @@ const updateCommentsVote = async (
       if (voteType === 'upvote') {
         newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
       } else {
-        newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        // For downvote: only increment if it won't make net score negative
+        const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+        if (potentialNetScore >= 0) {
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+        } else {
+          // If downvote would make net score negative, don't increment downvotes
+          newDownvotes = currentDownvotes;
+        }
       }
 
       // Notification for new vote
@@ -912,16 +979,14 @@ const updateCommentsVote = async (
       }
     }
 
-    // Final validation - ensure counts never go below zero
+    // Final protection: ensure values never go below zero and net score is never negative
     newUpvotes = Math.max(0, newUpvotes);
     newDownvotes = Math.max(0, newDownvotes);
 
-    // For posts/threads, prevent negative net scores
     const netScore = newUpvotes - newDownvotes;
-    if (netScore < 0 && (targetType === 'post' || targetType === 'thread')) {
-      newUpvotes = 0;
-      newDownvotes = 0;
-      user_vote = null; // Remove user vote if we had to reset to zero
+    if (netScore < 0) {
+      // Adjust downvotes to prevent negative net score
+      newDownvotes = newUpvotes;
     }
 
     // Update the target with new vote counts
@@ -955,6 +1020,388 @@ const updateCommentsVote = async (
   }
 };
 
+const updateTotalSavedCounter = async (targetId: string, contentType: string, action: 'increment' | 'decrement') => {
+  const tableConfig = {
+    post: 'posts',
+    thread: 'threads',
+    comment: 'threadcomments',
+    subcomment: 'threadsubcomments'
+  };
+
+  const table = tableConfig[contentType as keyof typeof tableConfig];
+  
+  if (!table) return;
+
+  try {
+    // Get current total_saved value
+    const { data: content, error } = await supabase
+      .from(table)
+      .select('total_saved')
+      .eq('id', targetId)
+      .single();
+
+    if (error || !content) {
+      console.error(`Error fetching ${contentType} data:`, error);
+      return;
+    }
+
+    // Calculate new total_saved value
+    const currentSaved = content.total_saved || 0;
+    const newSaved = action === 'increment' 
+      ? currentSaved + 1 
+      : Math.max(0, currentSaved - 1);
+
+    // Update the total_saved counter
+    const { error: updateError } = await supabase
+      .from(table)
+      .update({ total_saved: newSaved })
+      .eq('id', targetId);
+
+    if (updateError) {
+      console.error(`Error updating ${contentType} total_saved:`, updateError);
+    }
+
+    console.log(`Updated ${contentType} ${targetId} total_saved: ${currentSaved} → ${newSaved}`);
+  } catch (error) {
+    console.error(`Error in updateTotalSavedCounter for ${contentType}:`, error);
+  }
+};
+
+const updateSaveContent = async (
+  req: Request<{ targetId: string }, {}, SaveContentRequest>,
+  res: Response
+): Promise<any> => {
+  const { targetId } = req.params;
+  const { contentType, threadId, postId, commentId, subcommentId } = req.body;
+  const { id: user_id } = req.user!;
+
+  try {
+    // Validate content type
+    const validContentTypes = ['post', 'thread', 'comment', 'subcomment'];
+    if (!validContentTypes.includes(contentType)) {
+      return res.status(400).json({ error: 'Invalid content type' });
+    }
+
+    let finalPostId = postId || null;
+    let finalThreadId = threadId || null;
+    let finalCommentId = commentId || null;
+    let finalSubcommentId = subcommentId || null;
+
+    // Verify the target content exists and set main content ID
+    const tableConfig = {
+      post: 'posts',
+      thread: 'threads',
+      comment: 'threadcomments',
+      subcomment: 'threadsubcomments'
+    };
+
+    const table = tableConfig[contentType as keyof typeof tableConfig];
+    const { data: content, error: contentError } = await supabase
+      .from(table)
+      .select('id')
+      .eq('id', targetId)
+      .single();
+
+    if (contentError || !content) {
+      return res.status(404).json({ error: `${contentType} not found` });
+    }
+
+    // Set the main content ID to match target_id
+    switch (contentType) {
+      case 'post':
+        finalPostId = targetId;
+        break;
+      case 'thread':
+        finalThreadId = targetId;
+        // If threadId is provided, ensure we have post_id for threads
+        if (finalThreadId && !finalPostId) {
+          const { data: thread, error: threadError } = await supabase
+            .from('threads')
+            .select('post_id')
+            .eq('id', targetId)
+            .single();
+          
+          if (!threadError && thread) {
+            finalPostId = thread.post_id;
+          }
+        }
+        break;
+      case 'comment':
+        finalCommentId = targetId;
+        // If commentId is provided, ensure we have thread_id and post_id for comments
+        if (finalCommentId && (!finalThreadId || !finalPostId)) {
+          const { data: comment, error: commentError } = await supabase
+            .from('threadcomments')
+            .select('thread_id, post_id')
+            .eq('id', targetId)
+            .single();
+          
+          if (!commentError && comment) {
+            finalThreadId = finalThreadId || comment.thread_id;
+            finalPostId = finalPostId || comment.post_id;
+          }
+        }
+        break;
+      case 'subcomment':
+        finalSubcommentId = targetId;
+        // If subcommentId is provided, ensure we have comment_id, thread_id, and post_id for subcomments
+        if (finalSubcommentId && (!finalCommentId || !finalThreadId || !finalPostId)) {
+          const { data: subcomment, error: subcommentError } = await supabase
+            .from('threadsubcomments')
+            .select('comment_id')
+            .eq('id', targetId)
+            .single();
+          
+          if (!subcommentError && subcomment) {
+            finalCommentId = finalCommentId || subcomment.comment_id;
+            
+            // Get parent comment for thread_id and post_id
+            if (finalCommentId) {
+              const { data: comment, error: commentError } = await supabase
+                .from('threadcomments')
+                .select('thread_id, post_id')
+                .eq('id', finalCommentId)
+                .single();
+              
+              if (!commentError && comment) {
+                finalThreadId = finalThreadId || comment.thread_id;
+                finalPostId = finalPostId || comment.post_id;
+              }
+            }
+          }
+        }
+        break;
+    }
+
+    // Check if content already saved
+    const { data: existingSave, error: fetchError } = await supabase
+      .from('saved_content')
+      .select('id')
+      .eq('user_id', user_id)
+      .eq('target_id', targetId)
+      .eq('content_type', contentType)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({ error: fetchError.message });
+    }
+
+    if (existingSave) {
+      // Remove save (unsave)
+      const { error: deleteError } = await supabase
+        .from('saved_content')
+        .delete()
+        .eq('id', existingSave.id);
+
+      if (deleteError) {
+        return res.status(500).json({ error: deleteError.message });
+      }
+
+      // Decrement total_saved counter
+      await updateTotalSavedCounter(targetId, contentType, 'decrement');
+
+      return res.json({
+        success: true,
+        action: 'removed',
+        message: `${contentType} removed from saved`,
+        saved: false
+      });
+    } else {
+      // Add save - use the IDs provided in the request
+      const saveData: any = {
+        user_id,
+        content_type: contentType,
+        target_id: targetId,
+        post_id: finalPostId,
+        thread_id: finalThreadId,
+        comment_id: finalCommentId,
+        subcomment_id: finalSubcommentId
+      };
+
+      console.log('Inserting save data:', saveData);
+
+      const { data: newSave, error: insertError } = await supabase
+        .from('saved_content')
+        .insert(saveData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Insert error details:', insertError);
+        return res.status(500).json({ error: insertError.message });
+      }
+
+      // Increment total_saved counter
+      await updateTotalSavedCounter(targetId, contentType, 'increment');
+
+      return res.json({
+        success: true,
+        action: 'added',
+        message: `${contentType} saved successfully`,
+        saved: true,
+        data: newSave
+      });
+    }
+  } catch (error: any) {
+    console.error('Error in updateSaveContent:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const getSavedContent = async (req: Request, res: Response): Promise<any> => {
+  const { id: user_id } = req.user!;
+  const { contentType, limit = '10', offset = '0' } = req.query;
+
+  const validContentTypes = ['post', 'thread', 'comment', 'subcomment'];
+  const contentFilter = contentType as string;
+  
+  if (contentFilter && !validContentTypes.includes(contentFilter)) {
+    return res.status(400).json({ error: 'Invalid content type' });
+  }
+
+  try {
+    let query = supabase
+      .from('saved_content')
+      .select(`
+        *,
+        posts:post_id(*, profiles:user_id(username, avatar_url, first_name, last_name)),
+        threads:thread_id(*, profiles:user_id(username, avatar_url, first_name, last_name)),
+        comments:comment_id(*, 
+          profiles:user_id(username, avatar_url, first_name, last_name),
+          threads:thread_id(id, title),
+          posts:post_id(id, title)
+        ),
+        subcomments:subcomment_id(*, 
+          profiles:user_id(username, avatar_url, first_name, last_name),
+          threadcomments:comment_id(id, content, thread_id, post_id)
+        )
+      `)
+      .eq('user_id', user_id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+
+    if (contentFilter) {
+      query = query.eq('content_type', contentFilter);
+    }
+
+    const { data: savedItems, error } = await query;
+
+    if (error) {
+      console.error('Error fetching saved content:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    const enrichedItems = await Promise.all(
+      savedItems.map(async (item) => {
+        let contentData: any = {};
+        let authorProfile = null;
+        let parentInfo = null;
+
+        switch (item.content_type) {
+          case 'post':
+            contentData = item.posts;
+            authorProfile = item.posts?.profiles;
+            break;
+          case 'thread':
+            contentData = item.threads;
+            authorProfile = item.threads?.profiles;
+            break;
+          case 'comment':
+            contentData = item.comments;
+            authorProfile = item.comments?.profiles;
+            // Get parent thread/post info for comments
+            if (item.comments?.thread_id) {
+              const { data: thread } = await supabase
+                .from('threads')
+                .select('title')
+                .eq('id', item.comments.thread_id)
+                .single();
+              parentInfo = { type: 'thread', title: thread?.title, id: item.comments.thread_id };
+            } else if (item.comments?.post_id) {
+              const { data: post } = await supabase
+                .from('posts')
+                .select('title')
+                .eq('id', item.comments.post_id)
+                .single();
+              parentInfo = { type: 'post', title: post?.title, id: item.comments.post_id };
+            }
+            break;
+          case 'subcomment':
+            contentData = item.subcomments;
+            authorProfile = item.subcomments?.profiles;
+            // Get parent comment and thread info for subcomments
+            if (item.subcomments?.comment_id) {
+              const { data: parentComment } = await supabase
+                .from('threadcomments')
+                .select('content, thread_id, post_id')
+                .eq('id', item.subcomments.comment_id)
+                .single();
+              
+              if (parentComment?.thread_id) {
+                const { data: thread } = await supabase
+                  .from('threads')
+                  .select('title')
+                  .eq('id', parentComment.thread_id)
+                  .single();
+                parentInfo = { 
+                  type: 'thread', 
+                  title: thread?.title, 
+                  id: parentComment.thread_id,
+                  parentComment: parentComment.content
+                };
+              } else if (parentComment?.post_id) {
+                const { data: post } = await supabase
+                  .from('posts')
+                  .select('title')
+                  .eq('id', parentComment.post_id)
+                  .single();
+                parentInfo = { 
+                  type: 'post', 
+                  title: post?.title, 
+                  id: parentComment.post_id,
+                  parentComment: parentComment.content
+                };
+              }
+            }
+            break;
+        }
+
+        return {
+          id: item.id,
+          content_type: item.content_type,
+          target_id: item.target_id,
+          created_at: item.created_at,
+          content: contentData,
+          author: authorProfile,
+          parent_info: parentInfo,
+          post_id: item.post_id,
+          thread_id: item.thread_id,
+          comment_id: item.comment_id,
+          subcomment_id: item.subcomment_id
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: enrichedItems,
+      pagination: {
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+        total: enrichedItems.length
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error in getSavedContent:', error);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      message: error.message 
+    });
+  }
+};
+
 export {
   createComment,
   deleteComment,
@@ -962,5 +1409,6 @@ export {
   getComments,
   updateCommentReaction,
   updateCommentsVote,
+  updateSaveContent,
 };
 

@@ -9,14 +9,18 @@ import {
     getThreadsByUserId,
     toggleThreadStatus,
     updateVote,
+    getUserSavedThreads,
+    getUserThreads,
 } from '../controllers/threads/threads.controller';
 import {
     createComment,
     deleteComment,
     getComments,
+    getSavedContent,
     updateComment,
     updateCommentReaction,
     updateCommentsVote,
+    updateSaveContent,
 } from '../controllers/threads/comments.controller';
 import {
     createReply,
@@ -33,9 +37,12 @@ const router = express.Router();
 
 // ======================= threads ========================
 
-// get all threads(range)
 router.get('/get-all-threads', optionalAuthMiddleware, getAllThreads);
 
+router.get('/get-user-threads', authMiddleware, getUserThreads);
+
+router.get('/get-saved-threads', authMiddleware, getUserSavedThreads);
+  
 // create a new thread
 router.post('/create-thread', authMiddleware, createThread);
 
@@ -79,6 +86,10 @@ router.patch('/apply-comment-react/:comment_id', authMiddleware, updateCommentRe
 
 router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
 
+router.post('/comments/:targetId/save', authMiddleware, updateSaveContent);
+
+router.get('/get-saved-comments', authMiddleware, getSavedContent);
+
 
 // ======================= comment's replies ========================
 
@@ -98,6 +109,8 @@ router.delete('/delete-reply/:reply_id', authMiddleware, deleteReply);
 router.patch('/apply-reply-react/:reply_id', authMiddleware, updateReplyReaction);
 
 router.post('/subcomments/:targetId/vote', authMiddleware, updateCommentsVote);
+
+router.post('/subcomments/:targetId/save', authMiddleware, updateSaveContent);
 
 
 // ======================= Threads Spam ========================

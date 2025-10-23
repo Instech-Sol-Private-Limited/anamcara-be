@@ -1,6 +1,7 @@
 
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { createProfile } from '../controllers/users.controller';
 
 const router = Router();
 
@@ -11,5 +12,7 @@ router.get('/profile', authMiddleware, (req, res) => {
     data: req.user
   });
 });
+
+router.post('/', createProfile);
 
 export default router;
