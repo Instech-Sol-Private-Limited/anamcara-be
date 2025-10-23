@@ -371,11 +371,10 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
 
       // Get user saved status
       const { data: savedData } = await supabase
-        .from('saved_posts')
+        .from('saved_threads')
         .select('id')
         .eq('user_id', user_id)
-        .eq('target_id', thread_id)
-        .eq('target_type', 'thread')
+        .eq('thread_id', thread_id)
         .maybeSingle();
 
       if (savedData) userSaved = true;
@@ -446,7 +445,6 @@ const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Respon
   }
 };
 
-// get all threads
 const getAllThreads = async (req: Request, res: Response): Promise<any> => {
   const limit = parseInt(req.query.limit as string) || 10;
   const offset = parseInt(req.query.offset as string) || 0;
@@ -502,13 +500,12 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
 
           if (reactionData) userReaction = reactionData.type;
 
-          // Get user saved status
+          // Get user saved status - FIXED: using saved_threads table
           const { data: savedData } = await supabase
-            .from('saved_posts')
+            .from('saved_threads')
             .select('id')
             .eq('user_id', user_id)
-            .eq('target_id', thread.id)
-            .eq('target_type', 'thread')
+            .eq('thread_id', thread.id)
             .maybeSingle();
 
           if (savedData) userSaved = true;
@@ -570,6 +567,289 @@ const getAllThreads = async (req: Request, res: Response): Promise<any> => {
   } catch (err: any) {
     console.error('getAllThreads error:', err);
     return res.status(500).json({ error: 'Internal server error', message: err.message });
+  }
+};
+
+const getUserThreads = async (req: Request, res: Response): Promise<any> => {
+  const limit = parseInt(req.query.limit as string) || 10;
+  const offset = parseInt(req.query.offset as string) || 0;
+  const { id: user_id } = req.user!;
+
+  try {
+    // Get spammed thread IDs for filtering
+    let spammedThreadIds: string[] = [];
+
+    const { data: spammed, error: spamError } = await supabase
+      .from('threads_spam')
+      .select('thread_id')
+      .eq('user_id', user_id)
+
+    if (spamError) {
+      console.error('Error fetching spammed threads:', spamError);
+      return res.status(500).json({ error: 'Failed to fetch spammed threads.' });
+    }
+
+    spammedThreadIds = spammed?.map(item => item.thread_id) || [];
+
+    // Get user's threads
+    const { data: userThreads, error: threadError } = await supabase
+      .from('threads')
+      .select(`
+        *,
+        profiles!inner(
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          email
+      )
+      `)
+      .eq('author_id', user_id)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .order('publish_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (threadError) {
+      return res.status(500).json({ error: threadError.message });
+    }
+
+    // Filter out spammed threads
+    const filteredThreads = userThreads.filter(thread => !spammedThreadIds.includes(thread.id));
+
+    const threadsWithDetails = await Promise.all(
+      filteredThreads.map(async (thread) => {
+        let userReaction: string | null = null;
+        let userSaved = false;
+        let userVote: 'upvote' | 'downvote' | null = null;
+
+        // Get user reaction
+        const { data: reactionData } = await supabase
+          .from('thread_reactions')
+          .select('type')
+          .eq('user_id', user_id)
+          .eq('target_type', 'thread')
+          .eq('target_id', thread.id)
+          .maybeSingle();
+
+        if (reactionData) userReaction = reactionData.type;
+
+        // Get user saved status
+        const { data: savedData } = await supabase
+          .from('saved_threads')
+          .select('id')
+          .eq('user_id', user_id)
+          .eq('thread_id', thread.id)
+          .maybeSingle();
+
+        if (savedData) userSaved = true;
+
+        // Get user vote
+        const { data: voteData } = await supabase
+          .from('post_votes')
+          .select('vote_type')
+          .eq('user_id', user_id)
+          .eq('target_id', thread.id)
+          .eq('target_type', 'thread')
+          .maybeSingle();
+
+        if (voteData) userVote = voteData.vote_type;
+
+        // Get comment and reply counts
+        const { data: comments } = await supabase
+          .from('threadcomments')
+          .select('id')
+          .eq('thread_id', thread.id)
+          .eq('is_deleted', false);
+
+        const commentIds = comments?.map(c => c.id) || [];
+
+        const subcommentsResults = await Promise.all(
+          commentIds.map(commentId =>
+            supabase
+              .from('threadsubcomments')
+              .select('id')
+              .eq('comment_id', commentId)
+              .eq('is_deleted', false)
+          )
+        );
+
+        const totalComments = comments?.length || 0;
+        const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+
+        return {
+          ...thread,
+          user_reaction: userReaction,
+          user_saved: userSaved,
+          user_vote: userVote,
+          total_comments: totalComments + totalReplies,
+          total_supports: thread.total_supports || 0,
+          total_valuables: thread.total_valuables || 0,
+          total_funnies: thread.total_funnies || 0,
+          total_shockeds: thread.total_shockeds || 0,
+          total_moveds: thread.total_moveds || 0,
+          total_triggereds: thread.total_triggereds || 0,
+          total_upvotes: thread.total_upvotes || 0,
+          total_downvotes: thread.total_downvotes || 0,
+          total_echos: thread.total_echos || 0,
+          total_saved: thread.total_saved || 0,
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: threadsWithDetails,
+      pagination: {
+        limit,
+        offset,
+        total: threadsWithDetails.length,
+        hasMore: threadsWithDetails.length === limit
+      }
+    });
+
+  } catch (err: any) {
+    console.error('getUserThreads error:', err);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Internal server error', 
+      message: err.message 
+    });
+  }
+};
+
+const getUserSavedThreads = async (req: Request, res: Response): Promise<any> => {
+  const limit = parseInt(req.query.limit as string) || 10;
+  const offset = parseInt(req.query.offset as string) || 0;
+  const { id: user_id } = req.user!;
+
+  try {
+    // Get saved thread IDs first
+    const { data: savedThreads, error: savedError, count } = await supabase
+      .from('saved_threads')
+      .select('thread_id, created_at', { count: 'exact' })
+      .eq('user_id', user_id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (savedError) {
+      return res.status(500).json({ error: savedError.message });
+    }
+
+    if (!savedThreads || savedThreads.length === 0) {
+      return res.json({ success: true, data: [], pagination: { limit, offset, total: 0, hasMore: false } });
+    }
+
+    const threadIds = savedThreads.map(st => st.thread_id);
+    const savedAtMap = savedThreads.reduce((acc, st) => {
+      acc[st.thread_id] = st.created_at;
+      return acc;
+    }, {} as { [key: string]: string });
+
+    // Get thread details
+    const { data: threads, error: threadsError } = await supabase
+      .from('threads')
+      .select(`
+        *,
+        profiles:author_id (id, first_name, last_name, avatar_url, email)
+      `)
+      .in('id', threadIds)
+      .eq('is_active', true)
+      .eq('is_deleted', false);
+
+    if (threadsError) {
+      return res.status(500).json({ error: threadsError.message });
+    }
+
+    const threadsWithDetails = await Promise.all(
+      threads.map(async (thread) => {
+        let userReaction: string | null = null;
+        let userSaved = true; // Always true since these are saved threads
+        let userVote: 'upvote' | 'downvote' | null = null;
+
+        // Get user reaction
+        const { data: reactionData } = await supabase
+          .from('thread_reactions')
+          .select('type')
+          .eq('user_id', user_id)
+          .eq('target_type', 'thread')
+          .eq('target_id', thread.id)
+          .maybeSingle();
+
+        if (reactionData) userReaction = reactionData.type;
+
+        // Get user vote
+        const { data: voteData } = await supabase
+          .from('post_votes')
+          .select('vote_type')
+          .eq('user_id', user_id)
+          .eq('target_id', thread.id)
+          .eq('target_type', 'thread')
+          .maybeSingle();
+
+        if (voteData) userVote = voteData.vote_type;
+
+        // Get comment and reply counts
+        const { data: comments } = await supabase
+          .from('threadcomments')
+          .select('id')
+          .eq('thread_id', thread.id)
+          .eq('is_deleted', false);
+
+        const commentIds = comments?.map(c => c.id) || [];
+
+        const subcommentsResults = await Promise.all(
+          commentIds.map(commentId =>
+            supabase
+              .from('threadsubcomments')
+              .select('id')
+              .eq('comment_id', commentId)
+              .eq('is_deleted', false)
+          )
+        );
+
+        const totalComments = comments?.length || 0;
+        const totalReplies = subcommentsResults.reduce((sum, result) => sum + (result.data?.length || 0), 0);
+
+        return {
+          ...thread,
+          user_reaction: userReaction,
+          user_saved: userSaved,
+          user_vote: userVote,
+          total_comments: totalComments + totalReplies,
+          total_supports: thread.total_supports || 0,
+          total_valuables: thread.total_valuables || 0,
+          total_funnies: thread.total_funnies || 0,
+          total_shockeds: thread.total_shockeds || 0,
+          total_moveds: thread.total_moveds || 0,
+          total_triggereds: thread.total_triggereds || 0,
+          total_upvotes: thread.total_upvotes || 0,
+          total_downvotes: thread.total_downvotes || 0,
+          total_echos: thread.total_echos || 0,
+          total_saved: thread.total_saved || 0,
+          saved_at: savedThreads.find(st => st.thread_id === thread.id)?.created_at
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: threadsWithDetails,
+      pagination: {
+        limit,
+        offset,
+        total: threadsWithDetails.length,
+        hasMore: threadsWithDetails.length === limit
+      }
+    });
+
+  } catch (err: any) {
+    console.error('getUserSavedThreads error:', err);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Internal server error', 
+      message: err.message 
+    });
   }
 };
 
@@ -1129,6 +1409,8 @@ export {
   updateThread,
   getThreadDetails,
   getAllThreads,
+  getUserThreads,
+  getUserSavedThreads,
   updateReaction,
   getThreadsByUserId,
   toggleThreadStatus,

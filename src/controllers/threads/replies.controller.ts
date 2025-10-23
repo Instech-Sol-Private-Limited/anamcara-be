@@ -295,7 +295,7 @@ const getReplies = async (
         return res.status(500).json({ error: error.message });
     }
 
-    // Get all reply IDs for batch vote count operations
+    // Get all reply IDs for batch operations
     const replyIds = replies.map(reply => reply.id);
 
     // ✅ Batch fetch vote counts for all replies
@@ -305,9 +305,18 @@ const getReplies = async (
         .in('target_id', replyIds)
         .eq('target_type', 'subcomment');
 
-    // Create lookup maps for vote counts
+    // ✅ Batch fetch saved status for all replies
+    const { data: savedReplies } = await supabase
+        .from('saved_content')
+        .select('target_id')
+        .in('target_id', replyIds)
+        .eq('user_id', user_id)
+        .eq('content_type', 'subcomment');
+
+    // Create lookup maps for vote counts and saved status
     const upvotesCountMap = new Map();
     const downvotesCountMap = new Map();
+    const savedStatusMap = new Map();
 
     // Count votes per reply
     allVotes?.forEach(vote => {
@@ -318,6 +327,11 @@ const getReplies = async (
             const count = downvotesCountMap.get(vote.target_id) || 0;
             downvotesCountMap.set(vote.target_id, count + 1);
         }
+    });
+
+    // Map saved status per reply
+    savedReplies?.forEach(saved => {
+        savedStatusMap.set(saved.target_id, true);
     });
 
     const repliesWithReactions = await Promise.all(replies.map(async (reply) => {
@@ -349,12 +363,14 @@ const getReplies = async (
         const totalUpvotes = upvotesCountMap.get(reply.id) || 0;
         const totalDownvotes = downvotesCountMap.get(reply.id) || 0;
         const netScore = Math.max(0, totalUpvotes - totalDownvotes);
+        const user_saved = savedStatusMap.get(reply.id) || false;
 
         return { 
             ...reply, 
             user_reaction: userReaction,
             user_vote: userVote,
-            net_score: netScore
+            net_score: netScore,
+            user_saved: user_saved
         };
     }));
 

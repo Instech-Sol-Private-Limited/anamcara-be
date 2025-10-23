@@ -22,6 +22,7 @@ import {
   updateComment,
   updateCommentReaction,
   updateCommentsVote,
+  updateSaveContent,
 } from '../controllers/threads/comments.controller';
 import {
   createReply,
@@ -101,6 +102,7 @@ router.patch('/comments/:comment_id/apply-react', authMiddleware, updateCommentR
 
 router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
 
+router.post('/comments/:targetId/save', authMiddleware, updateSaveContent);
 
 
 // ========== Comment Replies ==========
@@ -115,5 +117,7 @@ router.delete('/replies/:reply_id', authMiddleware, deleteReply);
 router.patch('/replies/:reply_id/apply-react', authMiddleware, updateReplyReaction);
 
 router.post('/subcomments/:targetId/vote', authMiddleware, updateCommentsVote);
+
+router.post('/subcomments/:targetId/save', authMiddleware, updateSaveContent);
 
 export default router;
