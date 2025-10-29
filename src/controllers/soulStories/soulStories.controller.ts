@@ -4,6 +4,86 @@ import 'dotenv/config';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { supabase } from "../../app";
+import { sendNotification } from "../../sockets/emitNotification";
+
+type StoryReactionType = 'like' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
+
+type VoteType = 'upvote' | 'downvote';
+type VoteTargetType = 'story' | 'thread';
+
+interface StoryVote {
+  id: string;
+  user_id: string;
+  target_id: string;
+  target_type: VoteTargetType;
+  vote_type: VoteType;
+  created_at: string;
+  updated_at: string;
+}
+
+type StoryFieldMap = {
+  [key in StoryReactionType]:
+  | 'total_likes' | 'total_supports' | 'total_valuables' | 'total_funnies' | 'total_shockeds' | 'total_moveds' | 'total_triggereds';
+};
+
+interface GrammerCorrectionResultProps {
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+const storyFieldMap: StoryFieldMap = {
+  like: 'total_likes',
+  support: 'total_supports',
+  valuable: 'total_valuables',
+  funny: 'total_funnies',
+  shocked: 'total_shockeds',
+  moved: 'total_moveds',
+  triggered: 'total_triggereds'
+};
+
+const soulpointsMap: Record<StoryReactionType, number> = {
+  'like': 2,
+  'support': 3,
+  'valuable': 4,
+  'funny': 2,
+  'shocked': 1,
+  'moved': 3,
+  'triggered': 1
+};
+
+const parseGrammarCorrectionResult = (data: string): GrammerCorrectionResultProps => {
+  const titleMatch = data.match(/\*\*Title:\*\*\s*(.+?)(?:\n|$)/);
+  const descMatch = data.match(/\*\*Description:\*\*\s*([\s\S]+?)(?:\n\*\*Tags:|$)/);
+  const tagsMatch = data.match(/\*\*Tags:\*\*\s*\n([\s\S]+)$/);
+
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const description = descMatch ? descMatch[1].trim().replace(/\n/g, ' ') : '';
+
+  let tags: string[] = [];
+  if (tagsMatch) {
+    tags = tagsMatch[1]
+      .split('\n')
+      .map(line => line.replace(/^\*\s*/, '').trim())
+      .filter(tag => tag.length > 0);
+  }
+
+  return { title, description, tags };
+};
+
+const getReactionDisplayName = (reactionType: StoryReactionType): string => {
+  const displayNames: Record<StoryReactionType, string> = {
+    'like': 'like',
+    'support': 'support',
+    'valuable': 'valuable reaction',
+    'funny': 'funny reaction',
+    'shocked': 'shocked reaction',
+    'moved': 'moved reaction',
+    'triggered': 'triggered reaction'
+  };
+  return displayNames[reactionType] || reactionType;
+};
 
 export const createStory = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -21,17 +101,16 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       story_type,
       thumbnail_url,
       asset_type,
-      asset_url,
+      asset_urls,
       episodes = [],
       monetization_type = 'free',
       price = 0,
       free_pages = 0,
       free_episodes = 0,
       remix = false,
-      co_authors // OPTIONAL: Can be undefined, null, or empty array
+      co_authors
     } = req.body;
 
-    // Basic validation
     if (!title?.trim() || !category?.trim() || !description?.trim() || !story_type?.trim()) {
       res.status(400).json({
         success: false,
@@ -40,18 +119,34 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Determine content structure based on story_type and episodes
-    const content_structure = story_type === 'episodes' ? 'episodes' : 'single_asset';
+    const content_type = story_type === 'episodes' ? 'episodes' : 'single';
+    let finalUrls: string[] = [];
 
+    if (content_type === 'single') {
+      if (asset_urls) {
+        if (Array.isArray(asset_urls)) {
+          finalUrls = asset_urls.filter(url => url?.trim());
+        } else if (typeof asset_urls === 'string') {
+          finalUrls = [asset_urls.trim()];
+        }
+      }
 
-    if (content_structure === 'single_asset') {
-      if (!asset_url?.trim() || !asset_type?.trim()) {
+      if (finalUrls.length === 0) {
         res.status(400).json({
           success: false,
-          message: 'Missing required fields for single asset: asset_url, asset_type'
+          message: 'Missing required fields for single asset: at least one asset URL is required'
         });
         return;
       }
+
+      if (!asset_type?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'Missing required field: asset_type'
+        });
+        return;
+      }
+
       if (!['video', 'document'].includes(asset_type)) {
         res.status(400).json({
           success: false,
@@ -60,23 +155,19 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
         return;
       }
     } else {
-      // Episode-based validation - make episodes optional
       if (episodes && episodes.length > 0) {
-        // Validate each episode only if episodes are provided
         for (const [index, episode] of episodes.entries()) {
           if (!episode.video_url?.trim()) {
             res.status(400).json({
               success: false,
-              message: `Episode ${index + 1} is missing required fields: title, video_url`
+              message: `Episode ${index + 1} is missing required field: video_url`
             });
             return;
           }
         }
       }
-      // If no episodes provided, that's fine - it's just a story without episodes
     }
 
-    // Monetization type validation
     if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
       res.status(400).json({
         success: false,
@@ -85,7 +176,6 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Price validation for premium content
     if (monetization_type !== 'free' && price <= 0) {
       res.status(400).json({
         success: false,
@@ -94,7 +184,6 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Free content validation
     if (free_pages < 0 || free_episodes < 0) {
       res.status(400).json({
         success: false,
@@ -111,16 +200,15 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       category: category.trim(),
       story_type: story_type.trim(),
       thumbnail_url: thumbnail_url?.trim() || null,
-      asset_url: asset_url?.trim() || null, // Always use what frontend sends
-      asset_type: asset_type || null, // Always use what frontend sends
+      asset_urls: finalUrls,
+      asset_type: asset_type || null,
       monetization_type,
       price,
       free_pages,
       free_episodes,
       status: 'draft',
-      content_type: content_structure,
+      content_type: content_type,
       remix,
-      // ONLY add co_authors if it exists and has values
       ...(co_authors && co_authors.length > 0 && { co_authors })
     };
 
@@ -139,6 +227,668 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
     });
   }
 };
+
+export const updateStory = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { story_id } = req.params;
+    const {
+      title,
+      description,
+      tags,
+      category,
+      story_type,
+      thumbnail_url,
+      asset_type,
+      asset_url,
+      episodes,
+      monetization_type,
+      price,
+      free_pages,
+      free_episodes,
+      remix,
+      co_authors,
+      status
+    } = req.body;
+
+    if (!story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Story ID is required'
+      });
+      return;
+    }
+
+    // ✅ Only validate fields that are provided
+    const updateData: any = {};
+
+    // Title validation (if provided)
+    if (title !== undefined) {
+      if (!title?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'Title cannot be empty if provided'
+        });
+        return;
+      }
+      updateData.title = title.trim();
+    }
+
+    // Description validation (if provided)
+    if (description !== undefined) {
+      if (!description?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'Description cannot be empty if provided'
+        });
+        return;
+      }
+      updateData.description = description.trim();
+    }
+
+    // Tags (if provided)
+    if (tags !== undefined) {
+      updateData.tags = tags;
+    }
+
+    // Category validation (if provided)
+    if (category !== undefined) {
+      if (!category?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'Category cannot be empty if provided'
+        });
+        return;
+      }
+      updateData.category = category.trim();
+    }
+
+    // Story type validation (if provided)
+    if (story_type !== undefined) {
+      if (!story_type?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'Story type cannot be empty if provided'
+        });
+        return;
+      }
+      updateData.story_type = story_type.trim();
+    }
+
+    // Thumbnail URL (if provided)
+    if (thumbnail_url !== undefined) {
+      updateData.thumbnail_url = thumbnail_url?.trim() || null;
+    }
+
+    // Asset validation (only if both asset_url and asset_type are provided)
+    if (asset_url !== undefined || asset_type !== undefined) {
+      if (asset_url !== undefined) {
+        updateData.asset_url = asset_url?.trim() || null;
+      }
+      if (asset_type !== undefined) {
+        updateData.asset_type = asset_type;
+      }
+
+      // Validate asset type if provided
+      if (asset_type && !['video', 'document'].includes(asset_type)) {
+        res.status(400).json({
+          success: false,
+          message: 'asset_type must be either "video" or "document"'
+        });
+        return;
+      }
+    }
+
+    // Monetization validation (if provided)
+    if (monetization_type !== undefined) {
+      if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
+        res.status(400).json({
+          success: false,
+          message: 'monetization_type must be one of: free, premium, subscription'
+        });
+        return;
+      }
+      updateData.monetization_type = monetization_type;
+    }
+
+    // Price validation (if provided)
+    if (price !== undefined) {
+      if (monetization_type && monetization_type !== 'free' && price <= 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Price must be greater than 0 for premium content'
+        });
+        return;
+      }
+      updateData.price = price;
+    }
+
+    // Free pages/episodes (if provided)
+    if (free_pages !== undefined) {
+      if (free_pages < 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Free pages cannot be negative'
+        });
+        return;
+      }
+      updateData.free_pages = free_pages;
+    }
+
+    if (free_episodes !== undefined) {
+      if (free_episodes < 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Free episodes cannot be negative'
+        });
+        return;
+      }
+      updateData.free_episodes = free_episodes;
+    }
+
+    // Remix (if provided)
+    if (remix !== undefined) {
+      updateData.remix = remix;
+    }
+
+    // Co-authors (if provided)
+    if (co_authors !== undefined) {
+      if (co_authors && co_authors.length > 0) {
+        updateData.co_authors = co_authors;
+      } else {
+        updateData.co_authors = [];
+      }
+    }
+
+    // Status (if provided)
+    if (status !== undefined) {
+      updateData.status = status;
+    }
+
+    // Content type (if story_type changed)
+    if (updateData.story_type) {
+      updateData.content_type = updateData.story_type === 'episodes' ? 'episodes' : 'single_asset';
+    }
+
+    // Add updated timestamp
+    updateData.updated_at = new Date().toISOString();
+    const result = await soulStoriesServices.updateStory(story_id, updateData, episodes, userId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Story updated successfully',
+      story: result.story
+    });
+
+  } catch (error) {
+    console.error('Error updating story:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to update story'
+    });
+  }
+};
+
+export const getUserStories = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const page = parseInt(req.query.page as string) || 0;
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: User not authenticated'
+      });
+      return;
+    }
+
+    if (limit > 50) {
+      res.status(400).json({
+        success: false,
+        error: 'Limit cannot exceed 50 stories per request'
+      });
+      return;
+    }
+
+    // Fetch stories with pagination
+    const { data: stories, error: storiesError, count } = await supabase
+      .from('soul_stories')
+      .select(`
+        *,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          email,
+          username
+        )
+      `, { count: 'exact' })
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .range(page * limit, (page + 1) * limit - 1);
+
+    if (storiesError) throw storiesError;
+
+    if (!stories || stories.length === 0) {
+      res.status(200).json({
+        success: true,
+        data: {
+          stories: []
+        },
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          hasMore: false
+        }
+      });
+      return;
+    }
+
+    const storyIds = stories.map(story => story.id);
+
+    // Fetch episodes
+    const { data: episodes, error: episodesError } = await supabase
+      .from('soul_story_episodes')
+      .select('*')
+      .in('story_id', storyIds)
+      .order('episode_number', { ascending: true });
+
+    if (episodesError) throw episodesError;
+
+    const storiesWithDetails = await Promise.all(
+      stories.map(async (story) => {
+        const { data: userReaction } = await supabase
+          .from('soul_story_reactions')
+          .select('type')
+          .eq('user_id', userId)
+          .eq('target_id', story.id)
+          .eq('target_type', 'story')
+          .maybeSingle();
+
+        // Fetch user vote
+        const { data: userVote } = await supabase
+          .from('story_votes')
+          .select('vote_type')
+          .eq('user_id', userId)
+          .eq('target_id', story.id)
+          .eq('target_type', 'story')
+          .maybeSingle();
+
+        const { data: savedData } = await supabase
+          .from('saved_stories')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('story_id', story.id)
+          .maybeSingle();
+
+        const { data: echoData } = await supabase
+          .from('story_echos')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('story_id', story.id)
+          .maybeSingle();
+
+        const [
+          { count: total_upvotes },
+          { count: total_downvotes },
+          { count: total_echos },
+          { count: total_saved },
+          { data: reactionsCount }
+        ] = await Promise.all([
+          supabase
+            .from('story_votes')
+            .select('*', { count: 'exact', head: true })
+            .eq('target_id', story.id)
+            .eq('vote_type', 'upvote')
+            .eq('target_type', 'story'),
+          
+          supabase
+            .from('story_votes')
+            .select('*', { count: 'exact', head: true })
+            .eq('target_id', story.id)
+            .eq('vote_type', 'downvote')
+            .eq('target_type', 'story'),
+          
+          supabase
+            .from('story_echos')
+            .select('*', { count: 'exact', head: true })
+            .eq('story_id', story.id),
+          
+          supabase
+            .from('saved_stories')
+            .select('*', { count: 'exact', head: true })
+            .eq('story_id', story.id),
+          
+          supabase
+            .from('soul_story_reactions')
+            .select('type')
+            .eq('target_id', story.id)
+            .eq('target_type', 'story')
+        ]);
+
+        const reactionCounts = {
+          total_likes: 0,
+          total_supports: 0,
+          total_valuables: 0,
+          total_funnies: 0,
+          total_shockeds: 0,
+          total_moveds: 0,
+          total_triggereds: 0
+        };
+
+        if (reactionsCount) {
+          reactionsCount.forEach(reaction => {
+            const field = `total_${reaction.type}s`;
+            if (reactionCounts.hasOwnProperty(field)) {
+              reactionCounts[field as keyof typeof reactionCounts]++;
+            }
+          });
+        }
+
+        const storyEpisodes = episodes ? episodes.filter(ep => ep.story_id === story.id) : [];
+
+        return {
+          id: story.id,
+          title: story.title,
+          description: story.description,
+          tags: story.tags || [],
+          category: story.category,
+          story_type: story.story_type,
+          thumbnail_url: story.thumbnail_url,
+          asset_urls: story.asset_urls || [],
+          asset_type: story.asset_type,
+          monetization_type: story.monetization_type,
+          price: story.price,
+          free_pages: story.free_pages,
+          free_episodes: story.free_episodes,
+          status: story.status,
+          content_type: story.content_type,
+          total_views: story.total_views || 0,
+          is_boosted: story.is_boosted || false,
+          boost_type: story.boost_type,
+          boost_end_date: story.boost_end_date,
+          remix: story.remix || false,
+          active_status: story.active_status !== false,
+          co_authors: story.co_authors || [],
+          total_shares: story.total_shares || 0,
+          created_at: story.created_at,
+          updated_at: story.updated_at,
+          
+          // User interaction data
+          user_reaction: userReaction?.type || null,
+          user_vote: userVote?.vote_type || null,
+          user_saved: !!savedData,
+          saved_id: savedData?.id || null,
+          user_echo: !!echoData,
+          echo_id: echoData?.id || null,
+          
+          // Total counts
+          total_upvotes: total_upvotes || 0,
+          total_downvotes: total_downvotes || 0,
+          total_echos: total_echos || 0,
+          total_saved: total_saved || 0,
+          
+          // Reaction counts
+          ...reactionCounts,
+          
+          // Author profile
+          author: story.profiles ? {
+            id: story.profiles.id,
+            first_name: story.profiles.first_name,
+            last_name: story.profiles.last_name,
+            avatar_url: story.profiles.avatar_url,
+            email: story.profiles.email,
+            username: story.profiles.username
+          } : null,
+          
+          // Episodes
+          episodes: storyEpisodes.map(ep => ({
+            id: ep.id,
+            episode_number: ep.episode_number,
+            title: ep.title,
+            description: ep.description,
+            video_url: ep.video_url,
+            thumbnail_url: ep.thumbnail_url,
+            total_views: ep.total_views || 0,
+            created_at: ep.created_at
+          }))
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        stories: storiesWithDetails
+      },
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        hasMore: stories.length === limit
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in getUserStories service:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user stories',
+      data: {
+        stories: []
+      }
+    });
+  }
+};
+
+export const updateSoulStoryReaction = async (
+  req: Request<{ soulStoryId: string }, {}, { type: StoryReactionType }>,
+  res: Response
+): Promise<any> => {
+  const { soulStoryId } = req.params;
+  const { type } = req.body;
+  const { id: user_id } = req.user!;
+
+  if (!user_id || !storyFieldMap[type]) {
+    return res.status(400).json({ error: 'Invalid user or reaction type.' });
+  }
+
+  const targetType = 'story'; 
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('soul_story_reactions')
+    .select('*')
+    .eq('user_id', user_id)
+    .eq('target_id', soulStoryId)
+    .eq('target_type', targetType)
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json({ error: fetchError.message });
+  }
+
+  const { data: soulStoryData, error: soulStoryError } = await supabase
+    .from('soul_stories')
+    .select('author_id, total_likes, total_supports, total_valuables, total_funnies, total_shockeds, total_moveds, total_triggereds')
+    .eq('id', soulStoryId)
+    .single();
+
+  if (soulStoryError || !soulStoryData) {
+    return res.status(404).json({ error: 'Soul story not found!' });
+  }
+
+  const shouldSendNotification = soulStoryData.author_id !== user_id;
+
+  let authorProfile = null;
+  if (shouldSendNotification) {
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('email, first_name, last_name')
+      .eq('id', soulStoryData.author_id)
+      .single();
+
+    if (!profileError && profileData) {
+      authorProfile = profileData;
+    }
+  }
+
+  const updates = {
+    total_likes: soulStoryData.total_likes ?? 0,
+    total_supports: soulStoryData.total_supports ?? 0,
+    total_valuables: soulStoryData.total_valuables ?? 0,
+    total_funnies: soulStoryData.total_funnies ?? 0,
+    total_shockeds: soulStoryData.total_shockeds ?? 0,
+    total_moveds: soulStoryData.total_moveds ?? 0,
+    total_triggereds: soulStoryData.total_triggereds ?? 0,
+  };
+
+  if (existing) {
+    if (existing.type === type) {
+      // Remove reaction
+      const field = storyFieldMap[type];
+      updates[field] = Math.max(0, updates[field] - 1);
+
+      const { error: deleteError } = await supabase
+        .from('soul_story_reactions')
+        .delete()
+        .eq('id', existing.id);
+
+      if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+      const { error: updateSoulStoryError } = await supabase
+        .from('soul_stories')
+        .update({ [field]: updates[field] })
+        .eq('id', soulStoryId);
+
+      if (updateSoulStoryError) return res.status(500).json({ error: updateSoulStoryError.message });
+
+      if (shouldSendNotification && authorProfile) {
+        await sendNotification({
+          recipientEmail: authorProfile.email,
+          recipientUserId: soulStoryData.author_id,
+          actorUserId: user_id,
+          threadId: soulStoryId,
+          message: `_${getReactionDisplayName(type)}_ reaction was removed from your soul story.`,
+          type: 'soul_story_reaction_removed',
+          metadata: {
+            reaction_type: type,
+            soul_story_id: soulStoryId,
+            actor_user_id: user_id
+          }
+        });
+      }
+
+      return res.status(200).json({ message: `${type} removed from soul story!` });
+    }
+
+    // Update reaction type
+    const prevField = storyFieldMap[existing.type as StoryReactionType];
+    const currentField = storyFieldMap[type];
+
+    updates[prevField] = Math.max(0, updates[prevField] - 1);
+    updates[currentField] += 1;
+
+    const { error: updateReactionError } = await supabase
+      .from('soul_story_reactions')
+      .update({ type, updated_by: user_id })
+      .eq('id', existing.id);
+
+    if (updateReactionError) return res.status(500).json({ error: updateReactionError.message });
+
+    const { error: updateSoulStoryError } = await supabase
+      .from('soul_stories')
+      .update({
+        [prevField]: updates[prevField],
+        [currentField]: updates[currentField],
+      })
+      .eq('id', soulStoryId);
+
+    if (updateSoulStoryError) return res.status(500).json({ error: updateSoulStoryError.message });
+
+    if (shouldSendNotification && authorProfile) {
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: soulStoryData.author_id,
+        actorUserId: user_id,
+        threadId: soulStoryId,
+        message: `@${authorProfile.first_name} ${authorProfile.last_name} changed their reaction to _${getReactionDisplayName(type)}_ on your soul story.`,
+        type: 'soul_story_reaction_updated',
+        metadata: {
+          previous_reaction_type: existing.type,
+          new_reaction_type: type,
+          soul_story_id: soulStoryId,
+          actor_user_id: user_id
+        }
+      });
+    }
+
+    return res.status(200).json({ message: `Soul story reaction updated to ${type}!` });
+  } else {
+    // Add new reaction
+    const field = storyFieldMap[type];
+    updates[field] += 1;
+
+    const { error: insertError } = await supabase
+      .from('soul_story_reactions')
+      .insert([{
+        user_id,
+        target_id: soulStoryId,
+        target_type: targetType,
+        type
+      }]);
+
+    if (insertError) return res.status(500).json({ error: insertError.message });
+
+    const { error: updateSoulStoryError } = await supabase
+      .from('soul_stories')
+      .update({ [field]: updates[field] })
+      .eq('id', soulStoryId);
+
+    if (updateSoulStoryError) return res.status(500).json({ error: updateSoulStoryError.message });
+
+    if (shouldSendNotification && authorProfile) {
+      const soulpoints = soulpointsMap[type] || 0;
+
+      if (soulpoints > 0) {
+        const { error: soulpointsError } = await supabase.rpc('increment_soulpoints', {
+          p_user_id: soulStoryData.author_id,
+          p_points: soulpoints
+        });
+
+        if (soulpointsError) {
+          console.error('Error updating SoulPoints:', soulpointsError);
+        }
+      }
+
+      await sendNotification({
+        recipientEmail: authorProfile.email,
+        recipientUserId: soulStoryData.author_id,
+        actorUserId: user_id,
+        threadId: soulStoryId,
+        message: `@${authorProfile.first_name} ${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your soul story. ${soulpoints > 0 ? `+${soulpoints} SoulPoints added!` : ''}`,
+        type: 'soul_story_reaction_added',
+        metadata: {
+          reaction_type: type,
+          soul_story_id: soulStoryId,
+          actor_user_id: user_id,
+          soulpoints
+        }
+      });
+    }
+
+    return res.status(200).json({ message: `${type} added to soul story!` });
+  }
+};
+
 
 export const getAnalytics = async (req: Request, res: Response) => {
   try {
@@ -174,12 +924,8 @@ export const getStories = async (req: Request, res: Response) => {
       return;
     }
 
-    const { type } = req.params; // 'all', 'animation', 'book', 'video-drama', etc.
-    const {
-      page,       // page number
-      limit,     // items per page
-      sort = 'newest' // sorting: 'newest', 'oldest', 'popular', 'rating'
-    } = req.query;
+    const { type } = req.params;
+    const { page, limit, sort = 'newest' } = req.query;
 
     const response = await soulStoriesServices.getStories(userId, type, {
       page: parseInt(page as string),
@@ -574,53 +1320,6 @@ export const updateCommentReaction = async (req: Request, res: Response): Promis
   }
 };
 
-export const updateStoryReaction = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const { story_id } = req.params;
-    const { type } = req.body;
-
-    if (!['like', 'dislike', 'insightful', 'heart', 'hug', 'soul'].includes(type)) {
-      res.status(400).json({
-        success: false,
-        message: 'Invalid reaction type'
-      });
-      return;
-    }
-
-    const result = await soulStoriesServices.updateStoryReaction(userId, story_id, type);
-
-    if (result.success && result.data) {
-      res.status(200).json({
-        success: true,
-        message: result.message,
-        data: {
-          reaction_counts: result.data.reaction_counts,
-          user_reaction: result.data.user_reaction,
-          total_reactions: result.data.total_reactions
-        }
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        message: result.message
-      });
-    }
-
-  } catch (error) {
-    console.error('Error in updateStoryReaction controller:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Failed to update story reaction'
-    });
-  }
-};
 
 export const createReply = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1061,212 +1760,7 @@ export const generateQuickSuggestion = async (req: Request, res: Response): Prom
   }
 };
 
-export const updateStory = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
 
-    const { story_id } = req.params;
-    const {
-      title,
-      description,
-      tags,
-      category,
-      story_type,
-      thumbnail_url,
-      asset_type,
-      asset_url,
-      episodes,
-      monetization_type,
-      price,
-      free_pages,
-      free_episodes,
-      remix,
-      co_authors,
-      status
-    } = req.body;
-
-    if (!story_id) {
-      res.status(400).json({
-        success: false,
-        message: 'Story ID is required'
-      });
-      return;
-    }
-
-    // ✅ Only validate fields that are provided
-    const updateData: any = {};
-
-    // Title validation (if provided)
-    if (title !== undefined) {
-      if (!title?.trim()) {
-        res.status(400).json({
-          success: false,
-          message: 'Title cannot be empty if provided'
-        });
-        return;
-      }
-      updateData.title = title.trim();
-    }
-
-    // Description validation (if provided)
-    if (description !== undefined) {
-      if (!description?.trim()) {
-        res.status(400).json({
-          success: false,
-          message: 'Description cannot be empty if provided'
-        });
-        return;
-      }
-      updateData.description = description.trim();
-    }
-
-    // Tags (if provided)
-    if (tags !== undefined) {
-      updateData.tags = tags;
-    }
-
-    // Category validation (if provided)
-    if (category !== undefined) {
-      if (!category?.trim()) {
-        res.status(400).json({
-          success: false,
-          message: 'Category cannot be empty if provided'
-        });
-        return;
-      }
-      updateData.category = category.trim();
-    }
-
-    // Story type validation (if provided)
-    if (story_type !== undefined) {
-      if (!story_type?.trim()) {
-        res.status(400).json({
-          success: false,
-          message: 'Story type cannot be empty if provided'
-        });
-        return;
-      }
-      updateData.story_type = story_type.trim();
-    }
-
-    // Thumbnail URL (if provided)
-    if (thumbnail_url !== undefined) {
-      updateData.thumbnail_url = thumbnail_url?.trim() || null;
-    }
-
-    // Asset validation (only if both asset_url and asset_type are provided)
-    if (asset_url !== undefined || asset_type !== undefined) {
-      if (asset_url !== undefined) {
-        updateData.asset_url = asset_url?.trim() || null;
-      }
-      if (asset_type !== undefined) {
-        updateData.asset_type = asset_type;
-      }
-
-      // Validate asset type if provided
-      if (asset_type && !['video', 'document'].includes(asset_type)) {
-        res.status(400).json({
-          success: false,
-          message: 'asset_type must be either "video" or "document"'
-        });
-        return;
-      }
-    }
-
-    // Monetization validation (if provided)
-    if (monetization_type !== undefined) {
-      if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
-        res.status(400).json({
-          success: false,
-          message: 'monetization_type must be one of: free, premium, subscription'
-        });
-        return;
-      }
-      updateData.monetization_type = monetization_type;
-    }
-
-    // Price validation (if provided)
-    if (price !== undefined) {
-      if (monetization_type && monetization_type !== 'free' && price <= 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Price must be greater than 0 for premium content'
-        });
-        return;
-      }
-      updateData.price = price;
-    }
-
-    // Free pages/episodes (if provided)
-    if (free_pages !== undefined) {
-      if (free_pages < 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Free pages cannot be negative'
-        });
-        return;
-      }
-      updateData.free_pages = free_pages;
-    }
-
-    if (free_episodes !== undefined) {
-      if (free_episodes < 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Free episodes cannot be negative'
-        });
-        return;
-      }
-      updateData.free_episodes = free_episodes;
-    }
-
-    // Remix (if provided)
-    if (remix !== undefined) {
-      updateData.remix = remix;
-    }
-
-    // Co-authors (if provided)
-    if (co_authors !== undefined) {
-      if (co_authors && co_authors.length > 0) {
-        updateData.co_authors = co_authors;
-      } else {
-        updateData.co_authors = [];
-      }
-    }
-
-    // Status (if provided)
-    if (status !== undefined) {
-      updateData.status = status;
-    }
-
-    // Content type (if story_type changed)
-    if (updateData.story_type) {
-      updateData.content_type = updateData.story_type === 'episodes' ? 'episodes' : 'single_asset';
-    }
-
-    // Add updated timestamp
-    updateData.updated_at = new Date().toISOString();
-    const result = await soulStoriesServices.updateStory(story_id, updateData, episodes, userId);
-
-    res.status(200).json({
-      success: true,
-      message: 'Story updated successfully',
-      story: result.story
-    });
-
-  } catch (error) {
-    console.error('Error updating story:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: 'Failed to update story'
-    });
-  }
-};
 
 export const getKeywordSuggestions = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1336,7 +1830,6 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // No access check - always free
     const { text, maxChunkSize = 500 } = req.body;
 
     if (!text?.trim()) {
@@ -1350,10 +1843,13 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
     const result = await soulStoriesServices.correctGrammar(text, maxChunkSize);
 
     if (result.success) {
+      // Parse the formatted string into JSON
+      const parsedData = parseGrammarCorrectionResult(result.data?.correctedText);
+
       res.status(200).json({
         success: true,
         message: 'Grammar correction completed successfully',
-        data: result.data
+        data: parsedData
       });
     } else {
       res.status(500).json({
@@ -1370,6 +1866,7 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
     });
   }
 };
+
 
 export const checkPdfQuality = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1581,3 +2078,9 @@ export const purchaseAIToolAccess = async (req: Request, res: Response): Promise
     });
   }
 };
+
+
+
+
+//  =================== SoulStory Reactions and comments ============================
+

@@ -93,7 +93,7 @@ ${content}`;
 
         // Parse the response
         const parsed = this.parseGeminiResponse(rawResponse);
-        
+
         return {
           ...parsed,
           rawResponse
@@ -101,7 +101,6 @@ ${content}`;
       } catch (err) {
         console.error(`Gemini API Key ${this.currentKeyIndex} failed:`, (err as Error).message);
         lastError = err as Error;
-        // If current key fails, try next key immediately
         this.currentKeyIndex = (this.currentKeyIndex + 1) % this.keys.length;
       }
     }
@@ -127,7 +126,7 @@ ${content}`;
     description: string;
   }>> {
     const suggestions = [];
-    
+
     for (let i = 0; i < count; i++) {
       try {
         const suggestion = await this.generateThumbnailSuggestions(content);
@@ -135,7 +134,7 @@ ${content}`;
           title: suggestion.title,
           description: suggestion.description
         });
-        
+
         // Small delay between requests to avoid rate limiting
         if (i < count - 1) {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -150,10 +149,8 @@ ${content}`;
   }
 }
 
-// Initialize Gemini service
 const geminiService = new GeminiService();
 
-// Helper function to get reaction counts from reactions table
 const getReactionCounts = async (targetId: string, targetType: 'story' | 'comment') => {
   try {
     const { data: reactions, error } = await supabase
@@ -212,7 +209,6 @@ class GrammarCorrector {
 
   constructor(language: string = 'en-US') {
     this.language = language;
-    console.log(`GrammarCorrector initialized for ${language}`);
   }
 
   async processParagraph(paragraph: string, maxChunkSize: number = 500): Promise<any> {
@@ -228,8 +224,7 @@ class GrammarCorrector {
     }
 
     const cleanParagraph = paragraph.trim();
-    console.log(`Processing text: "${cleanParagraph}"`);
-    
+
     try {
       // Direct API call to LanguageTool
       const response = await fetch('https://api.languagetool.org/v2/check', {
@@ -244,7 +239,6 @@ class GrammarCorrector {
       });
 
       if (!response.ok) {
-        console.log('LanguageTool API error:', response.status);
         return {
           originalText: cleanParagraph,
           correctedText: cleanParagraph,
@@ -257,10 +251,7 @@ class GrammarCorrector {
 
       const data = await response.json();
       const matches = data.matches || [];
-      
-      console.log(`Found ${matches.length} corrections`);
-      console.log('Raw matches:', JSON.stringify(matches, null, 2));
-      
+
       if (matches.length === 0) {
         return {
           originalText: cleanParagraph,
@@ -274,11 +265,10 @@ class GrammarCorrector {
 
       // Filter and sort matches
       const filteredMatches = this.filterCorrections(matches);
-      console.log(`Filtered matches: ${filteredMatches.length}`);
-      
+
       // Sort by offset in descending order (right to left)
       const sortedMatches = filteredMatches.sort((a: any, b: any) => b.offset - a.offset);
-      
+
       let correctedText = cleanParagraph;
       const corrections: any[] = [];
 
@@ -290,21 +280,21 @@ class GrammarCorrector {
           original: cleanParagraph.substring(match.offset, match.offset + (match.errorLength || match.length)),
           replacements: match.replacements
         });
-        
+
         // Use match.length if errorLength is undefined
         const errorLength = match.errorLength || match.length || 0;
-        
+
         if (match.replacements && match.replacements.length > 0) {
           const replacement = match.replacements[0];
           const suggestionText = typeof replacement === 'object' ? replacement.value : replacement;
-          
+
           console.log(`Applying correction: "${cleanParagraph.substring(match.offset, match.offset + errorLength)}" -> "${suggestionText}"`);
-          
+
           // Apply the correction
-          correctedText = correctedText.substring(0, match.offset) + 
-                         suggestionText + 
-                         correctedText.substring(match.offset + errorLength);
-          
+          correctedText = correctedText.substring(0, match.offset) +
+            suggestionText +
+            correctedText.substring(match.offset + errorLength);
+
           corrections.push({
             original: cleanParagraph.substring(match.offset, match.offset + errorLength),
             suggestion: suggestionText,
@@ -313,26 +303,26 @@ class GrammarCorrector {
             offset: match.offset,
             pass: 1
           });
-          
+
           console.log(`Text after correction: "${correctedText}"`);
         } else {
           // Handle cases where no replacements are provided
           console.log(`No replacements provided for: "${cleanParagraph.substring(match.offset, match.offset + errorLength)}"`);
-          
+
           // Try to generate a basic correction based on the rule type
           if (match.rule?.issueType === 'misspelling') {
             // For spelling mistakes, try to suggest a corrected version
             const originalWord = cleanParagraph.substring(match.offset, match.offset + errorLength);
             const correctedWord = this.suggestSpellingCorrection(originalWord);
-            
+
             if (correctedWord !== originalWord) {
               console.log(`Generated suggestion: "${originalWord}" -> "${correctedWord}"`);
-              
+
               // Apply the correction
-              correctedText = correctedText.substring(0, match.offset) + 
-                             correctedWord + 
-                             correctedText.substring(match.offset + errorLength);
-              
+              correctedText = correctedText.substring(0, match.offset) +
+                correctedWord +
+                correctedText.substring(match.offset + errorLength);
+
               corrections.push({
                 original: originalWord,
                 suggestion: correctedWord,
@@ -382,7 +372,7 @@ class GrammarCorrector {
       'ok': 'okay',
       'not': 'not'
     };
-    
+
     return commonCorrections[word.toLowerCase()] || word;
   }
 
@@ -391,11 +381,11 @@ class GrammarCorrector {
 
     // Sort by offset to process from left to right
     const sortedMatches = matches.sort((a: any, b: any) => a.offset - b.offset);
-    
+
     // Remove overlapping matches, keeping the first (leftmost) one
     const filteredMatches: any[] = [];
     let lastEnd = -1;
-    
+
     for (const match of sortedMatches) {
       if (match.offset >= lastEnd) {
         // Skip matches that are likely false positives or low confidence
@@ -405,7 +395,7 @@ class GrammarCorrector {
         }
       }
     }
-    
+
     return filteredMatches;
   }
 
@@ -445,17 +435,10 @@ class GrammarCorrector {
 export const soulStoriesServices = {
   createStory: async (storyData: any, episodes: any[] = [], userId: string) => {
     try {
-      console.log('Attempting to insert:', storyData);
-      
-      // Create a clean copy without co_authors first (for backward compatibility)
       const { co_authors, ...baseStoryData } = storyData;
-      
-      // Only add co_authors if it's a valid non-empty array
-      const finalStoryData = {
-        ...baseStoryData,
-        ...(co_authors && Array.isArray(co_authors) && co_authors.length > 0 && { co_authors })
-      };
-      
+
+      const finalStoryData = { ...baseStoryData, ...(co_authors && Array.isArray(co_authors) && co_authors.length > 0 && { co_authors }) };
+
       const { data, error } = await supabase
         .from('soul_stories')
         .insert([finalStoryData])
@@ -464,7 +447,6 @@ export const soulStoriesServices = {
 
       if (error) throw error;
 
-      // Episodes logic stays exactly the same
       if (episodes.length > 0) {
         const episodesData = episodes.map((ep, index) => ({
           story_id: data.id,
@@ -475,15 +457,13 @@ export const soulStoriesServices = {
           thumbnail_url: ep.thumbnail_url || ""
         }));
 
-        await supabase
-          .from('soul_story_episodes')
-          .insert(episodesData);
+        await supabase.from('soul_story_episodes').insert(episodesData);
       }
 
-      return { 
+      return {
         success: true,
         message: 'Story created successfully',
-        story: data 
+        story: data
       };
 
     } catch (error) {
@@ -507,7 +487,7 @@ export const soulStoriesServices = {
           .from('soul_stories')
           .select('*')
           .contains('co_authors', [userId]);
-        
+
         if (!coAuthorError && coAuthorData) {
           coAuthorStories = coAuthorData;
         }
@@ -539,11 +519,11 @@ export const soulStoriesServices = {
 
       // EXISTING: Main author stories
       const mainAuthorStories: any[] = analyticsData || [];
-      
+
       // NEW: Combine with co-authored stories (avoiding duplicates)
       const existingStoryIds = new Set(mainAuthorStories.map(story => story.id));
       const uniqueCoAuthorStories = coAuthorStories.filter(story => !existingStoryIds.has(story.id));
-      
+
       // Combined stories (main author + unique co-authored)
       const allStories = [...mainAuthorStories, ...uniqueCoAuthorStories];
 
@@ -629,8 +609,8 @@ export const soulStoriesServices = {
   }) => {
     try {
       let query = supabase
-      .from('soul_stories')
-      .select(`
+        .from('soul_stories')
+        .select(`
         *,
         soul_story_episodes(
           id,
@@ -641,23 +621,20 @@ export const soulStoriesServices = {
           thumbnail_url
         )
       `, { count: 'exact' });
-    
-    if (type !== 'all') {
-      query = query.eq('category', type);
-    }
 
-    // Add active_status filter - only fetch active stories
-    query = query.eq('active_status', true);
+      if (type !== 'all') {
+        query = query.eq('category', type);
+      }
 
-    // Always sort by newest first (descending)
-    query = query.order('created_at', { ascending: false });
+      query = query.eq('active_status', true);
+      query = query.order('created_at', { ascending: false });
 
-    // Use the actual limit from options instead of hardcoded 5
-    const limit = options.limit;
-    const offset = (options.page - 1) * limit;
-    query = query.range(offset, offset + limit - 1);
+      // Use the actual limit from options instead of hardcoded 5
+      const limit = options.limit;
+      const offset = (options.page - 1) * limit;
+      query = query.range(offset, offset + limit - 1);
 
-    const { data: stories, error, count } = await query;
+      const { data: stories, error, count } = await query;
 
       if (error) {
         console.log('Table not available or error:', error.message);
@@ -665,7 +642,7 @@ export const soulStoriesServices = {
           stories: [],
           pagination: {
             page: options.page,
-            limit: limit, // Use actual limit
+            limit: limit,
             total: 0,
             totalPages: 0,
             hasMore: false,
@@ -676,30 +653,27 @@ export const soulStoriesServices = {
         };
       }
 
-    // Transform stories to include main URL and episode URLs
-    const transformedStories = (stories || []).map(story => {
-      if (story.content_type === 'episodes' && story.soul_story_episodes) {
-        // For episode-based stories, return main URL + episode URLs
-        return {
-          ...story,
-          main_url: story.asset_url, // Main story URL (can be series trailer/cover)
-          episode_urls: story.soul_story_episodes.map((ep: any) => ({
-            episode_number: ep.episode_number,
-            title: ep.title,
-            description: ep.description,
-            video_url: ep.video_url, // Individual episode video URL
-            thumbnail_url: ep.thumbnail_url
-          }))
-        };
-      } else {
-        // For single asset stories, return main URL
-        return {
-          ...story,
-          main_url: story.asset_url, // Main story URL
-          episode_urls: null // No episodes
-        };
-      }
-    });
+      const transformedStories = (stories || []).map(story => {
+        if (story.content_type === 'episodes' && story.soul_story_episodes) {
+          return {
+            ...story,
+            main_url: story.asset_url,
+            episode_urls: story.soul_story_episodes.map((ep: any) => ({
+              episode_number: ep.episode_number,
+              title: ep.title,
+              description: ep.description,
+              video_url: ep.video_url,
+              thumbnail_url: ep.thumbnail_url
+            }))
+          };
+        } else {
+          return {
+            ...story,
+            main_url: story.asset_url,
+            episode_urls: null
+          };
+        }
+      });
 
       const total = count || 0;
       const totalPages = Math.ceil(total / limit);
@@ -717,7 +691,7 @@ export const soulStoriesServices = {
           .select('target_id, type')
           .eq('target_type', 'story')
           .in('target_id', storyIds);
-        
+
         // Get current user's reactions for all stories
         if (userId) {
           const { data: userReactionData } = await supabase
@@ -726,25 +700,25 @@ export const soulStoriesServices = {
             .eq('user_id', userId)
             .eq('target_type', 'story')
             .in('target_id', storyIds);
-          
+
           // Create a map of story_id -> user_reaction_type
           userReactionData?.forEach(reaction => {
             userReactions[reaction.target_id] = reaction.type;
           });
         }
-        
+
         // Get comment counts for all stories
         const { data: comments } = await supabase
           .from('soul_story_comments')
           .select('soul_story_id')
           .in('soul_story_id', storyIds)
           .eq('is_deleted', false);
-        
+
         // Calculate comment counts for each story
         storyIds.forEach(storyId => {
           commentCounts[storyId] = comments?.filter(c => c.soul_story_id === storyId).length || 0;
         });
-        
+
         // Calculate reaction counts for each story
         storyIds.forEach(storyId => {
           const storyReactions = reactions?.filter(r => r.target_id === storyId) || [];
@@ -770,7 +744,7 @@ export const soulStoriesServices = {
         total_hugs: reactionCounts[story.id]?.total_hugs || 0,
         user_reaction: userReactions[story.id] || null,
         total_comments: commentCounts[story.id] || 0,
-        total_shares:story.total_shares || 0,
+        total_shares: story.total_shares || 0,
         total_views: story.total_views || 0  // ← This is already available from the story data
       }));
 
@@ -779,11 +753,11 @@ export const soulStoriesServices = {
         // Boosted stories first (no limit - all boosted stories can appear)
         if (a.is_boosted && !b.is_boosted) return -1;
         if (!a.is_boosted && b.is_boosted) return 1;
-        
+
         // If both boosted or both not boosted, sort by engagement
         const aEngagement = (a.total_likes + a.total_hearts + a.total_insightfuls + a.total_hugs + a.total_souls) + a.total_comments;
         const bEngagement = (b.total_likes + b.total_hearts + b.total_insightfuls + b.total_hugs + b.total_souls) + b.total_comments;
-        
+
         return bEngagement - aEngagement;
       });
 
@@ -825,7 +799,7 @@ export const soulStoriesServices = {
       };
     }
   },
-  async deleteStory(userId:string,story_id:string){
+  async deleteStory(userId: string, story_id: string) {
     try {
       // Check if story exists and user owns it
       const { data: story, error: checkError } = await supabase
@@ -874,7 +848,7 @@ export const soulStoriesServices = {
       throw error; // Re-throw to be handled by controller
     }
   },
-  purchaseContent: async (userId: string, storyId: string, contentData: Array<{type: 'page' | 'episode', identifier: string | number, coins: number}>) => {
+  purchaseContent: async (userId: string, storyId: string, contentData: Array<{ type: 'page' | 'episode', identifier: string | number, coins: number }>) => {
     try {
       // Check user level from profiles table
       const { data: userProfile, error: profileError } = await supabase
@@ -1004,9 +978,9 @@ export const soulStoriesServices = {
       }
 
       // Check if co-authors exist and are valid
-      const hasCoAuthors = story.co_authors && 
-                         Array.isArray(story.co_authors) && 
-                         story.co_authors.length > 0;
+      const hasCoAuthors = story.co_authors &&
+        Array.isArray(story.co_authors) &&
+        story.co_authors.length > 0;
 
       if (hasCoAuthors) {
         // NEW: Revenue sharing logic for stories with co-authors
@@ -1080,8 +1054,8 @@ export const soulStoriesServices = {
       console.error('Error purchasing content:', error);
       throw error;
     }
-  }, 
-  
+  },
+
   getStoryAccess: async (userId: string, storyId: string) => {
     try {
       // Get story details
@@ -1090,7 +1064,7 @@ export const soulStoriesServices = {
         .select('*')
         .eq('id', storyId)
         .single();
-  
+
       if (storyError || !story) {
         return { success: false, message: 'Story not found' };
       }
@@ -1100,7 +1074,7 @@ export const soulStoriesServices = {
         .from('soul_stories')
         .update({ total_views: (story.total_views || 0) + 1 })
         .eq('id', storyId);
-  
+
       // Award 15 soul points for accessing a story
       try {
         // Award 15 soul points for accessing a story
@@ -1117,7 +1091,7 @@ export const soulStoriesServices = {
       } catch (error) {
         console.error('❌ Exception in soul points award:', error);
       }
-  
+
       // Get user's access for this story from existing table
       const { data: userAccess } = await supabase
         .from('user_content_purchases')  // Use existing table
@@ -1125,11 +1099,11 @@ export const soulStoriesServices = {
         .eq('user_id', userId)
         .eq('story_id', storyId)
         .single();
-  
+
       if (story.asset_type === 'document') {
         // PDF Story - Return total accessible pages
         const totalAccessiblePages = story.free_pages + (userAccess?.highest_page_access || 0);
-        
+
         return {
           story_id: storyId,
           story_title: story.title,
@@ -1141,12 +1115,12 @@ export const soulStoriesServices = {
           total_coins_spent: userAccess?.total_coins_spent || 0,
           author_revenue: userAccess?.author_revenue || 0
         };
-  
+
       } else if (story.asset_type === 'video') {
         // Video Story - Return accessible episode URLs
         const accessibleEpisodes = userAccess?.accessible_episode_urls || [];
         const totalAccessibleEpisodes = story.free_episodes + accessibleEpisodes.length;
-        
+
         return {
           story_id: storyId,
           story_title: story.title,
@@ -1159,9 +1133,9 @@ export const soulStoriesServices = {
           author_revenue: userAccess?.author_revenue || 0
         };
       }
-  
+
       throw new Error('Invalid story type');
-  
+
     } catch (error) {
       console.error('Error getting story access:', error);
       return { success: false, message: 'Internal server error' };
@@ -1202,13 +1176,13 @@ export const soulStoriesServices = {
       // Group revenue by story
       const storyRevenue = userStories.map(story => {
         const storyPurchases = purchases?.filter(p => p.story_id === story.id) || [];
-        
+
         // Calculate total revenue for this story
         const totalRevenue = storyPurchases.reduce((sum, p) => sum + (p.author_revenue || 0), 0);
-        
+
         // Count pages sold (highest page access)
         const pagesSold = storyPurchases.reduce((max, p) => Math.max(max, p.highest_page_access || 0), 0);
-        
+
         // Count episodes sold (number of accessible episode URLs)
         const episodesSold = storyPurchases.reduce((sum, p) => sum + (p.accessible_episode_urls?.length || 0), 0);
 
@@ -1229,7 +1203,7 @@ export const soulStoriesServices = {
 
       return {
         user_id: userId,
-        total_revenue:totalRevenue,
+        total_revenue: totalRevenue,
         total_stories: userStories.length,
         story_revenue: storyRevenue
       };
@@ -1238,11 +1212,11 @@ export const soulStoriesServices = {
       console.error('Error fetching user revenue:', error);
       throw error;
     }
-  }, 
+  },
   searchAllContent: async (query: string, category: string, userId: string, storyId?: string) => {
     try {
       console.log('Search params:', { query, category, userId, storyId });
-      
+
       let supabaseQuery = supabase
         .from('soul_stories')
         .select(`
@@ -1271,7 +1245,7 @@ export const soulStoriesServices = {
         // Add comprehensive text search if query is not 'all'
         if (query && query.toLowerCase() !== 'all') {
           console.log('Adding comprehensive text search for:', query);
-          
+
           // Search across multiple fields - if ANY field contains the query, return the story
           supabaseQuery = supabaseQuery.or(
             `title.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`
@@ -1303,9 +1277,9 @@ export const soulStoriesServices = {
 
       console.log('Raw stories found:', stories?.length || 0);
       if (stories && stories.length > 0) {
-        console.log('Sample stories:', stories.slice(0, 3).map(s => ({ 
-          id: s.id, 
-          title: s.title, 
+        console.log('Sample stories:', stories.slice(0, 3).map(s => ({
+          id: s.id,
+          title: s.title,
           description: s.description,
           tags: s.tags,
           category: s.category
@@ -1381,7 +1355,7 @@ export const soulStoriesServices = {
   createComment: async (userId: string, soulStoryId: string, content: string, imgs: string[] = []) => {
     try {
       console.log('Searching for soul story with ID:', soulStoryId);
-      
+
       // First, let's check if the story exists at all
       const { data: storyData, error: storyError } = await supabase
         .from('soul_stories')
@@ -1408,7 +1382,7 @@ export const soulStoriesServices = {
           .select('is_deleted')
           .eq('id', soulStoryId)
           .single();
-        
+
         if (deletedCheck?.is_deleted === true) {
           return { success: false, message: 'Soul story has been deleted!' };
         }
@@ -1736,7 +1710,7 @@ export const soulStoriesServices = {
   updateCommentReaction: async (userId: string, commentId: string, type: string) => {
     try {
       console.log('updateCommentReaction service called with:', { userId, commentId, type });
-      
+
       const { data: existing, error: fetchError } = await supabase
         .from('soul_story_reactions')
         .select('*')
@@ -1858,7 +1832,7 @@ export const soulStoriesServices = {
   updateStoryReaction: async (userId: string, storyId: string, type: string) => {
     try {
       console.log('updateStoryReaction service called with:', { userId, storyId, type });
-      
+
       const { data: existing, error: fetchError } = await supabase
         .from('soul_story_reactions')
         .select('*')
@@ -1899,8 +1873,8 @@ export const soulStoriesServices = {
           // Get updated counts from reactions table
           const reactionCounts = await getReactionCounts(storyId, 'story');
 
-          return { 
-            success: true, 
+          return {
+            success: true,
             message: `${type} removed!`,
             data: {
               reaction_counts: reactionCounts,
@@ -1924,8 +1898,8 @@ export const soulStoriesServices = {
         // Get updated counts from reactions table
         const reactionCounts = await getReactionCounts(storyId, 'story');
 
-        return { 
-          success: true, 
+        return {
+          success: true,
           message: `Reaction updated to ${type}!`,
           data: {
             reaction_counts: reactionCounts,
@@ -1948,8 +1922,8 @@ export const soulStoriesServices = {
       // Get updated counts from reactions table
       const reactionCounts = await getReactionCounts(storyId, 'story');
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: `${type} added!`,
         data: {
           reaction_counts: reactionCounts,
@@ -1966,7 +1940,7 @@ export const soulStoriesServices = {
   getStoryWithReactions: async (storyId: string, userId?: string) => {
     try {
       console.log('getStoryWithReactions called with:', { storyId, userId });
-      
+
       // Get the story data
       const { data: story, error: storyError } = await supabase
         .from('soul_stories')
@@ -2153,7 +2127,7 @@ export const soulStoriesServices = {
   //         .select('target_id, type')
   //         .eq('target_type', 'story')
   //         .in('target_id', storyIds);
-        
+
   //       // Get current user's reactions for all stories
   //       if (userId) {
   //         const { data: userReactionData } = await supabase
@@ -2179,7 +2153,7 @@ export const soulStoriesServices = {
   //       storyIds.forEach(storyId => {
   //         const storyReactions = reactions?.filter(r => r.target_id === storyId) || [];
   //         const storyComments = commentData?.filter(c => c.soul_story_id === storyId) || [];
-          
+
   //         reactionCounts[storyId] = {
   //           total_likes: storyReactions.filter(r => r.type === 'like').length,
   //           total_dislikes: storyReactions.filter(r => r.type === 'dislike').length,
@@ -2188,7 +2162,7 @@ export const soulStoriesServices = {
   //           total_insightfuls: storyReactions.filter(r => r.type === 'insightful').length,
   //           total_hugs: storyReactions.filter(r => r.type === 'hug').length
   //         };
-          
+
   //         commentCounts[storyId] = storyComments.length;
   //       });
   //     }
@@ -2212,7 +2186,7 @@ export const soulStoriesServices = {
   //       // Calculate engagement score (same as trending logic)
   //       const aEngagement = (a.total_likes + a.total_hearts + a.total_insightfuls + a.total_hugs + a.total_souls) + a.total_comments + a.total_views;
   //       const bEngagement = (b.total_likes + b.total_hearts + b.total_insightfuls + b.total_hugs + b.total_souls) + b.total_comments + b.total_views;
-        
+
   //       return bEngagement - aEngagement;
   //     });
 
@@ -2312,7 +2286,7 @@ export const soulStoriesServices = {
           .select('target_id, type')
           .eq('target_type', 'story')
           .in('target_id', storyIds);
-        
+
         // Get current user's reactions for all stories
         if (userId) {
           const { data: userReactionData } = await supabase
@@ -2338,7 +2312,7 @@ export const soulStoriesServices = {
         storyIds.forEach(storyId => {
           const storyReactions = reactions?.filter(r => r.target_id === storyId) || [];
           const storyComments = commentData?.filter(c => c.soul_story_id === storyId) || [];
-          
+
           reactionCounts[storyId] = {
             total_likes: storyReactions.filter(r => r.type === 'like').length,
             total_dislikes: storyReactions.filter(r => r.type === 'dislike').length,
@@ -2347,7 +2321,7 @@ export const soulStoriesServices = {
             total_hugs: storyReactions.filter(r => r.type === 'hug').length,
             total_souls: storyReactions.filter(r => r.type === 'soul').length
           };
-          
+
           commentCounts[storyId] = storyComments.length;
         });
       }
@@ -2356,17 +2330,17 @@ export const soulStoriesServices = {
       const storiesWithEngagement = transformedStories.map(story => {
         const reactions = reactionCounts[story.id] || {};
         const commentCount = commentCounts[story.id] || 0;
-        
+
         // Calculate total engagement score
-        const totalReactions = (reactions.total_likes || 0) + 
-                             (reactions.total_hearts || 0) + 
-                             (reactions.total_insightfuls || 0) + 
-                             (reactions.total_hugs || 0) + 
-                             (reactions.total_souls || 0);
-        
+        const totalReactions = (reactions.total_likes || 0) +
+          (reactions.total_hearts || 0) +
+          (reactions.total_insightfuls || 0) +
+          (reactions.total_hugs || 0) +
+          (reactions.total_souls || 0);
+
         // Include views in engagement score
         const totalEngagement = totalReactions + commentCount + (story.total_views || 0);
-        
+
         return {
           ...story,
           total_likes: reactions.total_likes || 0,
@@ -2378,7 +2352,7 @@ export const soulStoriesServices = {
           user_reaction: userReactions[story.id] || null,
           total_comments: commentCount,
           total_views: story.total_views || 0,
-          total_shares: story.total_shares || 0 ,
+          total_shares: story.total_shares || 0,
           total_engagement: totalEngagement,
           total_reactions: totalReactions
         };
@@ -2508,7 +2482,7 @@ export const soulStoriesServices = {
       // Deduct coins from user
       const { error: deductError } = await supabase
         .from('anamcoins')
-        .update({ 
+        .update({
           available_coins: userCoins.available_coins - config.cost,
           spent_coins: (userCoins.spent_coins || 0) + config.cost  // Add to spent_coins
         })
@@ -2519,8 +2493,8 @@ export const soulStoriesServices = {
         return { success: false, message: 'Failed to deduct coins' };
       }
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: `Story boosted for ${boostType} successfully`,
         data: {
           boost_type: boostType,
@@ -2676,19 +2650,19 @@ export const soulStoriesServices = {
         if (storiesError) continue;
 
         const userStories = stories || [];
-        
+
         // Calculate statistics for this user
         const totalStories = userStories.length;
         const publishedStories = userStories.filter(story => story.status === 'published').length;
         const remixCount = userStories.filter(story => story.remix === true).length;
         const freeEpisodesCount = userStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0);
         const freePagesCount = userStories.reduce((sum, story) => sum + (story.free_pages || 0), 0);
-        
+
         // Count video and PDF stories
-        const videoStories = userStories.filter(story => 
+        const videoStories = userStories.filter(story =>
           story.asset_type === 'video' || story.story_type === 'episodes'
         ).length;
-        const pdfStories = userStories.filter(story => 
+        const pdfStories = userStories.filter(story =>
           story.asset_type === 'document'
         ).length;
 
@@ -2699,7 +2673,7 @@ export const soulStoriesServices = {
           .eq('user_id', user.id);
 
         const boostCount = boosts?.length || 0;
-        const activeBoosts = boosts?.filter(boost => 
+        const activeBoosts = boosts?.filter(boost =>
           new Date(boost.boost_end) > new Date()
         ).length || 0;
 
@@ -2709,7 +2683,7 @@ export const soulStoriesServices = {
           .select('coins_paid')
           .in('story_id', userStories.map(story => story.id));
 
-        const totalRevenue = purchases?.reduce((sum, purchase) => 
+        const totalRevenue = purchases?.reduce((sum, purchase) =>
           sum + (purchase.coins_paid || 0), 0
         ) || 0;
 
@@ -2770,8 +2744,8 @@ export const soulStoriesServices = {
         .single();
 
       if (existingReport) {
-        return { 
-          success: false, 
+        return {
+          success: false,
           message: 'Already reported',
           already_reported: true
         };
@@ -2957,9 +2931,9 @@ export const soulStoriesServices = {
 
       // Check if user is author or co-author
       const isAuthor = existingStory.author_id === userId;
-      const isCoAuthor = existingStory.co_authors && 
-                        Array.isArray(existingStory.co_authors) && 
-                        existingStory.co_authors.includes(userId);
+      const isCoAuthor = existingStory.co_authors &&
+        Array.isArray(existingStory.co_authors) &&
+        existingStory.co_authors.includes(userId);
 
       if (!isAuthor && !isCoAuthor) {
         throw new Error('Unauthorized to update this story');
@@ -2973,7 +2947,7 @@ export const soulStoriesServices = {
 
       // Create a clean copy without co_authors first (for backward compatibility)
       const { co_authors, ...baseUpdateData } = updateData;
-      
+
       let finalUpdateData = {
         ...baseUpdateData,
         ...(co_authors && Array.isArray(co_authors) && co_authors.length > 0 && { co_authors }),
@@ -3068,10 +3042,10 @@ export const soulStoriesServices = {
 
       if (updateError) throw updateError;
 
-      return { 
+      return {
         success: true,
         message: 'Story updated successfully',
-        story: updatedStory 
+        story: updatedStory
       };
 
     } catch (error) {
@@ -3083,9 +3057,8 @@ export const soulStoriesServices = {
     try {
       const cleanText = text.trim();
       const words = cleanText.split(/\s+/).filter(word => word.length > 0);
-      
+
       if (words.length === 1) {
-        // Single word - check spelling only (keep using LanguageTool)
         const result = await soulStoriesServices.checkSingleWordSpelling(cleanText);
         return {
           success: true,
@@ -3099,8 +3072,7 @@ export const soulStoriesServices = {
           }
         };
       }
-      
-      // Multiple words - use Gemini AI for grammar correction
+
       try {
         const prompt = `You are a professional English language editor. Correct the following text for grammar, spelling, and punctuation errors.
 
@@ -3134,11 +3106,11 @@ Corrected text:`;
         };
       } catch (geminiError) {
         console.error('Gemini AI error, falling back to LanguageTool:', geminiError);
-        
+
         // Fallback to LanguageTool if Gemini fails
         const corrector = new GrammarCorrector();
         const result = await corrector.processParagraph(cleanText, maxChunkSize);
-        
+
         return {
           success: true,
           data: {
@@ -3159,80 +3131,107 @@ Corrected text:`;
       };
     }
   },
-  checkSingleWordSpelling: async (word: string): Promise<{ correctedText: string; corrections: any[] }> => {
+  checkSingleWordSpelling: async (
+    word: string
+  ): Promise<{
+    originalText: string;
+    correctedText: string;
+    title: string;
+    description: string;
+    tags: string[];
+    corrections: any[];
+  }> => {
     try {
-      const response = await fetch('https://api.languagetool.org/v2/check', {
-        method: 'POST',
+      const response = await fetch("https://api.languagetool.org/v2/check", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
           text: word,
-          language: 'en-US',
+          language: "en-US",
         }),
       });
 
       if (!response.ok) {
-        return { correctedText: word, corrections: [] };
+        return {
+          originalText: word,
+          correctedText: word,
+          title: "Spelling Check",
+          description: "Word validated without changes",
+          tags: ["spelling"],
+          corrections: []
+        };
       }
 
       const data = await response.json();
       const matches = data.matches || [];
-      
-      if (matches.length > 0 && matches[0].replacements && matches[0].replacements.length > 0) {
-        const correction = matches[0];
-        
-        // Handle both object and string formats consistently
-        let suggestionText = word; // Default to original
-        
-        if (correction.replacements[0]) {
-          if (typeof correction.replacements[0] === 'object' && correction.replacements[0].value) {
-            suggestionText = correction.replacements[0].value;
-          } else if (typeof correction.replacements[0] === 'string') {
-            suggestionText = correction.replacements[0];
-          }
-        }
-        
-        // Only return correction if it's actually different
-        if (suggestionText !== word) {
-          return {
-            correctedText: suggestionText,
-            corrections: [{
-              original: word,
-              suggestion: suggestionText,
-              message: correction.message || "Spelling correction",
-              ruleId: correction.ruleId || "SPELLING_RULE",
-              offset: 0,
-              pass: 1
-            }]
-          };
-        }
+
+      if (matches.length === 0) {
+        return {
+          originalText: word,
+          correctedText: word,
+          title: "Spelling Check",
+          description: "Word is correct",
+          tags: ["spelling"],
+          corrections: []
+        };
       }
 
-      // Always return original text when no valid corrections
-      return { correctedText: word, corrections: [] };
+      const corrections: any[] = [];
+      let correctedWord = word;
+
+      matches.forEach((match: any) => {
+        const replacement = match.replacements?.[0]?.value;
+        if (replacement && replacement !== correctedWord) {
+          correctedWord = replacement;
+          corrections.push({
+            original: word,
+            suggestion: replacement,
+            message: match.message || "Correction",
+            ruleId: match.rule?.id || "UNKNOWN_RULE",
+            offset: match.offset || 0,
+            length: match.length || 0,
+          });
+        }
+      });
+
+      return {
+        originalText: word,
+        correctedText: correctedWord,
+        title: "Spelling Correction",
+        description: `Corrected word: "${correctedWord}"`,
+        tags: ["spelling", correctedWord],
+        corrections,
+      };
+
     } catch (error) {
-      console.error('Single word spelling check error:', error);
-      return { correctedText: word, corrections: [] };
+      console.error("Spelling check error:", error);
+      return {
+        originalText: word,
+        correctedText: word,
+        title: "Spelling Check Error",
+        description: "Fallback returned",
+        tags: ["spelling", "error"],
+        corrections: []
+      };
     }
   },
-  // Add this helper method for Gemini corrections
   generateCorrections: (original: string, corrected: string): any[] => {
     const corrections: any[] = [];
-    
+
     if (original === corrected) {
       return corrections;
     }
 
-    // Simple word-by-word comparison to identify corrections
     const originalWords = original.split(/\s+/);
     const correctedWords = corrected.split(/\s+/);
-    
+
     let offset = 0;
     for (let i = 0; i < Math.max(originalWords.length, correctedWords.length); i++) {
       const originalWord = originalWords[i] || '';
       const correctedWord = correctedWords[i] || '';
-      
+
       if (originalWord !== correctedWord && correctedWord) {
         corrections.push({
           original: originalWord,
@@ -3243,8 +3242,8 @@ Corrected text:`;
           pass: 1
         });
       }
-      
-      offset += originalWord.length + 1; // +1 for space
+
+      offset += originalWord.length + 1;
     }
 
     return corrections;
@@ -3252,16 +3251,16 @@ Corrected text:`;
   checkPdfQualityFromBucket: async (pdfUrl: string) => {
     try {
       console.log(`Checking PDF quality: ${pdfUrl}`);
-      
+
       if (pdfUrl.startsWith('/uploads/pdfs/')) {
         try {
           const fullPath = path.join(__dirname, '../../', pdfUrl);
-          
+
           if (!fs.existsSync(fullPath)) {
-            return { 
-              success: false, 
+            return {
+              success: false,
               message: 'Local PDF file not found',
-              data: { 
+              data: {
                 url: pdfUrl,
                 storageType: 'local',
                 isValid: false,
@@ -3269,16 +3268,16 @@ Corrected text:`;
               }
             };
           }
-          
+
           const pdfBuffer = fs.readFileSync(fullPath);
           const pdfData = await pdf(pdfBuffer);
           const pdfText = pdfData.text;
-          
+
           if (!pdfText || pdfText.trim().length === 0) {
-            return { 
-              success: false, 
+            return {
+              success: false,
               message: 'PDF contains no readable text',
-              data: { 
+              data: {
                 url: pdfUrl,
                 storageType: 'local',
                 isValid: false,
@@ -3286,12 +3285,11 @@ Corrected text:`;
               }
             };
           }
-          
+
           const readabilityAnalysis = soulStoriesServices.analyzeReadability(pdfText);
           const qualityScore = soulStoriesServices.calculateQualityScore(readabilityAnalysis);
           const isHighQuality = qualityScore >= 70;
-          
-          // In checkPdfQualityFromBucket function, add this before returning:
+
           console.log('PDF Analysis Results:', {
             wordCount: readabilityAnalysis.wordCount,
             sentenceCount: readabilityAnalysis.sentenceCount,
@@ -3302,11 +3300,11 @@ Corrected text:`;
             qualityIssues: readabilityAnalysis.qualityIssues,
             finalScore: qualityScore
           });
-          
-          return { 
-            success: true, 
+
+          return {
+            success: true,
             message: isHighQuality ? 'PDF quality check passed' : 'PDF quality check failed - readability issues detected',
-            data: { 
+            data: {
               url: pdfUrl,
               storageType: 'local',
               isValid: isHighQuality,
@@ -3317,13 +3315,13 @@ Corrected text:`;
               recommendations: readabilityAnalysis.suggestions
             }
           };
-          
+
         } catch (fileError) {
           console.error('Local file analysis error:', fileError);
-          return { 
-            success: false, 
+          return {
+            success: false,
             message: 'Failed to analyze local PDF content',
-            data: { 
+            data: {
               url: pdfUrl,
               storageType: 'local',
               isValid: false,
@@ -3332,39 +3330,39 @@ Corrected text:`;
           };
         }
       }
-      
+
       // Check if it's a valid HTTP URL (existing code)
       if (pdfUrl.includes('http')) {
         if (!pdfUrl.toLowerCase().endsWith('.pdf')) {
           return { success: false, message: 'URL must point to a PDF file' };
         }
-        
+
         try {
           // Download and analyze PDF content
           const response = await fetch(pdfUrl);
           if (!response.ok) {
             return { success: false, message: 'Failed to download PDF from URL' };
           }
-          
+
           const pdfBuffer = await response.arrayBuffer();
           const pdfText = new TextDecoder().decode(pdfBuffer);
-          
+
           // Basic PDF validation
           if (!pdfText.includes('/Page') && !pdfText.includes('PDF')) {
             return { success: false, message: 'Invalid PDF content - file may be corrupted' };
           }
-          
+
           // Perform readability analysis
           const readabilityAnalysis = soulStoriesServices.analyzeReadability(pdfText);
-          
+
           // Quality assessment based on readability
           const qualityScore = soulStoriesServices.calculateQualityScore(readabilityAnalysis);
           const isHighQuality = qualityScore >= 70;
-          
-          return { 
-            success: true, 
+
+          return {
+            success: true,
             message: isHighQuality ? 'PDF quality check passed' : 'PDF quality check failed - readability issues detected',
-            data: { 
+            data: {
               url: pdfUrl,
               storageType: 'external',
               isValid: true,
@@ -3375,7 +3373,7 @@ Corrected text:`;
               recommendations: readabilityAnalysis.suggestions
             }
           };
-          
+
         } catch (downloadError) {
           console.error('PDF download error:', downloadError);
           return { success: false, message: 'Failed to analyze PDF content' };
@@ -3407,7 +3405,7 @@ Corrected text:`;
 
       // Increment share count
       const newShareCount = (story.total_shares || 0) + 1;
-      
+
       const { error: updateError } = await supabase
         .from('soul_stories')
         .update({ total_shares: newShareCount })
@@ -3445,7 +3443,7 @@ Corrected text:`;
     try {
       // Clean and prepare text
       const cleanText = text.replace(/\s+/g, ' ').trim();
-      
+
       if (!cleanText || cleanText.length < 50) {
         return {
           wordCount: 0,
@@ -3458,41 +3456,41 @@ Corrected text:`;
           qualityIssues: ['Insufficient content for analysis']
         };
       }
-      
+
       // Basic text analysis
       const sentences = cleanText.split(/[.!?]+/).filter(s => s.trim().length > 0);
       const words = cleanText.split(/\s+/).filter(w => w.length > 0);
-      
+
       const wordCount = words.length;
       const sentenceCount = sentences.length;
       const avgSentenceLength = wordCount / sentenceCount;
       const avgWordLength = words.reduce((sum, word) => sum + word.length, 0) / wordCount;
-      
+
       // Count complex words (3+ syllables approximation)
       const complexWords = words.filter(word => {
         const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
         if (cleanWord.length <= 3) return false;
-        
+
         // Simple syllable counting heuristic
         const vowels = cleanWord.match(/[aeiouy]+/g);
         if (!vowels) return false;
-        
+
         let syllableCount = vowels.length;
-        
+
         // Adjust for silent 'e' at end
         if (cleanWord.endsWith('e') && syllableCount > 1) syllableCount--;
-        
+
         // Adjust for common suffixes
         if (cleanWord.endsWith('tion') || cleanWord.endsWith('sion')) syllableCount++;
-        
+
         return syllableCount >= 3;
       }).length;
-      
+
       // Calculate readability score (Flesch Reading Ease approximation)
-      const readabilityScore = Math.max(0, Math.min(100, 
+      const readabilityScore = Math.max(0, Math.min(100,
         206.835 - (1.015 * avgSentenceLength) - (84.6 * (complexWords / wordCount * 100))
       ));
-      
+
       // Generate suggestions
       const suggestions = [];
       if (avgSentenceLength > 20) {
@@ -3507,7 +3505,7 @@ Corrected text:`;
       if (suggestions.length === 0) {
         suggestions.push('Good readability overall!');
       }
-      
+
       // Detect quality issues
       const qualityIssues = [];
       if (cleanText.length < 200) {
@@ -3519,7 +3517,7 @@ Corrected text:`;
       if (avgWordLength > 6) {
         qualityIssues.push('Average word length is high - may affect readability');
       }
-      
+
       return {
         wordCount,
         sentenceCount,
@@ -3530,7 +3528,7 @@ Corrected text:`;
         suggestions,
         qualityIssues
       };
-      
+
     } catch (error) {
       console.error('Readability analysis error:', error);
       return {
@@ -3548,31 +3546,31 @@ Corrected text:`;
   calculateQualityScore: (analysis: any) => {
     try {
       let score = 100;
-      
+
       // Deduct points for readability issues
       if (analysis.readabilityScore < 30) score -= 15;
       else if (analysis.readabilityScore < 50) score -= 10;
       else if (analysis.readabilityScore < 70) score -= 5;
-      
+
       // Deduct points for sentence length issues
       if (analysis.avgSentenceLength > 25) score -= 10;
       else if (analysis.avgSentenceLength > 20) score -= 5;
-      
+
       // Deduct points for complex word usage
       const complexWordPercentage = (analysis.complexWords / analysis.wordCount) * 100;
       if (complexWordPercentage > 20) score -= 10;
       else if (analysis.complexWords / analysis.wordCount > 0.15) score -= 5;
-      
+
       // Deduct points for content length issues (more lenient)
       if (analysis.wordCount < 50) score -= 15;
       else if (analysis.wordCount < 100) score -= 10;
       else if (analysis.wordCount < 200) score -= 5;
-      
+
       // Deduct points for quality issues (reduced penalty)
       score -= analysis.qualityIssues.length * 3;
-      
+
       return Math.max(0, Math.min(100, score));
-      
+
     } catch (error) {
       console.error('Quality score calculation error:', error);
       return 50;
@@ -3591,9 +3589,9 @@ Corrected text:`;
       }
 
       if (userCoins.available_coins < coinsRequired) {
-        return { 
-          success: false, 
-          message: `Insufficient coins. Need ${coinsRequired}, have ${userCoins.available_coins}` 
+        return {
+          success: false,
+          message: `Insufficient coins. Need ${coinsRequired}, have ${userCoins.available_coins}`
         };
       }
 
@@ -3630,9 +3628,9 @@ Corrected text:`;
         return { success: false, message: 'Failed to update user coins' };
       }
 
-      return { 
-        success: true, 
-        message: `Successfully purchased 7 days of access for ${toolType} for ${coinsRequired} coins` 
+      return {
+        success: true,
+        message: `Successfully purchased 7 days of access for ${toolType} for ${coinsRequired} coins`
       };
     } catch (error) {
       console.error('Error purchasing AI tool access:', error);
@@ -3654,8 +3652,8 @@ Corrected text:`;
       }
 
       if (!usageData) {
-        return { 
-          canUse: false, 
+        return {
+          canUse: false,
           message: 'Paid access required - no free trial available',
           needsPurchase: true
         };
