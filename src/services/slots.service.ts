@@ -154,6 +154,8 @@ const handleConfirmedStatus = async (
         hostEmail: sellerData[0].email,
         participantEmail: buyerData[0].email
     });
+    console.log(zoomMeeting);
+    
 
     const { data: updatedBooking, error: updateError } = await supabase
         .from('slots_booking')
