@@ -25,7 +25,8 @@ import {
    getUnapprovedUsersController,
    approveUserController,
    sendApprovalEmail,
-   updateSellerServiceController
+  
+   updateSellerService
 } from '../controllers/users.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
@@ -58,7 +59,7 @@ router.get("/get-service/:id", authMiddleware, getServiceById);
 
 router.post("/generate-summary", authMiddleware, generateSummary);
 
-router.post('/update-service/:id',authMiddleware,updateSellerServiceController);
+router.put('/update-service/:id',authMiddleware,updateSellerService);
 
 
 

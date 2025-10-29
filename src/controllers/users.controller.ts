@@ -542,10 +542,12 @@ export const addSellerservice = async (req: Request, res: Response): Promise<any
 };
 
 
-export const updateSellerServiceController = async (req: Request, res: Response): Promise<any> => {
+
+export const updateSellerService = async (req: Request, res: Response): Promise<any> => {
   try {
-    const serviceId = req.params.id;
     const {
+      service_id,
+      seller_id,
       service_title,
       service_category,
       description,
@@ -553,107 +555,109 @@ export const updateSellerServiceController = async (req: Request, res: Response)
       thumbnails,
       plans,
       booking_prices,
-      is_active
     } = req.body;
 
-    if (!serviceId) {
+    // 🔹 Validation
+    if (!service_id || !seller_id || !service_title || !description) {
       return res.status(400).json({
         success: false,
-        message: 'Service ID is required'
+        message: "Service ID, seller ID, service title, and description are required",
       });
     }
 
-    // Validate booking prices if provided
-    if (booking_prices) {
-      if (!Array.isArray(booking_prices) || booking_prices.length !== 3 ||
-        !booking_prices.every(price => typeof price === 'number')) {
-        return res.status(400).json({
-          success: false,
-          message: 'Booking prices must be an array of exactly 3 numbers'
-        });
-      }
-    }
-
-    // Check if service exists
-    const { data: existingService, error: serviceError } = await supabase
-      .from('services')
-      .select('*')
-      .eq('id', serviceId)
-      .maybeSingle();
-
-    if (serviceError) throw serviceError;
-    if (!existingService) {
-      return res.status(404).json({
+    if (
+      !Array.isArray(booking_prices) ||
+      booking_prices.length !== 3 ||
+      !booking_prices.every((price) => typeof price === "number")
+    ) {
+      return res.status(400).json({
         success: false,
-        message: 'Service not found'
+        message: "Booking prices must be an array of exactly 3 numbers",
       });
     }
 
-    // Update main service data
-    const { data: updatedService, error: updateError } = await supabase
-      .from('services')
-      .update({
-        service_title: service_title || existingService.service_title,
-        service_category: service_category || existingService.service_category,
-        description: description || existingService.description,
-        keywords: keywords || existingService.keywords,
-        thumbnails: thumbnails || existingService.thumbnails,
-        bookingcall_array: booking_prices || existingService.bookingcall_array,
-        is_active: is_active !== undefined ? is_active : existingService.is_active
-      })
-      .eq('id', serviceId)
-      .select()
+    // 🔹 Check if the service exists
+    const { data: existingService, error: findError } = await supabase
+      .from("services")
+      .select("*")
+      .eq("id", service_id)
+      .eq("seller_id", seller_id)
       .single();
 
-    if (updateError) throw updateError;
+    if (findError || !existingService) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found or you are not authorized to update it",
+      });
+    }
 
-    // Update plans if provided
-    if (plans && Array.isArray(plans)) {
-      // Delete existing plans
-      await supabase
-        .from('services_plan')
+    // 🔹 Update main service record
+    const { data: updatedService, error: updateError } = await supabase
+      .from("services")
+      .update({
+        service_title,
+        service_category,
+        description,
+        keywords: keywords || [],
+        thumbnails: thumbnails || [],
+        bookingcall_array: booking_prices,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", service_id)
+      .select();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // 🔹 Update or replace service plans
+    if (plans && plans.length > 0) {
+      // First, delete old plans to replace them
+      const { error: deleteError } = await supabase
+        .from("services_plan")
         .delete()
-        .eq('service_id', serviceId);
+        .eq("service_id", service_id);
 
-      // Insert new plans
+      if (deleteError) throw deleteError;
+
+      // Then insert new ones
       const formattedPlans = plans.map((plan: any) => ({
-        service_id: serviceId,
+        service_id: service_id,
         plan_name: plan.name,
         plan_price: plan.price,
         is_active: plan.active !== false,
       }));
 
-      const { error: plansError } = await supabase
-        .from('services_plan')
+      const { error: insertError } = await supabase
+        .from("services_plan")
         .insert(formattedPlans);
 
-      if (plansError) throw plansError;
+      if (insertError) throw insertError;
     }
 
-    // Fetch updated service with plans
-    const { data: finalService, error: fetchError } = await supabase
-      .from('services')
+    // 🔹 Fetch updated service with plans
+    const { data: completeService, error: fetchError } = await supabase
+      .from("services")
       .select(`
         *,
         services_plan (*)
       `)
-      .eq('id', serviceId)
+      .eq("id", service_id)
       .single();
 
     if (fetchError) throw fetchError;
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: 'Service updated successfully',
-      data: finalService
+      message: "Service updated successfully",
+      data: completeService,
     });
-
   } catch (error: any) {
-    console.error('Error updating service:', error);
-    res.status(500).json({
+    console.error("Error updating service:", error);
+    return res.status(500).json({
       success: false,
-      message: 'Failed to update service',
-      error: error.message
+      message: "Failed to update service",
+      error: error.message,
     });
   }
 };
