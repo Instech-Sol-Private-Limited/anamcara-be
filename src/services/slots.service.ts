@@ -57,7 +57,7 @@ const createZoomMeeting = async (meetingData: {
         settings: {
             host_video: true,
             participant_video: true,
-            join_before_host: false,
+            join_before_host: true,
             mute_upon_entry: true,
             waiting_room: true,
             auto_recording: 'none',
@@ -76,6 +76,8 @@ const createZoomMeeting = async (meetingData: {
             }
         ]
     };
+    
+    
 
     const response = await fetch(`${ZOOM_CONFIG.apiBaseUrl}/users/me/meetings`, {
         method: 'POST',
@@ -137,11 +139,13 @@ const handleConfirmedStatus = async (
         .from('profiles')
         .select('*')
         .eq('id', bookingData.buyer_id);
+        
     const { data: sellerData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', bookingData.seller_id);
-
+  
+    
     if (!buyerData || !sellerData) {
         throw new Error('Could not fetch buyer or seller information');
     }
@@ -154,7 +158,7 @@ const handleConfirmedStatus = async (
         hostEmail: sellerData[0].email,
         participantEmail: buyerData[0].email
     });
-    console.log(zoomMeeting);
+
     
 
     const { data: updatedBooking, error: updateError } = await supabase
