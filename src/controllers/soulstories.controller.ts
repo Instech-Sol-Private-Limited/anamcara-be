@@ -435,6 +435,261 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
+// export const getUserStories = async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const userId = req.user?.id;
+//     const page = parseInt(req.query.page as string) || 0;
+//     const limit = parseInt(req.query.limit as string) || 10;
+
+//     if (!userId) {
+//       res.status(401).json({
+//         success: false,
+//         error: 'Unauthorized: User not authenticated'
+//       });
+//       return;
+//     }
+
+//     if (limit > 50) {
+//       res.status(400).json({
+//         success: false,
+//         error: 'Limit cannot exceed 50 stories per request'
+//       });
+//       return;
+//     }
+
+//     // Fetch stories with pagination
+//     const { data: stories, error: storiesError, count } = await supabase
+//       .from('soul_stories')
+//       .select(`
+//         *,
+//         profiles (
+//           id,
+//           first_name,
+//           last_name,
+//           avatar_url,
+//           email,
+//           username
+//         )
+//       `, { count: 'exact' })
+//       .eq('author_id', userId)
+//       .order('created_at', { ascending: false })
+//       .range(page * limit, (page + 1) * limit - 1);
+
+//     if (storiesError) throw storiesError;
+
+//     if (!stories || stories.length === 0) {
+//       res.status(200).json({
+//         success: true,
+//         data: {
+//           stories: []
+//         },
+//         pagination: {
+//           page,
+//           limit,
+//           total: 0,
+//           hasMore: false
+//         }
+//       });
+//       return;
+//     }
+
+//     const storyIds = stories.map(story => story.id);
+
+//     // Fetch episodes
+//     const { data: episodes, error: episodesError } = await supabase
+//       .from('soul_story_episodes')
+//       .select('*')
+//       .in('story_id', storyIds)
+//       .order('episode_number', { ascending: true });
+
+//     if (episodesError) throw episodesError;
+
+//     const storiesWithDetails = await Promise.all(
+//       stories.map(async (story) => {
+//         const { data: userReaction } = await supabase
+//           .from('soul_story_reactions')
+//           .select('type')
+//           .eq('user_id', userId)
+//           .eq('target_id', story.id)
+//           .eq('target_type', 'story')
+//           .maybeSingle();
+
+//         // Fetch user vote
+//         const { data: userVote } = await supabase
+//           .from('story_votes')
+//           .select('vote_type')
+//           .eq('user_id', userId)
+//           .eq('target_id', story.id)
+//           .eq('target_type', 'story')
+//           .maybeSingle();
+
+//         const { data: savedData } = await supabase
+//           .from('saved_stories')
+//           .select('id')
+//           .eq('user_id', userId)
+//           .eq('story_id', story.id)
+//           .maybeSingle();
+
+//         const { data: echoData } = await supabase
+//           .from('story_echos')
+//           .select('id')
+//           .eq('user_id', userId)
+//           .eq('story_id', story.id)
+//           .maybeSingle();
+
+//         const [
+//           { count: total_upvotes },
+//           { count: total_downvotes },
+//           { count: total_echos },
+//           { count: total_saved },
+//           { data: reactionsCount }
+//         ] = await Promise.all([
+//           supabase
+//             .from('story_votes')
+//             .select('*', { count: 'exact', head: true })
+//             .eq('target_id', story.id)
+//             .eq('vote_type', 'upvote')
+//             .eq('target_type', 'story'),
+          
+//           supabase
+//             .from('story_votes')
+//             .select('*', { count: 'exact', head: true })
+//             .eq('target_id', story.id)
+//             .eq('vote_type', 'downvote')
+//             .eq('target_type', 'story'),
+          
+//           supabase
+//             .from('story_echos')
+//             .select('*', { count: 'exact', head: true })
+//             .eq('story_id', story.id),
+          
+//           supabase
+//             .from('saved_stories')
+//             .select('*', { count: 'exact', head: true })
+//             .eq('story_id', story.id),
+          
+//           supabase
+//             .from('soul_story_reactions')
+//             .select('type')
+//             .eq('target_id', story.id)
+//             .eq('target_type', 'story')
+//         ]);
+
+//         const reactionCounts = {
+//           total_likes: 0,
+//           total_supports: 0,
+//           total_valuables: 0,
+//           total_funnies: 0,
+//           total_shockeds: 0,
+//           total_moveds: 0,
+//           total_triggereds: 0
+//         };
+
+//         if (reactionsCount) {
+//           reactionsCount.forEach(reaction => {
+//             const field = `total_${reaction.type}s`;
+//             if (reactionCounts.hasOwnProperty(field)) {
+//               reactionCounts[field as keyof typeof reactionCounts]++;
+//             }
+//           });
+//         }
+
+//         const storyEpisodes = episodes ? episodes.filter(ep => ep.story_id === story.id) : [];
+
+//         return {
+//           id: story.id,
+//           title: story.title,
+//           description: story.description,
+//           tags: story.tags || [],
+//           category: story.category,
+//           story_type: story.story_type,
+//           thumbnail_url: story.thumbnail_url,
+//           asset_urls: story.asset_urls || [],
+//           asset_type: story.asset_type,
+//           monetization_type: story.monetization_type,
+//           price: story.price,
+//           free_pages: story.free_pages,
+//           free_episodes: story.free_episodes,
+//           status: story.status,
+//           content_type: story.content_type,
+//           total_views: story.total_views || 0,
+//           is_boosted: story.is_boosted || false,
+//           boost_type: story.boost_type,
+//           boost_end_date: story.boost_end_date,
+//           remix: story.remix || false,
+//           active_status: story.active_status !== false,
+//           co_authors: story.co_authors || [],
+//           total_shares: story.total_shares || 0,
+//           created_at: story.created_at,
+//           updated_at: story.updated_at,
+          
+//           // User interaction data
+//           user_reaction: userReaction?.type || null,
+//           user_vote: userVote?.vote_type || null,
+//           user_saved: !!savedData,
+//           saved_id: savedData?.id || null,
+//           user_echo: !!echoData,
+//           echo_id: echoData?.id || null,
+          
+//           // Total counts
+//           total_upvotes: total_upvotes || 0,
+//           total_downvotes: total_downvotes || 0,
+//           total_echos: total_echos || 0,
+//           total_saved: total_saved || 0,
+          
+//           // Reaction counts
+//           ...reactionCounts,
+          
+//           // Author profile
+//           author: story.profiles ? {
+//             id: story.profiles.id,
+//             first_name: story.profiles.first_name,
+//             last_name: story.profiles.last_name,
+//             avatar_url: story.profiles.avatar_url,
+//             email: story.profiles.email,
+//             username: story.profiles.username
+//           } : null,
+          
+//           // Episodes
+//           episodes: storyEpisodes.map(ep => ({
+//             id: ep.id,
+//             episode_number: ep.episode_number,
+//             title: ep.title,
+//             description: ep.description,
+//             video_url: ep.video_url,
+//             thumbnail_url: ep.thumbnail_url,
+//             total_views: ep.total_views || 0,
+//             created_at: ep.created_at
+//           }))
+//         };
+//       })
+//     );
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         stories: storiesWithDetails
+//       },
+//       pagination: {
+//         page,
+//         limit,
+//         total: count || 0,
+//         hasMore: stories.length === limit
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('Error in getUserStories service:', error);
+//     res.status(500).json({
+//       success: false,
+//       error: 'Failed to fetch user stories',
+//       data: {
+//         stories: []
+//       }
+//     });
+//   }
+// };
+
 export const getUserStories = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -549,8 +804,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_triggereds: story.total_triggereds || 0,
         };
 
-        // Calculate total reactions
-        const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
+          const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
 
         const storyEpisodes = episodes ? episodes.filter(ep => ep.story_id === story.id) : [];
 
@@ -581,21 +835,19 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           created_at: story.created_at,
           updated_at: story.updated_at,
           
-          // User interaction data
+        
           user_reaction: userReaction?.type || null,
           user_vote: userVote?.vote_type || null,
           user_saved: !!savedData,
           saved_id: savedData?.id || null,
           user_echo: !!echoData,
           echo_id: echoData?.id || null,
-          
-          // Total counts - use direct values from soul_stories table
+   
           total_upvotes: story.total_upvotes || 0,
           total_downvotes: story.total_downvotes || 0,
           total_echos: story.total_echos || 0,
           total_saved: story.total_saved || 0,
           
-          // Reaction counts - use direct values from soul_stories table
           total_likes: story.total_likes || 0,
           total_supports: story.total_supports || 0,
           total_valuables: story.total_valuables || 0,
@@ -604,7 +856,6 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_moveds: story.total_moveds || 0,
           total_triggereds: story.total_triggereds || 0,
           
-          // Computed total reactions for convenience
           total_reactions: totalReactions,
           
           // Author profile
