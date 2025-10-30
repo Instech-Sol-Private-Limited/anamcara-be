@@ -15,7 +15,7 @@ import profileRoutes from './routes/profile.routes';
 import reportRoutes from './routes/reports.routes';
 import notificationsRoutes from './routes/notifications.routes';
 import chatMessageRoutes from './routes/chatmessages.routes';
-import soulStoriesRoutes from './routes/soulStories.routes';
+import soulStoriesRoutes from './routes/soulstories.routes';
 import cron from 'node-cron';
 import updateDailyInsights from './crons/dailyInsightsCron';
 import { getDailyInsights } from './controllers/dailyinsights.controller';

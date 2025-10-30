@@ -7,7 +7,7 @@ import { notifyChamberMembers } from '../sockets/manageChambers';
 type PostReactionType = 'like' | 'dislike' | 'insightful' | 'heart' | 'hug' | 'soul' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
 
 type VoteType = 'upvote' | 'downvote';
-type VoteTargetType = 'post' | 'thread';
+type VoteTargetType = 'post' | 'thread' | 'story';
 
 interface PostVote {
   id: string;
@@ -1676,7 +1676,7 @@ export const updateVote = async (
   const { voteType, targetType } = req.body;
   const { id: user_id } = req.user!;
 
-  if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread'].includes(targetType)) {
+  if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread', 'story'].includes(targetType)) {
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
@@ -1684,6 +1684,26 @@ export const updateVote = async (
   const DOWNVOTE_WEIGHT = 1;
 
   try {
+    let targetTable: string;
+    let selectFields: string;
+    
+    switch (targetType) {
+      case 'post':
+        targetTable = 'posts';
+        selectFields = 'total_upvotes, total_downvotes, user_id';
+        break;
+      case 'thread':
+        targetTable = 'threads';
+        selectFields = 'total_upvotes, total_downvotes, user_id';
+        break;
+      case 'story':
+        targetTable = 'soul_stories';
+        selectFields = 'total_upvotes, total_downvotes, author_id';
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid target type.' });
+    }
+
     const { data: existingVote, error: fetchError } = await supabase
       .from('post_votes')
       .select('*')
@@ -1696,10 +1716,9 @@ export const updateVote = async (
       return res.status(500).json({ error: fetchError.message });
     }
 
-    const tableName = targetType === 'post' ? 'posts' : 'threads';
     const { data: targetData, error: targetError } = await supabase
-      .from(tableName)
-      .select('total_upvotes, total_downvotes')
+      .from(targetTable)
+      .select(selectFields)
       .eq('id', targetId)
       .single();
 
@@ -1707,9 +1726,8 @@ export const updateVote = async (
       return res.status(404).json({ error: `${targetType} not found!` });
     }
 
-    const currentUpvotes = Math.max(0, targetData.total_upvotes || 0);
-    const currentDownvotes = Math.max(0, targetData.total_downvotes || 0);
-    const currentNetScore = currentUpvotes - currentDownvotes;
+    const currentUpvotes = Math.max(0, ((targetData as any).total_upvotes) || 0);
+    const currentDownvotes = Math.max(0, ((targetData as any).total_downvotes) || 0);
 
     let newUpvotes = currentUpvotes;
     let newDownvotes = currentDownvotes;
@@ -1717,7 +1735,7 @@ export const updateVote = async (
 
     if (existingVote) {
       if (existingVote.vote_type === voteType) {
-        // removing same vote
+        // Remove vote
         const { error: deleteError } = await supabase
           .from('post_votes')
           .delete()
@@ -1732,26 +1750,24 @@ export const updateVote = async (
 
         user_vote = null;
       } else {
-        // switching votes
         const { error: updateError } = await supabase
           .from('post_votes')
-          .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+          .update({ 
+            vote_type: voteType, 
+            updated_at: new Date().toISOString() 
+          })
           .eq('id', existingVote.id);
         if (updateError) return res.status(500).json({ error: updateError.message });
 
         if (existingVote.vote_type === 'upvote') {
-          // from upvote → downvote
           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
-          // Only allow downvote increment if it won't make net score negative
-          newDownvotes = Math.max(currentDownvotes, currentDownvotes + DOWNVOTE_WEIGHT);
+          newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
         } else {
-          // from downvote → upvote
           newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
         }
       }
     } else {
-      // new vote
       const { error: insertError } = await supabase
         .from('post_votes')
         .insert([{
@@ -1765,29 +1781,25 @@ export const updateVote = async (
       if (voteType === 'upvote') {
         newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
       } else {
-        // For downvote: only increment if it won't make net score negative
         const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
         if (potentialNetScore >= 0) {
           newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
         } else {
-          // If downvote would make net score negative, don't increment downvotes
           newDownvotes = currentDownvotes;
         }
       }
     }
 
-    // Final protection: ensure values never go below zero and net score is never negative
     newUpvotes = Math.max(0, newUpvotes);
     newDownvotes = Math.max(0, newDownvotes);
     
     const netScore = newUpvotes - newDownvotes;
     if (netScore < 0) {
-      // Adjust downvotes to prevent negative net score
       newDownvotes = newUpvotes;
     }
 
     const { error: updateTargetError } = await supabase
-      .from(tableName)
+      .from(targetTable)
       .update({
         total_upvotes: newUpvotes,
         total_downvotes: newDownvotes,
@@ -1795,6 +1807,44 @@ export const updateVote = async (
       })
       .eq('id', targetId);
     if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
+
+    const authorId = targetType === 'story' ? (targetData as any).author_id : (targetData as any).user_id;
+    const shouldSendNotification = authorId && authorId !== user_id;
+
+    if (shouldSendNotification) {
+      try {
+        const { data: authorProfile } = await supabase
+          .from('profiles')
+          .select('email, first_name, last_name')
+          .eq('id', authorId)
+          .single();
+
+        if (authorProfile) {
+          const voteAction = existingVote ? 
+            (existingVote.vote_type === voteType ? 'removed' : 'changed') : 
+            'added';
+
+          await sendNotification({
+            recipientEmail: authorProfile.email,
+            recipientUserId: authorId,
+            actorUserId: user_id,
+            threadId: targetId,
+            message: `@${authorProfile.first_name} ${authorProfile.last_name} ${voteAction} ${voteType} on your ${targetType}.`,
+            type: `${targetType}_vote_${voteAction}` as any,
+            metadata: {
+              vote_type: voteType,
+              previous_vote_type: existingVote?.vote_type,
+              target_id: targetId,
+              target_type: targetType,
+              actor_user_id: user_id
+            }
+          });
+        }
+      } catch (notificationError) {
+        console.error('Error sending vote notification:', notificationError);
+        // Don't fail the vote if notification fails
+      }
+    }
 
     return res.status(200).json({
       message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
@@ -1811,3 +1861,139 @@ export const updateVote = async (
     return res.status(500).json({ error: 'Failed to process vote' });
   }
 };
+
+// export const updateVote = async (
+//   req: Request<{ targetId: string }, {}, { voteType: VoteType; targetType: VoteTargetType }>,
+//   res: Response
+// ): Promise<any> => {
+//   const { targetId } = req.params;
+//   const { voteType, targetType } = req.body;
+//   const { id: user_id } = req.user!;
+
+//   if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread'].includes(targetType)) {
+//     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
+//   }
+
+//   const UPVOTE_WEIGHT = 20;
+//   const DOWNVOTE_WEIGHT = 1;
+
+//   try {
+//     const { data: existingVote, error: fetchError } = await supabase
+//       .from('post_votes')
+//       .select('*')
+//       .eq('user_id', user_id)
+//       .eq('target_id', targetId)
+//       .eq('target_type', targetType)
+//       .single();
+
+//     if (fetchError && fetchError.code !== 'PGRST116') {
+//       return res.status(500).json({ error: fetchError.message });
+//     }
+
+//     const tableName = targetType === 'post' ? 'posts' : 'threads';
+//     const { data: targetData, error: targetError } = await supabase
+//       .from(tableName)
+//       .select('total_upvotes, total_downvotes')
+//       .eq('id', targetId)
+//       .single();
+
+//     if (targetError || !targetData) {
+//       return res.status(404).json({ error: `${targetType} not found!` });
+//     }
+
+//     const currentUpvotes = Math.max(0, targetData.total_upvotes || 0);
+//     const currentDownvotes = Math.max(0, targetData.total_downvotes || 0);
+//     const currentNetScore = currentUpvotes - currentDownvotes;
+
+//     let newUpvotes = currentUpvotes;
+//     let newDownvotes = currentDownvotes;
+//     let user_vote: 'upvote' | 'downvote' | null = voteType;
+
+//     if (existingVote) {
+//       if (existingVote.vote_type === voteType) {
+//         // removing same vote
+//         const { error: deleteError } = await supabase
+//           .from('post_votes')
+//           .delete()
+//           .eq('id', existingVote.id);
+//         if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+//         if (voteType === 'upvote') {
+//           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+//         } else {
+//           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
+//         }
+
+//         user_vote = null;
+//       } else {
+//         // switching votes
+//         const { error: updateError } = await supabase
+//           .from('post_votes')
+//           .update({ vote_type: voteType, updated_at: new Date().toISOString() })
+//           .eq('id', existingVote.id);
+//         if (updateError) return res.status(500).json({ error: updateError.message });
+
+//         if (existingVote.vote_type === 'upvote') {
+//           newUpvotes = Math.max(0, currentUpvotes - UPVOTE_WEIGHT);
+//           newDownvotes = Math.max(currentDownvotes, currentDownvotes + DOWNVOTE_WEIGHT);
+//         } else {
+//           newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
+//           newDownvotes = Math.max(0, currentDownvotes - DOWNVOTE_WEIGHT);
+//         }
+//       }
+//     } else {
+//       const { error: insertError } = await supabase
+//         .from('post_votes')
+//         .insert([{
+//           user_id,
+//           target_id: targetId,
+//           target_type: targetType,
+//           vote_type: voteType
+//         }]);
+//       if (insertError) return res.status(500).json({ error: insertError.message });
+
+//       if (voteType === 'upvote') {
+//         newUpvotes = currentUpvotes + UPVOTE_WEIGHT;
+//       } else {
+//         const potentialNetScore = currentUpvotes - (currentDownvotes + DOWNVOTE_WEIGHT);
+//         if (potentialNetScore >= 0) {
+//           newDownvotes = currentDownvotes + DOWNVOTE_WEIGHT;
+//         } else {
+//           newDownvotes = currentDownvotes;
+//         }
+//       }
+//     }
+
+//     newUpvotes = Math.max(0, newUpvotes);
+//     newDownvotes = Math.max(0, newDownvotes);
+    
+//     const netScore = newUpvotes - newDownvotes;
+//     if (netScore < 0) {
+//       newDownvotes = newUpvotes;
+//     }
+
+//     const { error: updateTargetError } = await supabase
+//       .from(tableName)
+//       .update({
+//         total_upvotes: newUpvotes,
+//         total_downvotes: newDownvotes,
+//         updated_at: new Date().toISOString()
+//       })
+//       .eq('id', targetId);
+//     if (updateTargetError) return res.status(500).json({ error: updateTargetError.message });
+
+//     return res.status(200).json({
+//       message: `${voteType} ${existingVote ? (existingVote.vote_type === voteType ? 'removed' : 'updated') : 'added'}!`,
+//       data: {
+//         total_upvotes: newUpvotes,
+//         total_downvotes: newDownvotes,
+//         net_score: Math.max(0, netScore),
+//         user_vote: user_vote
+//       }
+//     });
+
+//   } catch (error: any) {
+//     console.error('Error updating vote:', error);
+//     return res.status(500).json({ error: 'Failed to process vote' });
+//   }
+// };
