@@ -1,11 +1,11 @@
 import { Request, Response } from "express";
-import { soulStoriesServices } from "../../services/soulStories.services";
+import { soulStoriesServices } from "../services/soulStories.services";
 import 'dotenv/config';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { supabase } from "../../app";
-import { sendNotification } from "../../sockets/emitNotification";
+import { supabase } from "../app";
+import { sendNotification } from "../sockets/emitNotification";
 
 type StoryReactionType = 'like' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
 
@@ -804,7 +804,11 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_triggereds: story.total_triggereds || 0,
         };
 
+<<<<<<< HEAD:src/controllers/soulStories/soulStories.controller.ts
       
+=======
+        // Calculate total reactions
+>>>>>>> afc804f96a2943ef01d69e2501364e833521786b:src/controllers/soulstories.controller.ts
         const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
 
         const storyEpisodes = episodes ? episodes.filter(ep => ep.story_id === story.id) : [];
@@ -849,6 +853,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_echos: story.total_echos || 0,
           total_saved: story.total_saved || 0,
           
+<<<<<<< HEAD:src/controllers/soulStories/soulStories.controller.ts
     
           total_likes: story.total_likes || 0,
           total_supports: story.total_supports || 0,
@@ -858,6 +863,23 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_moveds: story.total_moveds || 0,
           total_triggereds: story.total_triggereds || 0,
           
+=======
+          // Total counts - use direct values from soul_stories table
+          total_upvotes: story.total_upvotes || 0,
+          total_downvotes: story.total_downvotes || 0,
+          total_echos: story.total_echos || 0,
+          total_saved: story.total_saved || 0,
+          
+          // Reaction counts - use direct values from soul_stories table
+          total_likes: story.total_likes || 0,
+          total_supports: story.total_supports || 0,
+          total_valuables: story.total_valuables || 0,
+          total_funnies: story.total_funnies || 0,
+          total_shockeds: story.total_shockeds || 0,
+          total_moveds: story.total_moveds || 0,
+          total_triggereds: story.total_triggereds || 0,
+          
+>>>>>>> afc804f96a2943ef01d69e2501364e833521786b:src/controllers/soulstories.controller.ts
           // Computed total reactions for convenience
           total_reactions: totalReactions,
           
@@ -907,6 +929,239 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
       data: {
         stories: []
       }
+    });
+  }
+};
+
+export const getSoulStoryById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Story ID is required'
+      });
+      return;
+    }
+
+    // Fetch the main story data
+    const { data: story, error: storyError } = await supabase
+      .from('soul_stories')
+      .select(`
+        *,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          email,
+          username
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (storyError) {
+      if (storyError.code === 'PGRST116') {
+        res.status(404).json({
+          success: false,
+          error: 'Story not found'
+        });
+        return;
+      }
+      throw storyError;
+    }
+
+    // Fetch episodes for this story
+    const { data: episodes, error: episodesError } = await supabase
+      .from('soul_story_episodes')
+      .select('*')
+      .eq('story_id', id)
+      .order('episode_number', { ascending: true });
+
+    if (episodesError) throw episodesError;
+
+    // Fetch user interaction data if user is authenticated
+    let userReaction = null;
+    let userVote = null;
+    let userSaved = false;
+    let userEcho = false;
+
+    if (userId) {
+      // Fetch user reaction
+      const { data: reactionData } = await supabase
+        .from('soul_story_reactions')
+        .select('type')
+        .eq('user_id', userId)
+        .eq('target_id', id)
+        .eq('target_type', 'story')
+        .maybeSingle();
+
+      userReaction = reactionData?.type || null;
+
+      // Fetch user vote
+      const { data: voteData } = await supabase
+        .from('post_votes')
+        .select('vote_type')
+        .eq('user_id', userId)
+        .eq('target_id', id)
+        .eq('target_type', 'story')
+        .maybeSingle();
+
+      userVote = voteData?.vote_type || null;
+
+      // Fetch user saved status
+      const { data: savedData } = await supabase
+        .from('saved_soul_stories')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('soul_story_id', id)
+        .maybeSingle();
+
+      userSaved = !!savedData;
+
+      // Fetch user echo status
+      const { data: echoData } = await supabase
+        .from('story_echos')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('story_id', id)
+        .maybeSingle();
+
+      userEcho = !!echoData;
+    }
+
+    // Calculate reaction counts and totals
+    const reactionCounts = {
+      total_likes: story.total_likes || 0,
+      total_supports: story.total_supports || 0,
+      total_valuables: story.total_valuables || 0,
+      total_funnies: story.total_funnies || 0,
+      total_shockeds: story.total_shockeds || 0,
+      total_moveds: story.total_moveds || 0,
+      total_triggereds: story.total_triggereds || 0,
+    };
+
+    const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
+
+    const completeStory = {
+      id: story.id,
+      title: story.title,
+      description: story.description,
+      tags: story.tags || [],
+      category: story.category,
+      story_type: story.story_type,
+      thumbnail_url: story.thumbnail_url,
+      asset_urls: story.asset_urls || [],
+      asset_type: story.asset_type,
+      monetization_type: story.monetization_type,
+      price: story.price,
+      free_pages: story.free_pages,
+      free_episodes: story.free_episodes,
+      status: story.status,
+      content_type: story.content_type,
+      total_views: story.total_views || 0,
+      is_boosted: story.is_boosted || false,
+      boost_type: story.boost_type,
+      boost_end_date: story.boost_end_date,
+      remix: story.remix || false,
+      active_status: story.active_status !== false,
+      co_authors: story.co_authors || [],
+      total_shares: story.total_shares || 0,
+      created_at: story.created_at,
+      updated_at: story.updated_at,
+      
+      // User interaction data
+      user_reaction: userReaction,
+      user_vote: userVote,
+      user_saved: userSaved,
+      user_echo: userEcho,
+      
+      // Total counts
+      total_upvotes: story.total_upvotes || 0,
+      total_downvotes: story.total_downvotes || 0,
+      total_echos: story.total_echos || 0,
+      total_saved: story.total_saved || 0,
+      total_comments: story.total_comments || 0,
+      
+      // Individual reaction counts
+      total_likes: story.total_likes || 0,
+      total_supports: story.total_supports || 0,
+      total_valuables: story.total_valuables || 0,
+      total_funnies: story.total_funnies || 0,
+      total_shockeds: story.total_shockeds || 0,
+      total_moveds: story.total_moveds || 0,
+      total_triggereds: story.total_triggereds || 0,
+      
+      // Computed totals for convenience
+      total_reactions: totalReactions,
+      vote_score: (story.total_upvotes || 0) - (story.total_downvotes || 0),
+      
+      // Author profile
+      author: story.profiles ? {
+        id: story.profiles.id,
+        first_name: story.profiles.first_name,
+        last_name: story.profiles.last_name,
+        avatar_url: story.profiles.avatar_url,
+        email: story.profiles.email,
+        username: story.profiles.username
+      } : null,
+      
+      episodes: episodes ? episodes.map(episode => ({
+        id: episode.id,
+        story_id: episode.story_id,
+        episode_number: episode.episode_number,
+        title: episode.title,
+        description: episode.description,
+        video_url: episode.video_url,
+        thumbnail_url: episode.thumbnail_url,
+        duration: episode.duration,
+        file_size: episode.file_size,
+        total_views: episode.total_views || 0,
+        is_published: episode.is_published !== false,
+        created_at: episode.created_at,
+        updated_at: episode.updated_at
+      })) : [],
+      
+      metadata: {
+        has_episodes: episodes && episodes.length > 0,
+        total_episodes: episodes ? episodes.length : 0,
+        is_video_content: ['video-drama', 'animation', 'ai-movie'].includes(story.category),
+        is_episodic_content: ['serial-fiction', 'webtoon', 'comic', 'manga'].includes(story.category),
+        can_remix: story.remix,
+        is_owner: userId ? story.author_id === userId : false
+      }
+    };
+
+    if (userId && userId !== story.author_id) {
+      supabase
+        .from('soul_stories')
+        .update({ 
+          total_views: (story.total_views || 0) + 1 
+        })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) {
+            console.error('Error incrementing view count:', error);
+          }
+        });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        story: completeStory
+      },
+      message: 'Story fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in getSoulStoryById service:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch story details'
     });
   }
 };
@@ -1109,6 +1364,10 @@ export const updateSoulStoryReaction = async (
     return res.status(200).json({ message: `${type} added to soul story!` });
   }
 };
+
+
+
+
 
 
 export const getAnalytics = async (req: Request, res: Response) => {

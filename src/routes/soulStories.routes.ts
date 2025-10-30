@@ -32,8 +32,10 @@ import {
     shareStory,
     purchaseAIToolAccess,
     getUserStories,
-    updateSoulStoryReaction
-} from "../controllers/soulStories/soulStories.controller"
+    updateSoulStoryReaction,
+    getSoulStoryById
+} from "../controllers/soulstories.controller"
+import { updateVote } from '../controllers/posts.controller';
 
 
 const router = express.Router();
@@ -45,13 +47,15 @@ router.put("/update-story/:story_id", authMiddleware, updateStory);
 
 router.get("/get-user-stories", authMiddleware, getUserStories);
 
+router.get("/get-story/:id", authMiddleware, getSoulStoryById);
+
 router.patch("/apply-reaction/:soulStoryId", authMiddleware, updateSoulStoryReaction);
 
+router.post('/votes/:targetId', authMiddleware, updateVote);
 
 
 
 router.get("/analytics", authMiddleware, getAnalytics);
-
 
 router.get("/get-stories/:type", authMiddleware, getStories);
 
