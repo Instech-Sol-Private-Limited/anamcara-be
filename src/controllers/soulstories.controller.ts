@@ -804,12 +804,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_triggereds: story.total_triggereds || 0,
         };
 
-<<<<<<< HEAD:src/controllers/soulStories/soulStories.controller.ts
-      
-=======
-        // Calculate total reactions
->>>>>>> afc804f96a2943ef01d69e2501364e833521786b:src/controllers/soulstories.controller.ts
-        const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
+          const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
 
         const storyEpisodes = episodes ? episodes.filter(ep => ep.story_id === story.id) : [];
 
@@ -853,8 +848,6 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_echos: story.total_echos || 0,
           total_saved: story.total_saved || 0,
           
-<<<<<<< HEAD:src/controllers/soulStories/soulStories.controller.ts
-    
           total_likes: story.total_likes || 0,
           total_supports: story.total_supports || 0,
           total_valuables: story.total_valuables || 0,
@@ -863,24 +856,6 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           total_moveds: story.total_moveds || 0,
           total_triggereds: story.total_triggereds || 0,
           
-=======
-          // Total counts - use direct values from soul_stories table
-          total_upvotes: story.total_upvotes || 0,
-          total_downvotes: story.total_downvotes || 0,
-          total_echos: story.total_echos || 0,
-          total_saved: story.total_saved || 0,
-          
-          // Reaction counts - use direct values from soul_stories table
-          total_likes: story.total_likes || 0,
-          total_supports: story.total_supports || 0,
-          total_valuables: story.total_valuables || 0,
-          total_funnies: story.total_funnies || 0,
-          total_shockeds: story.total_shockeds || 0,
-          total_moveds: story.total_moveds || 0,
-          total_triggereds: story.total_triggereds || 0,
-          
->>>>>>> afc804f96a2943ef01d69e2501364e833521786b:src/controllers/soulstories.controller.ts
-          // Computed total reactions for convenience
           total_reactions: totalReactions,
           
           // Author profile
