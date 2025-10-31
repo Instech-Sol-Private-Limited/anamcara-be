@@ -47,17 +47,27 @@ router.put("/update-story/:story_id", authMiddleware, updateStory);
 
 router.get("/get-user-stories", authMiddleware, getUserStories);
 
+router.get("/trending", optionalAuthMiddleware, getTrendingStories);
+
 router.get("/get-story/:id", authMiddleware, getSoulStoryById);
 
 router.patch("/apply-reaction/:soulStoryId", authMiddleware, updateSoulStoryReaction);
 
 router.post('/votes/:targetId', authMiddleware, updateVote);
 
+router.get("/get-stories", authMiddleware, getStories);
+
+router.post("/search", authMiddleware, searchAllContent);
+
+
+
+
+
+
 
 
 router.get("/analytics", authMiddleware, getAnalytics);
 
-router.get("/get-stories/:type", authMiddleware, getStories);
 
 router.delete("/delete-story/:story_id", authMiddleware, deleteeStory);
 
@@ -67,11 +77,8 @@ router.get("/story-access/:storyId", authMiddleware, getStoryAccess);
 
 router.get("/user-revenue", authMiddleware, getUserRevenue);
 
-router.post("/search", authMiddleware, searchAllContent);
 
-router.get("/trending", optionalAuthMiddleware, getTrendingStories
 
-);
 router.get("/soul-stories-products", authMiddleware, getProductDetails);
 
 router.get("/all-users-stories-data", authMiddleware, getAllUsersStoriesData);
