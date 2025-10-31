@@ -755,7 +755,7 @@ const updateCommentsVote = async (
   }
 
   
-  const UPVOTE_WEIGHT = 20;
+  const UPVOTE_WEIGHT = 1;
   const DOWNVOTE_WEIGHT = 1;
 
   try {
