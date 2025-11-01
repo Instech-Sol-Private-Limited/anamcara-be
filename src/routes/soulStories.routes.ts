@@ -51,15 +51,15 @@ router.get("/get-user-stories", authMiddleware, getUserStories);
 
 router.get("/trending", optionalAuthMiddleware, getTrendingStories);
 
-router.get("/get-story/:id", authMiddleware, getSoulStoryById);
+router.get("/get-story/:id", optionalAuthMiddleware, getSoulStoryById);
 
 router.patch("/apply-reaction/:soulStoryId", authMiddleware, updateSoulStoryReaction);
 
 router.post('/votes/:targetId', authMiddleware, updateVote);
 
-router.get("/get-stories", authMiddleware, getStories);
+router.get("/get-stories", optionalAuthMiddleware, getStories);
 
-router.post("/search", authMiddleware, searchAllContent);
+router.post("/search", optionalAuthMiddleware, searchAllContent);
 
 router.post("/purchase-content", authMiddleware, purchaseStory);
 
