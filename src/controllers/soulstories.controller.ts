@@ -1373,7 +1373,7 @@ export const getStories = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     const page = parseInt(req.query.page as string) || 0;
     const limit = parseInt(req.query.limit as string) || 10;
-    const category = req.query.category as string; 
+    const category = req.query.category as string;
 
     if (!userId) {
       res.status(401).json({
@@ -1419,7 +1419,7 @@ export const getStories = async (req: Request, res: Response) => {
 
     if (storiesError) {
       console.error('Supabase stories error:', storiesError);
-      
+
       if (storiesError.code === 'PGRST103') {
         res.status(200).json({
           success: true,
@@ -1742,7 +1742,7 @@ export const searchStories = async (req: Request, res: Response) => {
 
     if (storiesError) {
       console.error('Supabase search error:', storiesError);
-      
+
       if (storiesError.code === 'PGRST103') {
         res.status(200).json({
           success: true,
@@ -2011,6 +2011,262 @@ export const searchStories = async (req: Request, res: Response) => {
   }
 };
 
+export const purchaseStory = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { storyId } = req.body;
+
+    if (!storyId) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required field: storyId'
+      });
+      return;
+    }
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('user_level')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !userProfile) {
+      throw new Error('User profile not found');
+    }
+
+    if (!userProfile.user_level || userProfile.user_level < 1) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not allowed. User level too low.'
+      });
+    }
+
+    const { data: story, error: storyError } = await supabase
+      .from('soul_stories')
+      .select(`
+        *,
+        episodes:soul_story_episodes(*)
+      `)
+      .eq('id', storyId)
+      .single();
+
+    if (storyError || !story) {
+      console.error('Story fetch error:', storyError);
+      return res.status(404).json({
+        success: false,
+        message: 'Story not found'
+      });
+    }
+
+    if (story.monetization_type === 'free' || story.price === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'This story is free and does not require purchase'
+      });
+    }
+
+    const { data: existingPurchase, error: purchaseError } = await supabase
+      .from('user_content_purchases')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('story_id', storyId)
+      .single();
+
+    if (existingPurchase) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already purchased this story'
+      });
+    }
+
+    const totalPrice = story.price;
+
+    const { data: userCoins, error: userError } = await supabase
+      .from('anamcoins')
+      .select('available_coins, spent_coins, total_coins')
+      .eq('user_id', userId)
+      .single();
+
+    if (userError || !userCoins) {
+      throw new Error('User coins account not found');
+    }
+
+    if (userCoins.available_coins < totalPrice) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient coins. Need ${totalPrice}, have ${userCoins.available_coins}`
+      });
+    }
+
+    let totalPages = 0;
+    let totalEpisodes = 0;
+    let accessibleEpisodes: string[] = [];
+
+    if (story.asset_type === 'document') {
+      totalPages = story.asset_urls?.length || story.free_pages || 0;
+    } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
+      totalEpisodes = story.episodes?.length || 0;
+      accessibleEpisodes = story.episodes?.map((ep: any) => ep.video_url) || [];
+    }
+
+    const { error: userUpdateError } = await supabase
+      .from('anamcoins')
+      .update({
+        available_coins: userCoins.available_coins - totalPrice,
+        spent_coins: (userCoins.spent_coins || 0) + totalPrice,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId);
+
+    if (userUpdateError) {
+      throw new Error('Failed to update user coins');
+    }
+
+    // FIXED: Removed 'purchase_type' column and fixed 'purchase_data' typo
+    const { data: purchaseData, error: purchaseCreateError } = await supabase
+      .from('user_content_purchases')
+      .insert({
+        user_id: userId,
+        story_id: storyId,
+        content_type: story.asset_type,
+        content_identifier: 'full_story',
+        coins_paid: totalPrice,
+        author_revenue: totalPrice,
+        highest_page_access: totalPages,
+        accessible_episode_urls: accessibleEpisodes,
+        total_coins_spent: totalPrice,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (purchaseCreateError) {
+      // Rollback coin deduction if purchase fails
+      await supabase
+        .from('anamcoins')
+        .update({
+          available_coins: userCoins.available_coins,
+          spent_coins: userCoins.spent_coins,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId);
+
+      throw new Error(`Failed to create purchase record: ${purchaseCreateError.message}`);
+    }
+
+    const hasCoAuthors = story.co_authors &&
+      Array.isArray(story.co_authors) &&
+      story.co_authors.length > 0;
+
+    if (hasCoAuthors) {
+      const allAuthors = [story.author_id, ...story.co_authors];
+      const revenuePerAuthor = Math.floor(totalPrice / allAuthors.length);
+      const remainder = totalPrice % allAuthors.length;
+
+      for (let i = 0; i < allAuthors.length; i++) {
+        const authorId = allAuthors[i];
+        const coinAmount = revenuePerAuthor + (i === 0 ? remainder : 0);
+
+        const { data: authorCoins, error: authorError } = await supabase
+          .from('anamcoins')
+          .select('available_coins, total_coins')
+          .eq('user_id', authorId)
+          .single();
+
+        if (authorError || !authorCoins) {
+          console.error(`Author ${authorId} coins account not found`);
+          continue;
+        }
+
+        const { error: authorUpdateError } = await supabase
+          .from('anamcoins')
+          .update({
+            available_coins: authorCoins.available_coins + coinAmount,
+            total_coins: authorCoins.total_coins + coinAmount,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', authorId);
+
+        if (authorUpdateError) {
+          console.error(`Failed to update coins for author ${authorId}`);
+        }
+      }
+
+      // FIXED: Removed co_authors_revenue column since it doesn't exist in schema
+      await supabase
+        .from('user_content_purchases')
+        .update({
+          author_revenue: revenuePerAuthor + remainder
+        })
+        .eq('id', purchaseData.id);
+    } else {
+      const { data: authorCoins, error: authorError } = await supabase
+        .from('anamcoins')
+        .select('available_coins, total_coins')
+        .eq('user_id', story.author_id)
+        .single();
+
+      if (authorError || !authorCoins) {
+        console.error('Author coins account not found');
+      } else {
+        const { error: authorUpdateError } = await supabase
+          .from('anamcoins')
+          .update({
+            available_coins: authorCoins.available_coins + totalPrice,
+            total_coins: authorCoins.total_coins + totalPrice,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', story.author_id);
+
+        if (authorUpdateError) {
+          console.error('Failed to update author coins');
+        }
+      }
+    }
+
+    await supabase
+      .from('soul_stories')
+      .update({
+        total_saved: (story.total_saved || 0) + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', storyId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Story purchased successfully',
+      purchase: {
+        id: purchaseData.id,
+        story_id: storyId,
+        story_title: story.title,
+        coins_paid: totalPrice,
+        access_granted: {
+          full_access: true,
+          total_pages: totalPages,
+          total_episodes: totalEpisodes,
+          accessible_episodes: accessibleEpisodes.length
+        },
+        purchased_at: purchaseData.created_at
+      },
+      remaining_coins: userCoins.available_coins - totalPrice
+    });
+
+  } catch (error) {
+    console.error('Error in purchaseStory controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to purchase story'
+    });
+  }
+};
+
 
 
 // comments
@@ -2119,11 +2375,6 @@ export const updateComment = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-
-
-
-
-
 export const getAnalytics = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -2180,57 +2431,6 @@ export const deleteeStory = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error'
-    });
-  }
-};
-
-export const purchaseContent = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
-
-    const { storyId, contentData } = req.body;
-
-    if (!storyId || !contentData || !Array.isArray(contentData)) {
-      res.status(400).json({
-        success: false,
-        message: 'Missing required fields: storyId, contentData (array)'
-      });
-      return;
-    }
-
-    if (contentData.length === 0) {
-      res.status(400).json({
-        success: false,
-        message: 'Content data array cannot be empty'
-      });
-      return; // Keep this return for early exit
-    }
-
-    // Validate each content item
-    for (const item of contentData) {
-      if (!item.type || !['page', 'episode'].includes(item.type) ||
-        item.identifier === undefined || item.coins <= 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Each content item must have: type (page/episode), identifier, coins > 0'
-        });
-        return; // Keep this return for early exit
-      }
-    }
-
-    const result = await soulStoriesServices.purchaseContent(userId, storyId, contentData);
-    res.status(200).json(result); // Remove 'return' here
-
-  } catch (error) {
-    console.error('Error in purchaseContent controller:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Failed to purchase content'
     });
   }
 };
@@ -2336,7 +2536,6 @@ export const searchAllContent = async (req: Request, res: Response) => {
 };
 
 
-
 export const deleteComment = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -2417,7 +2616,6 @@ export const updateCommentReaction = async (req: Request, res: Response): Promis
     });
   }
 };
-
 
 export const createReply = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -2836,8 +3034,6 @@ export const generateQuickSuggestion = async (req: Request, res: Response): Prom
   }
 };
 
-
-
 export const getKeywordSuggestions = async (req: Request, res: Response): Promise<void> => {
   try {
     const { query } = req.query;
@@ -2942,7 +3138,6 @@ export const correctGrammar = async (req: Request, res: Response): Promise<void>
     });
   }
 };
-
 
 export const checkPdfQuality = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -3154,9 +3349,3 @@ export const purchaseAIToolAccess = async (req: Request, res: Response): Promise
     });
   }
 };
-
-
-
-
-//  =================== SoulStory Reactions and comments ============================
-

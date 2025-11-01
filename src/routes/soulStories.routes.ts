@@ -6,7 +6,6 @@ import {
     getAnalytics, 
     getStories,
     deleteeStory, 
-    purchaseContent,
     getStoryAccess,
     getUserRevenue,
     searchAllContent,
@@ -33,7 +32,8 @@ import {
     purchaseAIToolAccess,
     getUserStories,
     updateSoulStoryReaction,
-    getSoulStoryById
+    getSoulStoryById,
+    purchaseStory
 } from "../controllers/soulstories.controller"
 import { updateVote } from '../controllers/posts.controller';
 import { createComment, deleteComment, getComments, updateComment, updateCommentReaction, updateCommentsVote, updateSaveContent } from '../controllers/threads/comments.controller';
@@ -61,9 +61,10 @@ router.get("/get-stories", authMiddleware, getStories);
 
 router.post("/search", authMiddleware, searchAllContent);
 
+router.post("/purchase-content", authMiddleware, purchaseStory);
 
 
-// ========== Post Comments ==========
+// ========== Story Comments ==========
 router.get('/get-comments', optionalAuthMiddleware, getComments);
 
 router.post('/:postId/comments', optionalAuthMiddleware, createComment);
@@ -79,7 +80,7 @@ router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
 router.post('/comments/:targetId/save', authMiddleware, updateSaveContent);
 
 
-// ========== Comment Replies ==========
+// ========== Story Replies ==========
 router.get('/comments/:comment_id/replies', optionalAuthMiddleware, getReplies);
 
 router.post('/comments/:comment_id/replies', authMiddleware, createReply);
@@ -97,11 +98,12 @@ router.post('/subcomments/:targetId/save', authMiddleware, updateSaveContent);
 
 
 
+
+
+
 router.get("/analytics", authMiddleware, getAnalytics);
 
 router.delete("/delete-story/:story_id", authMiddleware, deleteeStory);
-
-router.post("/purchase-content", authMiddleware, purchaseContent);
 
 router.get("/story-access/:storyId", authMiddleware, getStoryAccess);
 
