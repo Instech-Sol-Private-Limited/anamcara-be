@@ -1375,14 +1375,6 @@ export const getStories = async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const category = req.query.category as string;
 
-    if (!userId) {
-      res.status(401).json({
-        success: false,
-        error: "Unauthorized: User not authenticated"
-      });
-      return;
-    }
-
     if (limit > 50) {
       res.status(400).json({
         success: false,
