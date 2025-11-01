@@ -785,7 +785,8 @@ const updateCommentsVote = async (
     return res.status(400).json({ error: 'Invalid target type.' });
   }
 
-  const UPVOTE_WEIGHT = 20;
+  
+  const UPVOTE_WEIGHT = 1;
   const DOWNVOTE_WEIGHT = 1;
 
   try {
