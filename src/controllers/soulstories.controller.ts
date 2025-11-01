@@ -239,7 +239,8 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       price,
       free_pages,
       free_episodes,
-      status: 'draft',
+      // status: 'draft',
+      status: 'published',
       content_type: content_type,
       remix,
       disclaimer: enabledDisclaimers.length > 0 ? enabledDisclaimers : null,
@@ -2012,6 +2013,117 @@ export const searchStories = async (req: Request, res: Response) => {
 
 
 
+// comments
+export const createComment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { soul_story_id, content, imgs = [] } = req.body;
+
+    if (!content?.trim() || !soul_story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing required fields: content, soul_story_id'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.createComment(userId, soul_story_id, content, imgs);
+
+    if (result.success) {
+      res.status(201).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in createComment controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to create comment'
+    });
+  }
+};
+
+export const getComments = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { soul_story_id, page = 1, limit = 10 } = req.query;
+    const userId = req.user?.id;
+
+    if (!soul_story_id) {
+      res.status(400).json({
+        success: false,
+        message: 'soul_story_id is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.getComments(
+      soul_story_id as string,
+      Number(page),
+      Number(limit),
+      userId
+    );
+
+    res.status(200).json(result);
+
+  } catch (error) {
+    console.error('Error in getComments controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to fetch comments'
+    });
+  }
+};
+
+export const updateComment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { comment_id } = req.params;
+    const { content, imgs } = req.body;
+
+    if (!content?.trim()) {
+      res.status(400).json({
+        success: false,
+        message: 'Content is required'
+      });
+      return;
+    }
+
+    const result = await soulStoriesServices.updateComment(userId, comment_id, content, imgs);
+
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in updateComment controller:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Failed to update comment'
+    });
+  }
+};
+
+
+
+
+
+
 export const getAnalytics = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -2223,110 +2335,7 @@ export const searchAllContent = async (req: Request, res: Response) => {
   }
 };
 
-export const createComment = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
 
-    const { soul_story_id, content, imgs = [] } = req.body;
-
-    if (!content?.trim() || !soul_story_id) {
-      res.status(400).json({
-        success: false,
-        message: 'Missing required fields: content, soul_story_id'
-      });
-      return;
-    }
-
-    const result = await soulStoriesServices.createComment(userId, soul_story_id, content, imgs);
-
-    if (result.success) {
-      res.status(201).json(result);
-    } else {
-      res.status(400).json(result);
-    }
-
-  } catch (error) {
-    console.error('Error in createComment controller:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Failed to create comment'
-    });
-  }
-};
-
-export const getComments = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { soul_story_id, page = 1, limit = 10 } = req.query;
-    const userId = req.user?.id;
-
-    if (!soul_story_id) {
-      res.status(400).json({
-        success: false,
-        message: 'soul_story_id is required'
-      });
-      return;
-    }
-
-    const result = await soulStoriesServices.getComments(
-      soul_story_id as string,
-      Number(page),
-      Number(limit),
-      userId
-    );
-
-    res.status(200).json(result);
-
-  } catch (error) {
-    console.error('Error in getComments controller:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Failed to fetch comments'
-    });
-  }
-};
-
-export const updateComment = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const { comment_id } = req.params;
-    const { content, imgs } = req.body;
-
-    if (!content?.trim()) {
-      res.status(400).json({
-        success: false,
-        message: 'Content is required'
-      });
-      return;
-    }
-
-    const result = await soulStoriesServices.updateComment(userId, comment_id, content, imgs);
-
-    if (result.success) {
-      res.status(200).json(result);
-    } else {
-      res.status(400).json(result);
-    }
-
-  } catch (error) {
-    console.error('Error in updateComment controller:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Failed to update comment'
-    });
-  }
-};
 
 export const deleteComment = async (req: Request, res: Response): Promise<void> => {
   try {
