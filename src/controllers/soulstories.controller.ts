@@ -9,18 +9,127 @@ import { sendNotification } from "../sockets/emitNotification";
 
 type StoryReactionType = 'like' | 'support' | 'valuable' | 'funny' | 'shocked' | 'moved' | 'triggered';
 
-type VoteType = 'upvote' | 'downvote';
-type VoteTargetType = 'story' | 'thread';
+export const categoryConfig = {
+  // Episode Categories (Multiple Videos)
+  'serial-fiction': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: true,
+    asset_type: 'video',
+    story_type: 'episodes'
+  },
+  'video-drama': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: true,
+    asset_type: 'video',
+    story_type: 'episodes'
+  },
+  'course': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: true,
+    asset_type: 'video',
+    story_type: 'episodes'
+  },
 
-interface StoryVote {
-  id: string;
-  user_id: string;
-  target_id: string;
-  target_type: VoteTargetType;
-  vote_type: VoteType;
-  created_at: string;
-  updated_at: string;
-}
+  // Multiple PDF Categories
+  'webtoon': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'manga': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'manhwa': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'poetry': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'comic': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'comic-strip': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'fan-fiction': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: true, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+
+  // Single PDF Categories
+  'book': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'visual-narrative': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+  'article': { 
+    allowedTypes: ['pdf'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'document',
+    story_type: 'documents'
+  },
+
+  // Single Video Categories
+  'animation': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'video',
+    story_type: 'documents'
+  },
+  'cartoon': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'video',
+    story_type: 'documents'
+  },
+  'movie': { 
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
+    allowedMultiples: false, 
+    isEpisodeCategory: false,
+    asset_type: 'video',
+    story_type: 'documents'
+  },
+};
 
 type StoryFieldMap = {
   [key in StoryReactionType]:
@@ -85,7 +194,185 @@ const getReactionDisplayName = (reactionType: StoryReactionType): string => {
   return displayNames[reactionType] || reactionType;
 };
 
-export const createStory = async (req: Request, res: Response): Promise<void> => {
+// export const createStory = async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) {
+//       res.status(401).json({ error: "Unauthorized" });
+//       return;
+//     }
+
+//     const {
+//       title,
+//       description,
+//       tags = [],
+//       category,
+//       story_type,
+//       thumbnail_url,
+//       asset_type,
+//       asset_urls,
+//       episodes = [],
+//       monetization_type = 'free',
+//       price = 0,
+//       free_documents = 0,
+//       free_episodes = 0,
+//       remix = false,
+//       co_authors,
+//       disclaimer = []
+//     } = req.body;
+
+//     if (!title?.trim() || !category?.trim() || !description?.trim() || !story_type?.trim()) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'Missing required fields: title, category, description, story_type'
+//       });
+//       return;
+//     }
+
+//     if (disclaimer && Array.isArray(disclaimer)) {
+//       const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids', 'user_generated'];
+
+//       for (const disclaimerItem of disclaimer) {
+//         if (!disclaimerItem.type || !validDisclaimerTypes.includes(disclaimerItem.type)) {
+//           res.status(400).json({
+//             success: false,
+//             message: `Invalid disclaimer type: ${disclaimerItem.type}. Must be one of: ${validDisclaimerTypes.join(', ')}`
+//           });
+//           return;
+//         }
+
+//         if (typeof disclaimerItem.enabled !== 'boolean') {
+//           res.status(400).json({
+//             success: false,
+//             message: `Disclaimer enabled must be a boolean for type: ${disclaimerItem.type}`
+//           });
+//           return;
+//         }
+//       }
+//     } else if (disclaimer && !Array.isArray(disclaimer)) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'Disclaimer must be an array of objects with type and enabled properties'
+//       });
+//       return;
+//     }
+
+//     const content_type = story_type === 'episodes' ? 'episodes' : 'documents';
+//     let finalUrls: string[] = [];
+
+//     if (content_type === 'documents') {
+//       if (asset_urls) {
+//         if (Array.isArray(asset_urls)) {
+//           finalUrls = asset_urls.filter(url => url?.trim());
+//         } else if (typeof asset_urls === 'string') {
+//           finalUrls = [asset_urls.trim()];
+//         }
+//       }
+
+//       if (finalUrls.length === 0) {
+//         res.status(400).json({
+//           success: false,
+//           message: 'Missing required fields for single asset: at least one asset URL is required'
+//         });
+//         return;
+//       }
+
+//       if (!asset_type?.trim()) {
+//         res.status(400).json({
+//           success: false,
+//           message: 'Missing required field: asset_type'
+//         });
+//         return;
+//       }
+
+//       if (!['video', 'document'].includes(asset_type)) {
+//         res.status(400).json({
+//           success: false,
+//           message: 'asset_type must be either "video" or "document"'
+//         });
+//         return;
+//       }
+//     } else {
+//       if (episodes && episodes.length > 0) {
+//         for (const [index, episode] of episodes.entries()) {
+//           if (!episode.video_url?.trim()) {
+//             res.status(400).json({
+//               success: false,
+//               message: `Episode ${index + 1} is missing required field: video_url`
+//             });
+//             return;
+//           }
+//         }
+//       }
+//     }
+
+//     if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'monetization_type must be one of: free, premium, subscription'
+//       });
+//       return;
+//     }
+
+//     if (monetization_type !== 'free' && price <= 0) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'Price must be greater than 0 for premium content'
+//       });
+//       return;
+//     }
+
+//     if (free_documents < 0 || free_episodes < 0) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'Free documents and episodes cannot be negative'
+//       });
+//       return;
+//     }
+
+//     const enabledDisclaimers = disclaimer
+//       ? disclaimer.filter((d: any) => d.enabled === true)
+//       : [];
+
+//     const storyData = {
+//       author_id: userId,
+//       title: title.trim(),
+//       description: description.trim(),
+//       tags,
+//       category: category.trim(),
+//       story_type: story_type.trim(),
+//       thumbnail_url: thumbnail_url?.trim() || null,
+//       asset_urls: finalUrls,
+//       asset_type: asset_type || null,
+//       monetization_type,
+//       price,
+//       free_documents,
+//       free_episodes,
+//       // status: 'draft',
+//       status: 'published',
+//       content_type: content_type,
+//       remix,
+//       disclaimer: enabledDisclaimers.length > 0 ? enabledDisclaimers : null,
+//       ...(co_authors && co_authors.length > 0 && { co_authors })
+//     };
+
+//     const story = await soulStoriesServices.createStory(storyData, episodes, userId);
+//     res.status(201).json({
+//       success: true,
+//       message: 'Story created successfully',
+//       story
+//     });
+//   } catch (error) {
+//     console.error('Error creating story:', error);
+//     res.status(500).json({
+//       success: false,
+//       error: 'Internal server error',
+//       message: 'Failed to create story'
+//     });
+//   }
+// };
+
+export const createStory = async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -108,50 +395,113 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       free_documents = 0,
       free_episodes = 0,
       remix = false,
+      remix_story_id,
       co_authors,
-      disclaimer = []
+      disclaimers = []
     } = req.body;
 
-    if (!title?.trim() || !category?.trim() || !description?.trim() || !story_type?.trim()) {
-      res.status(400).json({
+    // Validate category exists in config
+    if (!category || !categoryConfig[category as keyof typeof categoryConfig]) {
+      return res.status(400).json({
         success: false,
-        message: 'Missing required fields: title, category, description, story_type'
+        message: `Invalid category: ${category}. Must be one of: ${Object.keys(categoryConfig).join(', ')}`
       });
-      return;
     }
 
-    if (disclaimer && Array.isArray(disclaimer)) {
+    const categoryInfo = categoryConfig[category as keyof typeof categoryConfig];
+
+    // Validate remix_story_id if provided
+    if (remix_story_id) {
+      const { data: remixStory, error: remixError } = await supabase
+        .from('soul_stories')
+        .select('id, author_id')
+        .eq('id', remix_story_id)
+        .single();
+
+      if (remixError || !remixStory) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid remix_story_id: Story not found'
+        });
+      }
+
+      if (remixStory.author_id === userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot create a remix of your own story'
+        });
+      }
+    }
+
+    // Validate required fields
+    if (!title?.trim() || !category?.trim() || !description?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: title, category, description'
+      });
+    }
+
+    // Validate disclaimers
+    if (disclaimers && Array.isArray(disclaimers)) {
       const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids', 'user_generated'];
 
-      for (const disclaimerItem of disclaimer) {
+      for (const disclaimerItem of disclaimers) {
         if (!disclaimerItem.type || !validDisclaimerTypes.includes(disclaimerItem.type)) {
-          res.status(400).json({
+          return res.status(400).json({
             success: false,
             message: `Invalid disclaimer type: ${disclaimerItem.type}. Must be one of: ${validDisclaimerTypes.join(', ')}`
           });
-          return;
         }
 
         if (typeof disclaimerItem.enabled !== 'boolean') {
-          res.status(400).json({
+          return res.status(400).json({
             success: false,
             message: `Disclaimer enabled must be a boolean for type: ${disclaimerItem.type}`
           });
-          return;
         }
       }
-    } else if (disclaimer && !Array.isArray(disclaimer)) {
-      res.status(400).json({
+    } else if (disclaimers && !Array.isArray(disclaimers)) {
+      return res.status(400).json({
         success: false,
         message: 'Disclaimer must be an array of objects with type and enabled properties'
       });
-      return;
     }
 
-    const content_type = story_type === 'episodes' ? 'episodes' : 'documents';
-    let finalUrls: string[] = [];
+    const derivedAssetType = categoryInfo.asset_type;
+    const derivedStoryType = categoryInfo.story_type;
+    const isEpisodeCategory = categoryInfo.isEpisodeCategory;
 
-    if (content_type === 'documents') {
+    let finalUrls: string[] = [];
+    let finalEpisodes: any[] = [];
+
+    if (isEpisodeCategory) {
+      if (!episodes || episodes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Category '${category}' requires at least one episode`
+        });
+      }
+
+      for (const [index, episode] of episodes.entries()) {
+        if (!episode.video_url?.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Episode ${index + 1} is missing required field: video_url`
+          });
+        }
+
+        const videoUrl = episode.video_url.trim();
+        const videoExtension = videoUrl.split('.').pop()?.toLowerCase();
+        if (!videoExtension || !categoryInfo.allowedTypes.includes(videoExtension)) {
+          return res.status(400).json({
+            success: false,
+            message: `Episode ${index + 1} has invalid video format. Allowed formats: ${categoryInfo.allowedTypes.join(', ')}`
+          });
+        }
+      }
+
+      finalEpisodes = episodes;
+    } else {
       if (asset_urls) {
         if (Array.isArray(asset_urls)) {
           finalUrls = asset_urls.filter(url => url?.trim());
@@ -161,68 +511,62 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       }
 
       if (finalUrls.length === 0) {
-        res.status(400).json({
+        return res.status(400).json({
           success: false,
-          message: 'Missing required fields for single asset: at least one asset URL is required'
+          message: `Category '${category}' requires at least one asset URL`
         });
-        return;
       }
 
-      if (!asset_type?.trim()) {
-        res.status(400).json({
-          success: false,
-          message: 'Missing required field: asset_type'
-        });
-        return;
-      }
-
-      if (!['video', 'document'].includes(asset_type)) {
-        res.status(400).json({
-          success: false,
-          message: 'asset_type must be either "video" or "document"'
-        });
-        return;
-      }
-    } else {
-      if (episodes && episodes.length > 0) {
-        for (const [index, episode] of episodes.entries()) {
-          if (!episode.video_url?.trim()) {
-            res.status(400).json({
-              success: false,
-              message: `Episode ${index + 1} is missing required field: video_url`
-            });
-            return;
-          }
+      for (const url of finalUrls) {
+        const fileExtension = url.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !categoryInfo.allowedTypes.includes(fileExtension)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid file format for URL: ${url}. Allowed formats: ${categoryInfo.allowedTypes.join(', ')}`
+          });
         }
+      }
+
+      if (!categoryInfo.allowedMultiples && finalUrls.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: `Category '${category}' only allows a single asset`
+        });
       }
     }
 
-    if (!['free', 'premium', 'subscription'].includes(monetization_type)) {
-      res.status(400).json({
+    if (!['free', 'premium'].includes(monetization_type)) {
+      return res.status(400).json({
         success: false,
-        message: 'monetization_type must be one of: free, premium, subscription'
+        message: 'monetization_type must be one of: free, premium'
       });
-      return;
     }
 
     if (monetization_type !== 'free' && price <= 0) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Price must be greater than 0 for premium content'
       });
-      return;
     }
 
     if (free_documents < 0 || free_episodes < 0) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Free documents and episodes cannot be negative'
       });
-      return;
     }
 
-    const enabledDisclaimers = disclaimer
-      ? disclaimer.filter((d: any) => d.enabled === true)
+    let freeDocuments = free_documents;
+    let freeEpisodes = free_episodes;
+
+    if (isEpisodeCategory) {
+      freeEpisodes = Math.min(free_episodes, episodes.length);
+    } else {
+      freeDocuments = Math.min(free_documents, finalUrls.length);
+    }
+
+    const enabledDisclaimers = disclaimers
+      ? disclaimers.filter((d: any) => d.enabled === true)
       : [];
 
     const storyData = {
@@ -231,31 +575,33 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       description: description.trim(),
       tags,
       category: category.trim(),
-      story_type: story_type.trim(),
+      story_type: derivedStoryType,
       thumbnail_url: thumbnail_url?.trim() || null,
-      asset_urls: finalUrls,
-      asset_type: asset_type || null,
+      asset_urls: isEpisodeCategory ? [] : finalUrls,
+      asset_type: derivedAssetType,
       monetization_type,
       price,
-      free_documents,
-      free_episodes,
-      // status: 'draft',
+      free_documents: freeDocuments,
+      free_episodes: freeEpisodes,
       status: 'published',
-      content_type: content_type,
+      content_type: isEpisodeCategory ? 'episodes' : 'documents',
       remix,
+      remix_story_id: remix_story_id || null,
       disclaimer: enabledDisclaimers.length > 0 ? enabledDisclaimers : null,
       ...(co_authors && co_authors.length > 0 && { co_authors })
     };
 
-    const story = await soulStoriesServices.createStory(storyData, episodes, userId);
-    res.status(201).json({
+    const story = await soulStoriesServices.createStory(storyData, finalEpisodes, userId);
+    
+    return res.status(201).json({
       success: true,
       message: 'Story created successfully',
       story
     });
+
   } catch (error) {
     console.error('Error creating story:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error',
       message: 'Failed to create story'
@@ -488,6 +834,72 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
+export const checkContentAccess = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { storyId, contentUrl } = req.body;
+
+    if (!storyId || !contentUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: storyId and contentUrl'
+      });
+    }
+
+    const contentUrls = Array.isArray(contentUrl) ? contentUrl : [contentUrl];
+
+    const accessResults: { [key: string]: boolean } = {};
+
+    for (const url of contentUrls) {
+      const { data: purchases, error } = await supabase
+        .from('user_content_purchases')
+        .select('content_identifier')
+        .eq('user_id', userId)
+        .eq('story_id', storyId)
+        .or(`content_identifier.eq.${url},content_identifier.eq.full_story`);
+
+      if (error) {
+        console.error(`Error checking access for ${url}:`, error);
+        accessResults[url] = false;
+        continue;
+      }
+
+      accessResults[url] = purchases && purchases.length > 0;
+    }
+
+    const { data: fullStoryPurchase } = await supabase
+      .from('user_content_purchases')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('story_id', storyId)
+      .eq('content_identifier', 'full_story')
+      .single();
+
+    const hasFullAccess = !!fullStoryPurchase;
+
+    res.status(200).json({
+      success: true,
+      has_access: Object.values(accessResults).some(access => access),
+      has_full_access: hasFullAccess,
+      access_details: accessResults,
+      full_story_access: hasFullAccess
+    });
+
+  } catch (error) {
+    console.error('Error checking content access:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to check content access'
+    });
+  }
+};
+
 export const getUserStories = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -655,6 +1067,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           description: story.description,
           tags: story.tags || [],
           category: story.category,
+          disclaimer: story.disclaimer,
           story_type: story.story_type,
           thumbnail_url: story.thumbnail_url,
           asset_urls: story.asset_urls || [],
@@ -853,6 +1266,7 @@ export const getTrendingStories = async (req: Request, res: Response): Promise<v
           description: story.description,
           tags: story.tags || [],
           category: story.category,
+          disclaimer: story.disclaimer,
           story_type: story.story_type,
           thumbnail_url: story.thumbnail_url,
           asset_urls: story.asset_urls || [],
@@ -992,6 +1406,25 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
 
     if (episodesError) throw episodesError;
 
+    let coAuthorProfiles: any[] = [];
+    if (story.co_authors && story.co_authors.length > 0) {
+      const { data: coAuthorsData, error: coAuthorsError } = await supabase
+        .from('profiles')
+        .select(`
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          email,
+          username
+        `)
+        .in('id', story.co_authors);
+
+      if (!coAuthorsError && coAuthorsData) {
+        coAuthorProfiles = coAuthorsData;
+      }
+    }
+
     let userReaction = null;
     let userVote = null;
     let userSaved = false;
@@ -1053,6 +1486,7 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
       id: story.id,
       title: story.title,
       description: story.description,
+      disclaimer: story.disclaimer,
       tags: story.tags || [],
       category: story.category,
       story_type: story.story_type,
@@ -1112,6 +1546,16 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
         username: story.profiles.username
       } : null,
 
+      // Co-author profiles
+      co_author_profiles: coAuthorProfiles!.map(profile => ({
+        id: profile.id,
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        avatar_url: profile.avatar_url,
+        email: profile.email,
+        username: profile.username
+      })),
+
       episodes: episodes ? episodes.map(episode => ({
         id: episode.id,
         story_id: episode.story_id,
@@ -1134,7 +1578,9 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
         is_video_content: ['video-drama', 'animation', 'ai-movie'].includes(story.category),
         is_episodic_content: ['serial-fiction', 'webtoon', 'comic', 'manga'].includes(story.category),
         can_remix: story.remix,
-        is_owner: userId ? story.author_id === userId : false
+        is_owner: userId ? story.author_id === userId : false,
+        is_co_author: userId ? story.co_authors?.includes(userId) || false : false,
+        total_co_authors: coAuthorProfiles.length
       }
     };
 
@@ -1563,6 +2009,7 @@ export const getStories = async (req: Request, res: Response) => {
             description: story.description,
             tags: story.tags || [],
             category: story.category,
+            disclaimer: story.disclaimer,
             story_type: story.story_type,
             thumbnail_url: story.thumbnail_url,
             asset_urls: story.asset_urls || [],
@@ -2003,6 +2450,262 @@ export const searchStories = async (req: Request, res: Response) => {
   }
 };
 
+// export const purchaseStory = async (req: Request, res: Response): Promise<any> => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) {
+//       res.status(401).json({ error: 'Unauthorized' });
+//       return;
+//     }
+
+//     const { storyId } = req.body;
+
+//     if (!storyId) {
+//       res.status(400).json({
+//         success: false,
+//         message: 'Missing required field: storyId'
+//       });
+//       return;
+//     }
+
+//     const { data: userProfile, error: profileError } = await supabase
+//       .from('profiles')
+//       .select('user_level')
+//       .eq('id', userId)
+//       .single();
+
+//     if (profileError || !userProfile) {
+//       throw new Error('User profile not found');
+//     }
+
+//     if (!userProfile.user_level || userProfile.user_level < 1) {
+//       return res.status(403).json({
+//         success: false,
+//         message: 'Not allowed. User level too low.'
+//       });
+//     }
+
+//     const { data: story, error: storyError } = await supabase
+//       .from('soul_stories')
+//       .select(`
+//         *,
+//         episodes:soul_story_episodes(*)
+//       `)
+//       .eq('id', storyId)
+//       .single();
+
+//     if (storyError || !story) {
+//       console.error('Story fetch error:', storyError);
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Story not found'
+//       });
+//     }
+
+//     if (story.monetization_type === 'free' || story.price === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'This story is free and does not require purchase'
+//       });
+//     }
+
+//     const { data: existingPurchase, error: purchaseError } = await supabase
+//       .from('user_content_purchases')
+//       .select('*')
+//       .eq('user_id', userId)
+//       .eq('story_id', storyId)
+//       .single();
+
+//     if (existingPurchase) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'You have already purchased this story'
+//       });
+//     }
+
+//     const totalPrice = story.price;
+
+//     const { data: userCoins, error: userError } = await supabase
+//       .from('anamcoins')
+//       .select('available_coins, spent_coins, total_coins')
+//       .eq('user_id', userId)
+//       .single();
+
+//     if (userError || !userCoins) {
+//       throw new Error('User coins account not found');
+//     }
+
+//     if (userCoins.available_coins < totalPrice) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Insufficient coins. Need ${totalPrice}, have ${userCoins.available_coins}`
+//       });
+//     }
+
+//     let totalPages = 0;
+//     let totalEpisodes = 0;
+//     let accessibleEpisodes: string[] = [];
+
+//     if (story.asset_type === 'document') {
+//       totalPages = story.asset_urls?.length || story.free_documents || 0;
+//     } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
+//       totalEpisodes = story.episodes?.length || 0;
+//       accessibleEpisodes = story.episodes?.map((ep: any) => ep.video_url) || [];
+//     }
+
+//     const { error: userUpdateError } = await supabase
+//       .from('anamcoins')
+//       .update({
+//         available_coins: userCoins.available_coins - totalPrice,
+//         spent_coins: (userCoins.spent_coins || 0) + totalPrice,
+//         updated_at: new Date().toISOString()
+//       })
+//       .eq('user_id', userId);
+
+//     if (userUpdateError) {
+//       throw new Error('Failed to update user coins');
+//     }
+
+//     // FIXED: Removed 'purchase_type' column and fixed 'purchase_data' typo
+//     const { data: purchaseData, error: purchaseCreateError } = await supabase
+//       .from('user_content_purchases')
+//       .insert({
+//         user_id: userId,
+//         story_id: storyId,
+//         content_type: story.asset_type,
+//         content_identifier: 'full_story',
+//         coins_paid: totalPrice,
+//         author_revenue: totalPrice,
+//         highest_page_access: totalPages,
+//         accessible_episode_urls: accessibleEpisodes,
+//         total_coins_spent: totalPrice,
+//         created_at: new Date().toISOString(),
+//         updated_at: new Date().toISOString()
+//       })
+//       .select()
+//       .single();
+
+//     if (purchaseCreateError) {
+//       // Rollback coin deduction if purchase fails
+//       await supabase
+//         .from('anamcoins')
+//         .update({
+//           available_coins: userCoins.available_coins,
+//           spent_coins: userCoins.spent_coins,
+//           updated_at: new Date().toISOString()
+//         })
+//         .eq('user_id', userId);
+
+//       throw new Error(`Failed to create purchase record: ${purchaseCreateError.message}`);
+//     }
+
+//     const hasCoAuthors = story.co_authors &&
+//       Array.isArray(story.co_authors) &&
+//       story.co_authors.length > 0;
+
+//     if (hasCoAuthors) {
+//       const allAuthors = [story.author_id, ...story.co_authors];
+//       const revenuePerAuthor = Math.floor(totalPrice / allAuthors.length);
+//       const remainder = totalPrice % allAuthors.length;
+
+//       for (let i = 0; i < allAuthors.length; i++) {
+//         const authorId = allAuthors[i];
+//         const coinAmount = revenuePerAuthor + (i === 0 ? remainder : 0);
+
+//         const { data: authorCoins, error: authorError } = await supabase
+//           .from('anamcoins')
+//           .select('available_coins, total_coins')
+//           .eq('user_id', authorId)
+//           .single();
+
+//         if (authorError || !authorCoins) {
+//           console.error(`Author ${authorId} coins account not found`);
+//           continue;
+//         }
+
+//         const { error: authorUpdateError } = await supabase
+//           .from('anamcoins')
+//           .update({
+//             available_coins: authorCoins.available_coins + coinAmount,
+//             total_coins: authorCoins.total_coins + coinAmount,
+//             updated_at: new Date().toISOString()
+//           })
+//           .eq('user_id', authorId);
+
+//         if (authorUpdateError) {
+//           console.error(`Failed to update coins for author ${authorId}`);
+//         }
+//       }
+
+//       // FIXED: Removed co_authors_revenue column since it doesn't exist in schema
+//       await supabase
+//         .from('user_content_purchases')
+//         .update({
+//           author_revenue: revenuePerAuthor + remainder
+//         })
+//         .eq('id', purchaseData.id);
+//     } else {
+//       const { data: authorCoins, error: authorError } = await supabase
+//         .from('anamcoins')
+//         .select('available_coins, total_coins')
+//         .eq('user_id', story.author_id)
+//         .single();
+
+//       if (authorError || !authorCoins) {
+//         console.error('Author coins account not found');
+//       } else {
+//         const { error: authorUpdateError } = await supabase
+//           .from('anamcoins')
+//           .update({
+//             available_coins: authorCoins.available_coins + totalPrice,
+//             total_coins: authorCoins.total_coins + totalPrice,
+//             updated_at: new Date().toISOString()
+//           })
+//           .eq('user_id', story.author_id);
+
+//         if (authorUpdateError) {
+//           console.error('Failed to update author coins');
+//         }
+//       }
+//     }
+
+//     await supabase
+//       .from('soul_stories')
+//       .update({
+//         total_saved: (story.total_saved || 0) + 1,
+//         updated_at: new Date().toISOString()
+//       })
+//       .eq('id', storyId);
+
+//     return res.status(200).json({
+//       success: true,
+//       message: 'Story purchased successfully',
+//       purchase: {
+//         id: purchaseData.id,
+//         story_id: storyId,
+//         story_title: story.title,
+//         coins_paid: totalPrice,
+//         access_granted: {
+//           full_access: true,
+//           total_pages: totalPages,
+//           total_episodes: totalEpisodes,
+//           accessible_episodes: accessibleEpisodes.length
+//         },
+//         purchased_at: purchaseData.created_at
+//       },
+//       remaining_coins: userCoins.available_coins - totalPrice
+//     });
+
+//   } catch (error) {
+//     console.error('Error in purchaseStory controller:', error);
+//     res.status(500).json({
+//       success: false,
+//       error: 'Internal server error',
+//       message: error instanceof Error ? error.message : 'Failed to purchase story'
+//     });
+//   }
+// };
+
 export const purchaseStory = async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.user?.id;
@@ -2011,7 +2714,7 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       return;
     }
 
-    const { storyId } = req.body;
+    const { storyId, contentIdentifier = 'full_story', specificUrl, purchaseType = 'full' } = req.body;
 
     if (!storyId) {
       res.status(400).json({
@@ -2042,7 +2745,8 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       .from('soul_stories')
       .select(`
         *,
-        episodes:soul_story_episodes(*)
+        episodes:soul_story_episodes(*),
+        remix_story:soul_stories!remix_story_id(id, author_id, title)
       `)
       .eq('id', storyId)
       .single();
@@ -2062,22 +2766,67 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       });
     }
 
-    const { data: existingPurchase, error: purchaseError } = await supabase
+    // Check existing purchase
+    let existingPurchaseQuery = supabase
       .from('user_content_purchases')
       .select('*')
       .eq('user_id', userId)
-      .eq('story_id', storyId)
-      .single();
+      .eq('story_id', storyId);
 
-    if (existingPurchase) {
+    if (specificUrl) {
+      existingPurchaseQuery = existingPurchaseQuery.eq('content_identifier', specificUrl);
+    }
+
+    const { data: existingPurchase, error: purchaseError } = await existingPurchaseQuery;
+
+    if (existingPurchase && existingPurchase.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'You have already purchased this story'
+        message: specificUrl ? 'You have already purchased this content' : 'You have already purchased this story'
       });
     }
 
-    const totalPrice = story.price;
+    // Calculate price and access details
+    let totalPrice = story.price;
+    let contentIdentifierToUse = contentIdentifier;
+    let accessibleUrls: string[] = [];
+    let contentType = 'story';
 
+    if (specificUrl && purchaseType === 'individual') {
+      // Individual content purchase
+      if (story.asset_type === 'document' && story.asset_urls?.includes(specificUrl)) {
+        totalPrice = Math.ceil(story.price / Math.max(story.asset_urls.length, 1));
+        contentIdentifierToUse = specificUrl;
+        accessibleUrls = [specificUrl];
+        contentType = 'document'; // Individual document purchase
+      } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
+        const targetEpisode = story.episodes?.find((ep: any) => ep.video_url === specificUrl);
+        if (targetEpisode) {
+          totalPrice = Math.ceil(story.price / Math.max(story.episodes.length, 1));
+          contentIdentifierToUse = specificUrl;
+          accessibleUrls = [specificUrl];
+          contentType = 'episode'; // Individual episode purchase
+        }
+      }
+    } else {
+      // Full story purchase - always use 'story' content type
+      if (story.asset_type === 'document') {
+        accessibleUrls = story.asset_urls || [];
+        contentType = 'story'; // Full document story
+      } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
+        accessibleUrls = story.episodes?.map((ep: any) => ep.video_url) || [];
+        contentType = 'story'; // Full video story
+      }
+    }
+
+    if (totalPrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid price for this content'
+      });
+    }
+
+    // Check user coins
     const { data: userCoins, error: userError } = await supabase
       .from('anamcoins')
       .select('available_coins, spent_coins, total_coins')
@@ -2095,17 +2844,7 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       });
     }
 
-    let totalPages = 0;
-    let totalEpisodes = 0;
-    let accessibleEpisodes: string[] = [];
-
-    if (story.asset_type === 'document') {
-      totalPages = story.asset_urls?.length || story.free_documents || 0;
-    } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
-      totalEpisodes = story.episodes?.length || 0;
-      accessibleEpisodes = story.episodes?.map((ep: any) => ep.video_url) || [];
-    }
-
+    // Deduct coins from user
     const { error: userUpdateError } = await supabase
       .from('anamcoins')
       .update({
@@ -2119,27 +2858,39 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       throw new Error('Failed to update user coins');
     }
 
-    // FIXED: Removed 'purchase_type' column and fixed 'purchase_data' typo
+    // Create purchase record with proper content types
+    const purchaseDataToInsert: any = {
+      user_id: userId,
+      story_id: storyId,
+      content_type: contentType, // 'document', 'episode', or 'story'
+      content_identifier: contentIdentifierToUse,
+      coins_paid: totalPrice,
+      author_revenue: totalPrice,
+      total_coins_spent: totalPrice,
+      purchase_date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Add conditional fields based on content type
+    if (contentType === 'document' || contentType === 'story') {
+      // For document purchases or full story with documents
+      purchaseDataToInsert.highest_page_access = story.asset_type === 'document' ? (story.asset_urls?.length || 0) : 0;
+    }
+
+    if (contentType === 'episode' || contentType === 'story') {
+      // For episode purchases or full story with episodes
+      purchaseDataToInsert.accessible_episode_urls = accessibleUrls;
+    }
+
     const { data: purchaseData, error: purchaseCreateError } = await supabase
       .from('user_content_purchases')
-      .insert({
-        user_id: userId,
-        story_id: storyId,
-        content_type: story.asset_type,
-        content_identifier: 'full_story',
-        coins_paid: totalPrice,
-        author_revenue: totalPrice,
-        highest_page_access: totalPages,
-        accessible_episode_urls: accessibleEpisodes,
-        total_coins_spent: totalPrice,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .insert(purchaseDataToInsert)
       .select()
       .single();
 
     if (purchaseCreateError) {
-      // Rollback coin deduction if purchase fails
+      // Rollback coin deduction
       await supabase
         .from('anamcoins')
         .update({
@@ -2152,97 +2903,35 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
       throw new Error(`Failed to create purchase record: ${purchaseCreateError.message}`);
     }
 
-    const hasCoAuthors = story.co_authors &&
-      Array.isArray(story.co_authors) &&
-      story.co_authors.length > 0;
+    // Distribute revenue - pass userId to handle buyer-author same case
+    await distributeRevenue(story, totalPrice, purchaseData.id, userId);
 
-    if (hasCoAuthors) {
-      const allAuthors = [story.author_id, ...story.co_authors];
-      const revenuePerAuthor = Math.floor(totalPrice / allAuthors.length);
-      const remainder = totalPrice % allAuthors.length;
-
-      for (let i = 0; i < allAuthors.length; i++) {
-        const authorId = allAuthors[i];
-        const coinAmount = revenuePerAuthor + (i === 0 ? remainder : 0);
-
-        const { data: authorCoins, error: authorError } = await supabase
-          .from('anamcoins')
-          .select('available_coins, total_coins')
-          .eq('user_id', authorId)
-          .single();
-
-        if (authorError || !authorCoins) {
-          console.error(`Author ${authorId} coins account not found`);
-          continue;
-        }
-
-        const { error: authorUpdateError } = await supabase
-          .from('anamcoins')
-          .update({
-            available_coins: authorCoins.available_coins + coinAmount,
-            total_coins: authorCoins.total_coins + coinAmount,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', authorId);
-
-        if (authorUpdateError) {
-          console.error(`Failed to update coins for author ${authorId}`);
-        }
-      }
-
-      // FIXED: Removed co_authors_revenue column since it doesn't exist in schema
+    // Update story stats - only for full story purchases
+    if (purchaseType === 'full') {
       await supabase
-        .from('user_content_purchases')
+        .from('soul_stories')
         .update({
-          author_revenue: revenuePerAuthor + remainder
+          total_saved: (story.total_saved || 0) + 1,
+          updated_at: new Date().toISOString()
         })
-        .eq('id', purchaseData.id);
-    } else {
-      const { data: authorCoins, error: authorError } = await supabase
-        .from('anamcoins')
-        .select('available_coins, total_coins')
-        .eq('user_id', story.author_id)
-        .single();
-
-      if (authorError || !authorCoins) {
-        console.error('Author coins account not found');
-      } else {
-        const { error: authorUpdateError } = await supabase
-          .from('anamcoins')
-          .update({
-            available_coins: authorCoins.available_coins + totalPrice,
-            total_coins: authorCoins.total_coins + totalPrice,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', story.author_id);
-
-        if (authorUpdateError) {
-          console.error('Failed to update author coins');
-        }
-      }
+        .eq('id', storyId);
     }
-
-    await supabase
-      .from('soul_stories')
-      .update({
-        total_saved: (story.total_saved || 0) + 1,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', storyId);
 
     return res.status(200).json({
       success: true,
-      message: 'Story purchased successfully',
+      message: purchaseType === 'individual' ? 'Content purchased successfully' : 'Story purchased successfully',
       purchase: {
         id: purchaseData.id,
         story_id: storyId,
         story_title: story.title,
+        content_identifier: contentIdentifierToUse,
+        content_type: contentType,
         coins_paid: totalPrice,
         access_granted: {
-          full_access: true,
-          total_pages: totalPages,
-          total_episodes: totalEpisodes,
-          accessible_episodes: accessibleEpisodes.length
+          full_access: purchaseType === 'full',
+          purchased_url: specificUrl || null,
+          accessible_urls: accessibleUrls,
+          total_accessible: accessibleUrls.length
         },
         purchased_at: purchaseData.created_at
       },
@@ -2259,7 +2948,113 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
   }
 };
 
+async function distributeRevenue(story: any, totalPrice: number, purchaseId: string, buyerId: string) {
+  const authorsToPay: { id: string; share: number; isRemixAuthor?: boolean; isBuyer?: boolean }[] = [];
+  
+  const isRemix = story.remix_story_id && story.remix_story;
 
+  if (isRemix) {
+    const originalAuthorShare = Math.floor(totalPrice * 0.2);
+    let remainingShare = totalPrice - originalAuthorShare;
+    
+    if (story.remix_story.author_id !== buyerId) {
+      authorsToPay.push({
+        id: story.remix_story.author_id,
+        share: originalAuthorShare,
+        isRemixAuthor: true,
+        isBuyer: false
+      });
+    } else {
+      remainingShare += originalAuthorShare;
+    }
+    
+    const hasCoAuthors = story.co_authors && Array.isArray(story.co_authors) && story.co_authors.length > 0;
+    const currentAuthors = hasCoAuthors ? [story.author_id, ...story.co_authors] : [story.author_id];
+    const sharePerAuthor = Math.floor(remainingShare / currentAuthors.length);
+    const remainder = remainingShare % currentAuthors.length;
+    
+    currentAuthors.forEach((authorId: string, index: number) => {
+      const isAuthorBuyer = authorId === buyerId;
+      authorsToPay.push({
+        id: authorId,
+        share: sharePerAuthor + (index === 0 ? remainder : 0),
+        isRemixAuthor: false,
+        isBuyer: isAuthorBuyer
+      });
+    });
+  } else {
+    const hasCoAuthors = story.co_authors && Array.isArray(story.co_authors) && story.co_authors.length > 0;
+    const allAuthors = hasCoAuthors ? [story.author_id, ...story.co_authors] : [story.author_id];
+    const sharePerAuthor = Math.floor(totalPrice / allAuthors.length);
+    const remainder = totalPrice % allAuthors.length;
+    
+    allAuthors.forEach((authorId: string, index: number) => {
+      const isAuthorBuyer = authorId === buyerId;
+      authorsToPay.push({
+        id: authorId,
+        share: sharePerAuthor + (index === 0 ? remainder : 0),
+        isRemixAuthor: false,
+        isBuyer: isAuthorBuyer
+      });
+    });
+  }
+
+  // Update coins for all authors
+  for (const author of authorsToPay) {
+    if (author.share > 0) {
+      const { data: authorCoins, error: authorError } = await supabase
+        .from('anamcoins')
+        .select('available_coins, total_coins, user_id')
+        .eq('user_id', author.id)
+        .single();
+
+      if (!authorError && authorCoins) {
+        await supabase
+          .from('anamcoins')
+          .update({
+            available_coins: authorCoins.available_coins + author.share,
+            total_coins: authorCoins.total_coins + author.share,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', author.id);
+      } else {
+        await supabase
+          .from('anamcoins')
+          .insert({
+            user_id: author.id,
+            available_coins: author.share,
+            total_coins: author.share,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+      }
+
+      console.log(`Distributed ${author.share} AC to author ${author.id} ${
+        author.isRemixAuthor ? '(remix author)' : ''
+      } ${
+        author.isBuyer ? '(buyer)' : ''
+      }`);
+    }
+  }
+
+  const revenueDistribution = authorsToPay.map(author => ({
+    author_id: author.id,
+    share: author.share,
+    is_remix_author: author.isRemixAuthor || false,
+    is_buyer: author.isBuyer || false
+  }));
+
+  const primaryAuthorShare = authorsToPay.find(a => a.id === story.author_id)?.share || 0;
+
+  await supabase
+    .from('user_content_purchases')
+    .update({
+      author_revenue: primaryAuthorShare,
+      revenue_distribution: revenueDistribution,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', purchaseId);
+}
 
 // comments
 export const createComment = async (req: Request, res: Response): Promise<void> => {
@@ -2526,7 +3321,6 @@ export const searchAllContent = async (req: Request, res: Response) => {
     });
   }
 };
-
 
 export const deleteComment = async (req: Request, res: Response): Promise<void> => {
   try {
