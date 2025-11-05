@@ -105,7 +105,7 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       episodes = [],
       monetization_type = 'free',
       price = 0,
-      free_pages = 0,
+      free_documents = 0,
       free_episodes = 0,
       remix = false,
       co_authors,
@@ -148,10 +148,10 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const content_type = story_type === 'episodes' ? 'episodes' : 'single';
+    const content_type = story_type === 'episodes' ? 'episodes' : 'documents';
     let finalUrls: string[] = [];
 
-    if (content_type === 'single') {
+    if (content_type === 'documents') {
       if (asset_urls) {
         if (Array.isArray(asset_urls)) {
           finalUrls = asset_urls.filter(url => url?.trim());
@@ -213,10 +213,10 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    if (free_pages < 0 || free_episodes < 0) {
+    if (free_documents < 0 || free_episodes < 0) {
       res.status(400).json({
         success: false,
-        message: 'Free pages and episodes cannot be negative'
+        message: 'Free documents and episodes cannot be negative'
       });
       return;
     }
@@ -237,7 +237,7 @@ export const createStory = async (req: Request, res: Response): Promise<void> =>
       asset_type: asset_type || null,
       monetization_type,
       price,
-      free_pages,
+      free_documents,
       free_episodes,
       // status: 'draft',
       status: 'published',
@@ -284,7 +284,7 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
       episodes,
       monetization_type,
       price,
-      free_pages,
+      free_documents,
       free_episodes,
       remix,
       co_authors,
@@ -426,15 +426,15 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
       updateData.price = price;
     }
 
-    if (free_pages !== undefined) {
-      if (free_pages < 0) {
+    if (free_documents !== undefined) {
+      if (free_documents < 0) {
         res.status(400).json({
           success: false,
           message: 'Free pages cannot be negative'
         });
         return;
       }
-      updateData.free_pages = free_pages;
+      updateData.free_documents = free_documents;
     }
 
     if (free_episodes !== undefined) {
@@ -465,7 +465,7 @@ export const updateStory = async (req: Request, res: Response): Promise<void> =>
     }
 
     if (updateData.story_type) {
-      updateData.content_type = updateData.story_type === 'episodes' ? 'episodes' : 'single_asset';
+      updateData.content_type = updateData.story_type === 'episodes' ? 'episodes' : 'documents';
     }
 
     updateData.updated_at = new Date().toISOString();
@@ -661,7 +661,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           asset_type: story.asset_type,
           monetization_type: story.monetization_type,
           price: story.price,
-          free_pages: story.free_pages,
+          free_documents: story.free_documents,
           free_episodes: story.free_episodes,
           status: story.status,
           content_type: story.content_type,
@@ -859,7 +859,7 @@ export const getTrendingStories = async (req: Request, res: Response): Promise<v
           asset_type: story.asset_type,
           monetization_type: story.monetization_type,
           price: story.price,
-          free_pages: story.free_pages,
+          free_documents: story.free_documents,
           free_episodes: story.free_episodes,
           status: story.status,
           content_type: story.content_type,
@@ -1061,7 +1061,7 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
       asset_type: story.asset_type,
       monetization_type: story.monetization_type,
       price: story.price,
-      free_pages: story.free_pages,
+      free_documents: story.free_documents,
       free_episodes: story.free_episodes,
       status: story.status,
       content_type: story.content_type,
@@ -1569,7 +1569,7 @@ export const getStories = async (req: Request, res: Response) => {
             asset_type: story.asset_type,
             monetization_type: story.monetization_type,
             price: story.price,
-            free_pages: story.free_pages,
+            free_documents: story.free_documents,
             free_episodes: story.free_episodes,
             status: story.status,
             content_type: story.content_type,
@@ -1891,7 +1891,7 @@ export const searchStories = async (req: Request, res: Response) => {
             asset_type: story.asset_type,
             monetization_type: story.monetization_type,
             price: story.price,
-            free_pages: story.free_pages,
+            free_documents: story.free_documents,
             free_episodes: story.free_episodes,
             status: story.status,
             content_type: story.content_type,
@@ -2100,7 +2100,7 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
     let accessibleEpisodes: string[] = [];
 
     if (story.asset_type === 'document') {
-      totalPages = story.asset_urls?.length || story.free_pages || 0;
+      totalPages = story.asset_urls?.length || story.free_documents || 0;
     } else if (story.asset_type === 'video' && story.story_type === 'episodes') {
       totalEpisodes = story.episodes?.length || 0;
       accessibleEpisodes = story.episodes?.map((ep: any) => ep.video_url) || [];
