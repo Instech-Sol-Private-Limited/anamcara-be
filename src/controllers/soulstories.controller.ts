@@ -11,120 +11,120 @@ type StoryReactionType = 'like' | 'support' | 'valuable' | 'funny' | 'shocked' |
 
 export const categoryConfig = {
   // Episode Categories (Multiple Videos)
-  'serial-fiction': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: true, 
+  'serial-fiction': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: true,
     isEpisodeCategory: true,
     asset_type: 'video',
     story_type: 'episodes'
   },
-  'video-drama': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: true, 
+  'video-drama': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: true,
     isEpisodeCategory: true,
     asset_type: 'video',
     story_type: 'episodes'
   },
-  'course': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: true, 
+  'course': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: true,
     isEpisodeCategory: true,
     asset_type: 'video',
     story_type: 'episodes'
   },
 
   // Multiple PDF Categories
-  'webtoon': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'webtoon': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'manga': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'manga': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'manhwa': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'manhwa': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'poetry': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'poetry': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'comic': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'comic': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'comic-strip': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'comic-strip': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'fan-fiction': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: true, 
+  'fan-fiction': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: true,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
 
   // Single PDF Categories
-  'book': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: false, 
+  'book': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'visual-narrative': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: false, 
+  'visual-narrative': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
-  'article': { 
-    allowedTypes: ['pdf'], 
-    allowedMultiples: false, 
+  'article': {
+    allowedTypes: ['pdf'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'document',
     story_type: 'documents'
   },
 
   // Single Video Categories
-  'animation': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: false, 
+  'animation': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'video',
     story_type: 'documents'
   },
-  'cartoon': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: false, 
+  'cartoon': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'video',
     story_type: 'documents'
   },
-  'movie': { 
-    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'], 
-    allowedMultiples: false, 
+  'movie': {
+    allowedTypes: ['mp4', 'mov', 'avi', 'mkv'],
+    allowedMultiples: false,
     isEpisodeCategory: false,
     asset_type: 'video',
     story_type: 'documents'
@@ -592,7 +592,7 @@ export const createStory = async (req: Request, res: Response): Promise<any> => 
     };
 
     const story = await soulStoriesServices.createStory(storyData, finalEpisodes, userId);
-    
+
     return res.status(201).json({
       success: true,
       message: 'Story created successfully',
@@ -1083,6 +1083,7 @@ export const getUserStories = async (req: Request, res: Response): Promise<void>
           boost_type: story.boost_type,
           boost_end_date: story.boost_end_date,
           remix: story.remix || false,
+          remix_story_id: story.remix_story_id || null,
           active_status: story.active_status !== false,
           co_authors: story.co_authors || [],
           total_shares: story.total_shares || 0,
@@ -1504,6 +1505,7 @@ export const getSoulStoryById = async (req: Request, res: Response): Promise<voi
       boost_type: story.boost_type,
       boost_end_date: story.boost_end_date,
       remix: story.remix || false,
+      remix_story_id: story.remix_story_id || null,
       active_status: story.active_status !== false,
       co_authors: story.co_authors || [],
       total_shares: story.total_shares || 0,
@@ -2025,6 +2027,7 @@ export const getStories = async (req: Request, res: Response) => {
             boost_type: story.boost_type,
             boost_end_date: story.boost_end_date,
             remix: story.remix || false,
+            remix_story_id: story.remix_story_id || null,
             active_status: story.active_status !== false,
             co_authors: story.co_authors || [],
             total_shares: story.total_shares || 0,
@@ -2347,6 +2350,7 @@ export const searchStories = async (req: Request, res: Response) => {
             boost_type: story.boost_type,
             boost_end_date: story.boost_end_date,
             remix: story.remix || false,
+            remix_story_id: story.remix_story_id || null,
             active_status: story.active_status !== false,
             co_authors: story.co_authors || [],
             total_shares: story.total_shares || 0,
@@ -2950,13 +2954,13 @@ export const purchaseStory = async (req: Request, res: Response): Promise<any> =
 
 async function distributeRevenue(story: any, totalPrice: number, purchaseId: string, buyerId: string) {
   const authorsToPay: { id: string; share: number; isRemixAuthor?: boolean; isBuyer?: boolean }[] = [];
-  
+
   const isRemix = story.remix_story_id && story.remix_story;
 
   if (isRemix) {
     const originalAuthorShare = Math.floor(totalPrice * 0.2);
     let remainingShare = totalPrice - originalAuthorShare;
-    
+
     if (story.remix_story.author_id !== buyerId) {
       authorsToPay.push({
         id: story.remix_story.author_id,
@@ -2967,12 +2971,12 @@ async function distributeRevenue(story: any, totalPrice: number, purchaseId: str
     } else {
       remainingShare += originalAuthorShare;
     }
-    
+
     const hasCoAuthors = story.co_authors && Array.isArray(story.co_authors) && story.co_authors.length > 0;
     const currentAuthors = hasCoAuthors ? [story.author_id, ...story.co_authors] : [story.author_id];
     const sharePerAuthor = Math.floor(remainingShare / currentAuthors.length);
     const remainder = remainingShare % currentAuthors.length;
-    
+
     currentAuthors.forEach((authorId: string, index: number) => {
       const isAuthorBuyer = authorId === buyerId;
       authorsToPay.push({
@@ -2987,7 +2991,7 @@ async function distributeRevenue(story: any, totalPrice: number, purchaseId: str
     const allAuthors = hasCoAuthors ? [story.author_id, ...story.co_authors] : [story.author_id];
     const sharePerAuthor = Math.floor(totalPrice / allAuthors.length);
     const remainder = totalPrice % allAuthors.length;
-    
+
     allAuthors.forEach((authorId: string, index: number) => {
       const isAuthorBuyer = authorId === buyerId;
       authorsToPay.push({
@@ -3029,11 +3033,9 @@ async function distributeRevenue(story: any, totalPrice: number, purchaseId: str
           });
       }
 
-      console.log(`Distributed ${author.share} AC to author ${author.id} ${
-        author.isRemixAuthor ? '(remix author)' : ''
-      } ${
-        author.isBuyer ? '(buyer)' : ''
-      }`);
+      console.log(`Distributed ${author.share} AC to author ${author.id} ${author.isRemixAuthor ? '(remix author)' : ''
+        } ${author.isBuyer ? '(buyer)' : ''
+        }`);
     }
   }
 
