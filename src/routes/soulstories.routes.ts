@@ -33,7 +33,8 @@ import {
     getUserStories,
     updateSoulStoryReaction,
     getSoulStoryById,
-    purchaseStory
+    purchaseStory,
+    checkContentAccess
 } from "../controllers/soulstories.controller"
 import { updateVote } from '../controllers/posts.controller';
 import { createComment, deleteComment, getComments, updateComment, updateCommentReaction, updateCommentsVote, updateSaveContent } from '../controllers/threads/comments.controller';
@@ -60,6 +61,8 @@ router.post('/votes/:targetId', authMiddleware, updateVote);
 router.get("/get-stories", optionalAuthMiddleware, getStories);
 
 router.post("/search", optionalAuthMiddleware, searchAllContent);
+
+router.post("/check-content-access", authMiddleware, checkContentAccess);
 
 router.post("/purchase-content", authMiddleware, purchaseStory);
 
