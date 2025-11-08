@@ -6,16 +6,15 @@ import {
     getAnalytics, 
     getStories,
     deleteeStory, 
-    purchaseContent,
     getStoryAccess,
     getUserRevenue,
     searchAllContent,
-    createComment,
-    createReply,
-    getComments,
-    updateComment,
-    deleteComment,
-    updateCommentReaction,
+    // createComment,
+    // createReply,
+    // getComments,
+    // updateComment,
+    // deleteComment,
+    // updateCommentReaction,
     getStoryWithReactions,
     getCommentReactions,
     getTrendingStories,
@@ -33,9 +32,13 @@ import {
     purchaseAIToolAccess,
     getUserStories,
     updateSoulStoryReaction,
-    getSoulStoryById
+    getSoulStoryById,
+    purchaseStory,
+    checkContentAccess
 } from "../controllers/soulstories.controller"
 import { updateVote } from '../controllers/posts.controller';
+import { createComment, deleteComment, getComments, updateComment, updateCommentReaction, updateCommentsVote, updateSaveContent } from '../controllers/threads/comments.controller';
+import { createReply, deleteReply, getReplies, updateReply, updateReplyReaction } from '../controllers/threads/replies.controller';
 
 
 const router = express.Router();
@@ -47,31 +50,70 @@ router.put("/update-story/:story_id", authMiddleware, updateStory);
 
 router.get("/get-user-stories", authMiddleware, getUserStories);
 
-router.get("/get-story/:id", authMiddleware, getSoulStoryById);
+router.get("/trending", optionalAuthMiddleware, getTrendingStories);
+
+router.get("/get-story/:id", optionalAuthMiddleware, getSoulStoryById);
 
 router.patch("/apply-reaction/:soulStoryId", authMiddleware, updateSoulStoryReaction);
 
 router.post('/votes/:targetId', authMiddleware, updateVote);
 
+router.get("/get-stories", optionalAuthMiddleware, getStories);
+
+router.post("/search", optionalAuthMiddleware, searchAllContent);
+
+router.post("/check-content-access", authMiddleware, checkContentAccess);
+
+router.post("/purchase-content", authMiddleware, purchaseStory);
+
+
+// ========== Story Comments ==========
+router.get('/get-comments', optionalAuthMiddleware, getComments);
+
+router.post('/:postId/comments', optionalAuthMiddleware, createComment);
+
+router.put('/comments/:comment_id', optionalAuthMiddleware, updateComment);
+
+router.delete('/comments/:comment_id', optionalAuthMiddleware, deleteComment);
+
+router.patch('/comments/:comment_id/apply-react', authMiddleware, updateCommentReaction);
+
+router.post('/comments/:targetId/vote', authMiddleware, updateCommentsVote);
+
+router.post('/comments/:targetId/save', authMiddleware, updateSaveContent);
+
+
+// ========== Story Replies ==========
+router.get('/comments/:comment_id/replies', optionalAuthMiddleware, getReplies);
+
+router.post('/comments/:comment_id/replies', authMiddleware, createReply);
+
+router.put('/replies/:reply_id', authMiddleware, updateReply);
+
+router.delete('/replies/:reply_id', authMiddleware, deleteReply);
+
+router.patch('/replies/:reply_id/apply-react', authMiddleware, updateReplyReaction);
+
+router.post('/subcomments/:targetId/vote', authMiddleware, updateCommentsVote);
+
+router.post('/subcomments/:targetId/save', authMiddleware, updateSaveContent);
+
+
+
+
+
 
 
 router.get("/analytics", authMiddleware, getAnalytics);
 
-router.get("/get-stories/:type", authMiddleware, getStories);
-
 router.delete("/delete-story/:story_id", authMiddleware, deleteeStory);
-
-router.post("/purchase-content", authMiddleware, purchaseContent);
 
 router.get("/story-access/:storyId", authMiddleware, getStoryAccess);
 
 router.get("/user-revenue", authMiddleware, getUserRevenue);
 
-router.post("/search", authMiddleware, searchAllContent);
 
-router.get("/trending", optionalAuthMiddleware, getTrendingStories
 
-);
 router.get("/soul-stories-products", authMiddleware, getProductDetails);
 
 router.get("/all-users-stories-data", authMiddleware, getAllUsersStoriesData);

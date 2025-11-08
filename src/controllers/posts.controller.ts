@@ -1030,7 +1030,6 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
       .single();
 
     if (commentData) {
-      // Send notification to comment author
       if (commentData.user_id !== userId) {
         const { data: commentAuthorProfile } = await supabase
           .from('profiles')
@@ -1044,7 +1043,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: commentData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `@${commentAuthorProfile.first_name}${commentAuthorProfile.last_name}  replied to your comment. +1 soulpoint added!`,
+            message: `@${commentAuthorProfile.first_name}${commentAuthorProfile.last_name}  replied to your comment. +1 SoulPoint added!`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1479,7 +1478,7 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: post.user_id,
             actorUserId: userId,
             threadId: postId,
-            message: `@${authorProfile.first_name}${authorProfile.last_name} voted on your poll. +1 soulpoint added!`,
+            message: `@${authorProfile.first_name}${authorProfile.last_name} voted on your poll. +1 SoulPoint added!`,
             type: 'poll_vote_added',
             metadata: {
               post_id: postId,
@@ -1680,7 +1679,7 @@ export const updateVote = async (
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
 
-  const UPVOTE_WEIGHT = 20;
+  const UPVOTE_WEIGHT = 1;
   const DOWNVOTE_WEIGHT = 1;
 
   try {
