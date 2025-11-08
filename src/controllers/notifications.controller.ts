@@ -6,8 +6,9 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
         const { id } = req.user!;
         const { data, error } = await supabase
             .from('notifications')
-            .select(`*`)
-            .eq("user_id", id);
+            .select('*')
+            .eq('user_id', id)
+            .order('created_at', { ascending: false });
 
         if (error) {
             throw new Error(`Supabase error: ${error.message}`);
