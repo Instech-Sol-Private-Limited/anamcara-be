@@ -264,7 +264,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} SoulPoints added!` : ''}`,
+        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,
@@ -949,7 +949,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
           recipientUserId: postData.user_id,
           actorUserId: userId,
           threadId: postId,
-          message: `@${authorProfile.first_name}${authorProfile.last_name} commented on your post. +${soulpoints} SoulPoints added!`,
+          message: `@${authorProfile.first_name}${authorProfile.last_name} commented on your post. +${soulpoints} SoulPoints (SP) added!`,
           type: 'post_comment_added',
           metadata: {
             comment_id: data.id,

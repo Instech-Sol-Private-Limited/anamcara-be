@@ -156,7 +156,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       recipientUserId: author_id,
       actorUserId: null,
       threadId: threadId,
-      message: 'Thread created successfully! +10 SoulPoints added to your profile',
+      message: 'Thread created successfully! +10 SoulPoints (SP) added to your profile',
       type: 'thread_creation',
       metadata: {
         soulpoints: 10,

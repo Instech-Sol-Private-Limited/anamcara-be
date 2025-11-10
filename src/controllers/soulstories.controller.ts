@@ -1801,7 +1801,7 @@ export const updateSoulStoryReaction = async (
         recipientUserId: soulStoryData.author_id,
         actorUserId: user_id,
         threadId: soulStoryId,
-        message: `@${authorProfile.first_name} ${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your soul story. ${soulpoints > 0 ? `+${soulpoints} SoulPoints added!` : ''}`,
+        message: `@${authorProfile.first_name} ${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your soul story. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: 'soul_story_reaction_added',
         metadata: {
           reaction_type: type,
