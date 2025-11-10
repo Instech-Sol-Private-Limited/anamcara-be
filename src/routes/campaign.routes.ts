@@ -1,6 +1,6 @@
 import express from 'express';
 
-import { activateCampaign, adminCloseCampaign, approveCampaign, claimDonations, closeCampaign, createBid, createCampaign, createDonation, generateCampaignDesc, getAllCampaigns, getApprovedCampaigns, getCampaignBids, getCampaignDetails, getCampaignDonations, getPendingApprovalCampaigns, getUserCampaigns, getOverallTotals, pauseCampaign, updateCampaign, createBoost } from '../controllers/campaign.controller';
+import { activateCampaign, adminCloseCampaign, approveCampaign, claimDonations, closeCampaign, createBid, createCampaign, createDonation, generateCampaignDesc, getAllCampaigns, getApprovedCampaigns, getCampaignBids, getCampaignDetails, getCampaignDonations, getPendingApprovalCampaigns, getUserCampaigns, getOverallTotals, pauseCampaign, updateCampaign, createBoost, getBoostedCampaigns } from '../controllers/campaign.controller';
 import { getActiveFeaturedProducts } from '../controllers/products.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 const router = express.Router();
@@ -12,6 +12,8 @@ router.post('/generate-description', authMiddleware, generateCampaignDesc);
 router.get('/pending-approvals', authMiddleware, getPendingApprovalCampaigns);
 
 router.get('/get-all-campaigns', authMiddleware, getAllCampaigns);
+
+router.get('/get-boosted-campaigns', getBoostedCampaigns);
 
 router.get('/get-hope-campaigns', getApprovedCampaigns);
 

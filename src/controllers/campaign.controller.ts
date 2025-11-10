@@ -389,6 +389,44 @@ const getAllCampaigns = async (req: Request, res: Response): Promise<any> => {
     }
 };
 
+const getBoostedCampaigns = async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { data: campaigns, error } = await supabase
+            .from("hope_campaigns")
+            .select(`
+                *,
+                creator:user_id(first_name, last_name, email, avatar_url),
+                offered_product:offer_product_id(*)
+            `)
+            .eq('boost_campaign', true)
+            .eq('is_approved', true)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(8);
+
+        if (error) {
+            console.error("Database error:", error);
+            return res.status(500).json({
+                success: false,
+                message: `Database error: ${error.message}`
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: campaigns || [],
+            count: campaigns?.length || 0
+        });
+
+    } catch (error: any) {
+        console.error("Error fetching boosted campaigns:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to fetch boosted campaigns"
+        });
+    }
+};
+
 const getApprovedCampaigns = async (req: Request, res: Response): Promise<any> => {
     try {
         const { page = 1, limit = 10, category, campaignType, status = 'active' } = req.query;
@@ -2462,6 +2500,7 @@ const claimDonations = async (req: Request, res: Response): Promise<any> => {
 //     }
 // }
 
+
 // -------------- Product boost or promotion--------------
 export const createBoost = async (req: Request, res: Response): Promise<any> => {
     try {
@@ -2524,134 +2563,6 @@ export const getActiveBoosts = async (req: Request, res: Response): Promise<any>
     }
 };
 
-const getUserBoosts = async (req: Request, res: Response): Promise<any> => {
-    try {
-        const userId = req.user?.id;
-
-        const { data: boosts, error } = await supabase
-            .from('boosts')
-            .select(`
-        *,
-        product:products(
-          id,
-          title,
-          thumbnail
-        )
-      `)
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            return res.status(500).json({ error: 'Failed to fetch user boosts' });
-        }
-
-        res.json({ boosts });
-    } catch (error) {
-        console.error('Error fetching user boosts:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-};
-
-const getMarketplaceBoosts = async (req: Request, res: Response): Promise<any> => {
-    try {
-        const { limit = 20, offset = 0 } = req.query;
-
-        const { data: boosts, error } = await supabase
-            .from('boosts')
-            .select(`
-        *,
-        product:products(
-          id,
-          title,
-          category,
-          price_anam_coins,
-          status,
-          thumbnail,
-          user_id,
-          user:profiles(
-            id,
-            username,
-            avatar_url
-          )
-        )
-      `)
-            .eq('status', 'active')
-            .gt('end_time', new Date().toISOString())
-            .order('created_at', { ascending: false })
-            .range(Number(offset), Number(offset) + Number(limit) - 1);
-
-        if (error) {
-            return res.status(500).json({ error: 'Failed to fetch marketplace boosts' });
-        }
-
-        res.json({ boosts });
-    } catch (error) {
-        console.error('Error fetching marketplace boosts:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-};
-
-const getActiveFeaturedProducts = async (req: Request, res: Response): Promise<any> => {
-    try {
-        const now = new Date().toISOString();
-
-        const { error: expireError } = await supabase
-            .from("boosts")
-            .update({ status: "expired" })
-            .lte("end_time", now)
-            .neq("status", "expired");
-
-        if (expireError) {
-            console.error("Error expiring boosts:", expireError);
-        }
-
-        const { data: boostedProducts, error } = await supabase
-            .from("products")
-            .select(`
-        *,
-        creator:profiles (
-          id,
-          first_name,
-          last_name,
-          email,
-          avatar_url
-        ),
-        boosts!inner (
-          id,
-          end_time
-        )
-      `)
-            .eq("status", "approved")
-            .gt("boosts.end_time", now)
-            .order("created_at", { ascending: false });
-
-        if (error) {
-            console.error("Error fetching boosted products:", error);
-            return res.status(500).json({ success: false, error: "Failed to fetch featured products" });
-        }
-
-        // 3. Attach flags
-        const featuredProducts =
-            boostedProducts?.map((product) => ({
-                ...product,
-                featured: true,
-                is_boosted: true,
-            })) || [];
-
-        res.status(200).json({
-            success: true,
-            products: featuredProducts,
-            count: featuredProducts.length,
-        });
-    } catch (error: any) {
-        console.error("Error fetching featured products:", error);
-        res.status(500).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
-
 
 export {
     createCampaign,
@@ -2667,6 +2578,7 @@ export {
     closeCampaign,
     adminCloseCampaign,
     getAllCampaigns,
+    getBoostedCampaigns,
 
     // donations and bidding
     getCampaignBids,
