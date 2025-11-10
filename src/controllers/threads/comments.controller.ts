@@ -167,10 +167,10 @@ const createComment = async (req: Request, res: Response): Promise<any> => {
         }
 
         const message = targetType === 'thread'
-          ? `Comment posted on your thread "${parentTitle}"! +${soulpoints} soulpoints added to your profile`
+          ? `Comment posted on your thread "${parentTitle}"! +${soulpoints} SoulPoints (SP) added to your profile`
           : targetType === 'story'
-          ? `Comment posted on your story "${parentTitle}"! +${soulpoints} soulpoints added to your profile`
-          : `Comment posted on your post! +${soulpoints} soulpoints added to your profile`;
+          ? `Comment posted on your story "${parentTitle}"! +${soulpoints} SoulPoints (SP) added to your profile`
+          : `Comment posted on your post! +${soulpoints} SoulPoints (SP) added to your profile`;
 
         await sendNotification({
           recipientEmail: authorProfile.email,
@@ -732,7 +732,7 @@ const updateCommentReaction = async (
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `**@someone** reacted with _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
+        message: `**@someone** reacted with _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: notificationType,
         metadata: {
           reaction_type: type,

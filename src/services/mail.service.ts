@@ -3,12 +3,12 @@ import nodemailer from "nodemailer";
 
 // 1) Create transporter
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
+  host: "smtp.zoho.com",
   port: 465,
   secure: true,
   auth: {
-    user: 'amancaraai@gmail.com',
-    pass: 'tojx xlti wbio qccf',
+    user: 'no-reply@anamcara.ai',
+    pass: 'Anamcara@123!',
   },
 });
 
@@ -16,8 +16,8 @@ const transporter = nodemailer.createTransport({
 export async function sendMail() {
   try {
     const info = await transporter.sendMail({
-      from: `"ANAMCARA Team 🍀" <${process.env.EMAIL_USER}>`,
-      to:'rahatalibaig810@gmail.com',
+      from: `"ANAMCARA🍀" <${process.env.EMAIL_USER}>`,
+      to:'no-reply@anamcara.ai',
       subject:'Test Mail',
       html:`Hello`,
     });

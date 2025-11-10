@@ -195,10 +195,10 @@ export const sendPostCreationNotification = async (userId: string, postId: strin
         }
 
         if (profile) {
-            let message = `Post created successfully! +${soulpoints} soulpoints added to your profile`;
+            let message = `Post created successfully! +${soulpoints} SoulPoints (SP) added to your profile`;
 
             if (isChamberPost && chamberName) {
-                message = `Post created in ${chamberName}! +${soulpoints} soulpoints added to your profile`;
+                message = `Post created in ${chamberName}! +${soulpoints} SoulPoints (SP) added to your profile`;
             }
 
             await sendNotification({
