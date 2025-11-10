@@ -741,7 +741,6 @@ export const checkaccountstatususerId = async (req: Request, res: Response): Pro
         .eq('user_id', userId);
     }
 
-    // Get account balance if ready
     let balance = null;
     if (isReady) {
       try {
