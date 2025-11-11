@@ -71,6 +71,226 @@ const soulpointsMap: Record<ReactionType, number> = {
 };
 
 // add new thread
+// const createThread = async (req: Request, res: Response): Promise<any> => {
+//   try {
+//     const {
+//       title,
+//       description,
+//       imgs = [],
+//       category_id,
+//       keywords = [],
+//       whisper_mode = false,
+//       disclaimers 
+//     } = req.body;
+
+//     const { id: author_id, first_name, last_name, email } = req.user!;
+
+//     const requiredFields = {
+//       title,
+//       description,
+//       category_id,
+//       author_id,
+//       author_name: first_name,
+//     };
+
+//     for (const [key, value] of Object.entries(requiredFields)) {
+//       if (!value) {
+//         const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+//         return res.status(400).json({ error: `${formattedKey} is required!` });
+//       }
+//     }
+    
+//     // if (disclaimers && !Array.isArray(disclaimers)) {
+//     //   return res.status(400).json({ error: 'Disclaimers must be an array' });
+//     // }
+//      if (disclaimers && disclaimers.length > 0) {
+//       const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids'];
+//       const invalidDisclaimers = disclaimers.filter(
+//         (d: any) => !validDisclaimerTypes.includes(d.type) || typeof d.enabled !== 'boolean'
+//       );
+
+//       if (invalidDisclaimers.length > 0) {
+//         res.status(400).json({
+//           success: false,
+//           message: 'Invalid disclaimer format. Each disclaimer must have valid type and enabled status.'
+//         });
+//         return;
+//       }
+//     }
+//     const enabledDisclaimers = disclaimers
+//       ? disclaimers.filter((d: any) => d.enabled === true)
+//       : null;
+
+//     const { data: categoryData, error: categoryError } = await supabase
+//       .from('threadcategory')
+//       .select('category_name')
+//       .eq('id', category_id)
+//       .single();
+
+//     if (categoryError || !categoryData) {
+//       return res.status(400).json({ error: 'Invalid Category Id. No matching category found.' });
+//     }
+
+//     const { category_name } = categoryData;
+
+//     const { data, error } = await supabase
+//       .from('threads')
+//       .insert([{
+//         title,
+//         description,
+//         imgs,
+//         category_id,
+//         category_name,
+//         author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+//         author_id,
+//         keywords,
+//         whisper_mode,
+//         disclaimers: enabledDisclaimers
+//       }])
+//       .select();
+
+//     if (error) {
+//       console.error('Supabase insert error:', error);
+//       return res.status(500).json({
+//         error: error.message || 'Unknown error occurred while creating thread.',
+//         details: error.details || null,
+//         hint: error.hint || null,
+//       });
+//     }
+
+//     if (!data || data.length === 0) {
+//       return res.status(500).json({ error: 'Thread creation failed. No data returned.' });
+//     }
+
+//     const threadId = data[0].id;
+
+//     await sendNotification({
+//       recipientEmail: email,
+//       recipientUserId: author_id,
+//       actorUserId: null,
+//       threadId: threadId,
+//       message: 'Thread created successfully! +10 SoulPoints (SP) added to your profile',
+//       type: 'thread_creation',
+//       metadata: {
+//         soulpoints: 10,
+//         thread_id: threadId,
+//         thread_title: title
+//       }
+//     });
+
+//     return res.status(201).json({
+//       message: 'Thread created successfully!',
+//     });
+
+//   } catch (err: any) {
+//     console.error('Unexpected error in createThread:', err);
+//     return res.status(500).json({
+//       error: 'Internal server error while creating thread.',
+//       message: err.message || 'Unexpected failure.',
+//     });
+//   }
+// };
+// const updateThread = async (req: Request, res: Response): Promise<any> => {
+//   try {
+//     const { thread_id } = req.params;
+//     const {
+//       title,
+//       description,
+//       imgs = [],
+//       category_id,
+//       keywords = [],
+//       whisper_mode = false,
+//     } = req.body;
+
+//     const { id: author_id, first_name, last_name, role } = req.user!;
+
+//     const { data: existingThread, error: threadError } = await supabase
+//       .from('threads')
+//       .select('*')
+//       .eq('id', thread_id)
+//       .eq('is_deleted', false)
+//       .single();
+
+//     if (threadError || !existingThread) {
+//       return res.status(404).json({ error: 'Thread not found!' });
+//     }
+
+//     const isAuthor = existingThread.author_id === author_id;
+//     const isSuperadmin = role === 'superadmin';
+
+//     if (!isAuthor && !isSuperadmin) {
+//       return res.status(403).json({ error: 'Permission denied!' });
+//     }
+
+//     const requiredFields = {
+//       title,
+//       description,
+//       category_id,
+//       author_id,
+//       author_name: first_name,
+//     };
+
+//     for (const [key, value] of Object.entries(requiredFields)) {
+//       if (!value) {
+//         const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+//         return res.status(400).json({ error: `${formattedKey} is required!` });
+//       }
+//     }
+
+//     const { data: categoryData, error: categoryError } = await supabase
+//       .from('threadcategory')
+//       .select('category_name')
+//       .eq('id', category_id)
+//       .single();
+
+//     if (categoryError || !categoryData) {
+//       return res.status(400).json({ error: 'Invalid Category Id. No matching category found.' });
+//     }
+
+//     const { category_name } = categoryData;
+
+//     const { error: updateError } = await supabase
+//       .from('threads')
+//       .update({
+//         title,
+//         description,
+//         imgs,
+//         category_id,
+//         category_name,
+//         author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+//         author_id,
+//         keywords,
+//         whisper_mode,
+//         updated_by: author_id,
+//         is_edited: true
+//       })
+//       .eq('id', thread_id);
+
+//     if (updateError) {
+//       console.error('Supabase update error:', updateError);
+//       return res.status(500).json({
+//         error: updateError.message || 'Unknown error occurred while updating thread.',
+//         details: updateError.details || null,
+//         hint: updateError.hint || null,
+//       });
+//     }
+
+//     return res.status(200).json({
+//       message: 'Thread updated successfully!',
+//     });
+
+//   } catch (err: any) {
+//     console.error('Unexpected error in updateThread:', err);
+//     return res.status(500).json({
+//       error: 'Internal server error while updating thread.',
+//       message: err.message || 'Unexpected failure.',
+//     });
+//   }
+// };
+
+// Key fixes in thread.controller.ts
+
+// 1. Fix createThread function - ensure disclaimers are properly validated and saved
 const createThread = async (req: Request, res: Response): Promise<any> => {
   try {
     const {
@@ -80,7 +300,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       category_id,
       keywords = [],
       whisper_mode = false,
-      disclaimers = []
+      disclaimers  // ✅ This should be 'disclaimers' (plural)
     } = req.body;
 
     const { id: author_id, first_name, last_name, email } = req.user!;
@@ -99,14 +319,35 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
         return res.status(400).json({ error: `${formattedKey} is required!` });
       }
     }
+    
+    // ✅ Fixed disclaimer validation
+    if (disclaimers) {
+      // Check if it's an array
+      if (!Array.isArray(disclaimers)) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Disclaimers must be an array' 
+        });
+      }
 
-    if (disclaimers && !Array.isArray(disclaimers)) {
-      return res.status(400).json({ error: 'Disclaimers must be an array' });
+      // Validate each disclaimer
+      const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids'];
+      const invalidDisclaimers = disclaimers.filter(
+        (d: any) => !validDisclaimerTypes.includes(d.type) || typeof d.enabled !== 'boolean'
+      );
+
+      if (invalidDisclaimers.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid disclaimer format. Each disclaimer must have valid type and enabled status.'
+        });
+      }
     }
 
-    const enabledDisclaimers = disclaimers
+    // ✅ Filter only enabled disclaimers
+    const enabledDisclaimers = disclaimers && disclaimers.length > 0
       ? disclaimers.filter((d: any) => d.enabled === true)
-      : null;
+      : [];
 
     const { data: categoryData, error: categoryError } = await supabase
       .from('threadcategory')
@@ -132,7 +373,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
         author_id,
         keywords,
         whisper_mode,
-        disclaimers: enabledDisclaimers
+        disclaimers: enabledDisclaimers.length > 0 ? enabledDisclaimers : null  // ✅ Use plural 'disclaimers'
       }])
       .select();
 
@@ -156,7 +397,7 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
       recipientUserId: author_id,
       actorUserId: null,
       threadId: threadId,
-      message: 'Thread created successfully! +10 SoulPoints added to your profile',
+      message: 'Thread created successfully! +10 SoulPoints (SP) added to your profile',
       type: 'thread_creation',
       metadata: {
         soulpoints: 10,
@@ -166,7 +407,9 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
     });
 
     return res.status(201).json({
+      success: true,
       message: 'Thread created successfully!',
+      data: data[0]  // ✅ Return the created thread data
     });
 
   } catch (err: any) {
@@ -178,6 +421,133 @@ const createThread = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
+// 2. ✅ Fix updateThread to handle disclaimers
+const updateThread = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { thread_id } = req.params;
+    const {
+      title,
+      description,
+      imgs = [],
+      category_id,
+      keywords = [],
+      whisper_mode = false,
+      disclaimers  // ✅ Add disclaimers support
+    } = req.body;
+
+    const { id: author_id, first_name, last_name, role } = req.user!;
+
+    const { data: existingThread, error: threadError } = await supabase
+      .from('threads')
+      .select('*')
+      .eq('id', thread_id)
+      .eq('is_deleted', false)
+      .single();
+
+    if (threadError || !existingThread) {
+      return res.status(404).json({ error: 'Thread not found!' });
+    }
+
+    const isAuthor = existingThread.author_id === author_id;
+    const isSuperadmin = role === 'superadmin';
+
+    if (!isAuthor && !isSuperadmin) {
+      return res.status(403).json({ error: 'Permission denied!' });
+    }
+
+    const requiredFields = {
+      title,
+      description,
+      category_id,
+      author_id,
+      author_name: first_name,
+    };
+
+    for (const [key, value] of Object.entries(requiredFields)) {
+      if (!value) {
+        const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+        return res.status(400).json({ error: `${formattedKey} is required!` });
+      }
+    }
+
+    // ✅ Validate disclaimers if provided
+    if (disclaimers) {
+      if (!Array.isArray(disclaimers)) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Disclaimers must be an array' 
+        });
+      }
+
+      const validDisclaimerTypes = ['ai_generated', 'sponsored', 'nsfw', 'kids'];
+      const invalidDisclaimers = disclaimers.filter(
+        (d: any) => !validDisclaimerTypes.includes(d.type) || typeof d.enabled !== 'boolean'
+      );
+
+      if (invalidDisclaimers.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid disclaimer format. Each disclaimer must have valid type and enabled status.'
+        });
+      }
+    }
+
+    const enabledDisclaimers = disclaimers && disclaimers.length > 0
+      ? disclaimers.filter((d: any) => d.enabled === true)
+      : [];
+
+    const { data: categoryData, error: categoryError } = await supabase
+      .from('threadcategory')
+      .select('category_name')
+      .eq('id', category_id)
+      .single();
+
+    if (categoryError || !categoryData) {
+      return res.status(400).json({ error: 'Invalid Category Id. No matching category found.' });
+    }
+
+    const { category_name } = categoryData;
+
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({
+        title,
+        description,
+        imgs,
+        category_id,
+        category_name,
+        author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
+        author_id,
+        keywords,
+        whisper_mode,
+        disclaimers: enabledDisclaimers.length > 0 ? enabledDisclaimers : null,  // ✅ Update disclaimers
+        updated_by: author_id,
+        is_edited: true
+      })
+      .eq('id', thread_id);
+
+    if (updateError) {
+      console.error('Supabase update error:', updateError);
+      return res.status(500).json({
+        error: updateError.message || 'Unknown error occurred while updating thread.',
+        details: updateError.details || null,
+        hint: updateError.hint || null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Thread updated successfully!',
+    });
+
+  } catch (err: any) {
+    console.error('Unexpected error in updateThread:', err);
+    return res.status(500).json({
+      error: 'Internal server error while updating thread.',
+      message: err.message || 'Unexpected failure.',
+    });
+  }
+};
 // delete thread
 const deleteThread = async (
   req: Request<{ thread_id: string }> & { user?: { id: string; role?: string } },
@@ -228,103 +598,7 @@ const deleteThread = async (
 };
 
 // update thread
-const updateThread = async (req: Request, res: Response): Promise<any> => {
-  try {
-    const { thread_id } = req.params;
-    const {
-      title,
-      description,
-      imgs = [],
-      category_id,
-      keywords = [],
-      whisper_mode = false,
-    } = req.body;
 
-    const { id: author_id, first_name, last_name, role } = req.user!;
-
-    const { data: existingThread, error: threadError } = await supabase
-      .from('threads')
-      .select('*')
-      .eq('id', thread_id)
-      .eq('is_deleted', false)
-      .single();
-
-    if (threadError || !existingThread) {
-      return res.status(404).json({ error: 'Thread not found!' });
-    }
-
-    const isAuthor = existingThread.author_id === author_id;
-    const isSuperadmin = role === 'superadmin';
-
-    if (!isAuthor && !isSuperadmin) {
-      return res.status(403).json({ error: 'Permission denied!' });
-    }
-
-    const requiredFields = {
-      title,
-      description,
-      category_id,
-      author_id,
-      author_name: first_name,
-    };
-
-    for (const [key, value] of Object.entries(requiredFields)) {
-      if (!value) {
-        const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-        return res.status(400).json({ error: `${formattedKey} is required!` });
-      }
-    }
-
-    const { data: categoryData, error: categoryError } = await supabase
-      .from('threadcategory')
-      .select('category_name')
-      .eq('id', category_id)
-      .single();
-
-    if (categoryError || !categoryData) {
-      return res.status(400).json({ error: 'Invalid Category Id. No matching category found.' });
-    }
-
-    const { category_name } = categoryData;
-
-    const { error: updateError } = await supabase
-      .from('threads')
-      .update({
-        title,
-        description,
-        imgs,
-        category_id,
-        category_name,
-        author_name: `${first_name}${last_name ? ` ${last_name}` : ''}`,
-        author_id,
-        keywords,
-        whisper_mode,
-        updated_by: author_id,
-        is_edited: true
-      })
-      .eq('id', thread_id);
-
-    if (updateError) {
-      console.error('Supabase update error:', updateError);
-      return res.status(500).json({
-        error: updateError.message || 'Unknown error occurred while updating thread.',
-        details: updateError.details || null,
-        hint: updateError.hint || null,
-      });
-    }
-
-    return res.status(200).json({
-      message: 'Thread updated successfully!',
-    });
-
-  } catch (err: any) {
-    console.error('Unexpected error in updateThread:', err);
-    return res.status(500).json({
-      error: 'Internal server error while updating thread.',
-      message: err.message || 'Unexpected failure.',
-    });
-  }
-};
 
 // get thread details
 const getThreadDetails = async (req: Request<{ thread_id: string }>, res: Response): Promise<any> => {

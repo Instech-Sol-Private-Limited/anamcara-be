@@ -709,7 +709,7 @@ const updateReplyReaction = async (
         recipientUserId: replyData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} soulpoints added!` : ''}`,
+        message: `Received _${getReactionDisplayName(type)}_ on your reply: "${getContentPreview(replyData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: parentType === 'thread' ? 'reaction_added' : 
               parentType === 'post' ? 'post_reply_reaction_added' : 'story_reply_reaction_added',
         metadata: {
