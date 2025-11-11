@@ -1141,9 +1141,9 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   getUserRevenue: async (userId: string) => {
     try {
-      // Get all stories created by the user
       const { data: userStories, error: storiesError } = await supabase
         .from('soul_stories')
         .select('id, title, category, story_type, asset_type')
@@ -1162,10 +1162,9 @@ export const soulStoriesServices = {
         };
       }
 
-      // Get all purchases for user's stories from the correct table name
       const storyIds = userStories.map(story => story.id);
       const { data: purchases, error: purchasesError } = await supabase
-        .from('user_content_purchases')  // Fixed: correct table name with underscore
+        .from('user_content_purchases')
         .select('story_id, author_revenue, total_coins_spent, highest_page_access, accessible_episode_urls')
         .in('story_id', storyIds);
 
@@ -1173,17 +1172,10 @@ export const soulStoriesServices = {
         throw new Error('Failed to fetch story purchases');
       }
 
-      // Group revenue by story
       const storyRevenue = userStories.map(story => {
         const storyPurchases = purchases?.filter(p => p.story_id === story.id) || [];
-
-        // Calculate total revenue for this story
         const totalRevenue = storyPurchases.reduce((sum, p) => sum + (p.author_revenue || 0), 0);
-
-        // Count pages sold (highest page access)
         const pagesSold = storyPurchases.reduce((max, p) => Math.max(max, p.highest_page_access || 0), 0);
-
-        // Count episodes sold (number of accessible episode URLs)
         const episodesSold = storyPurchases.reduce((sum, p) => sum + (p.accessible_episode_urls?.length || 0), 0);
 
         return {
@@ -1213,10 +1205,9 @@ export const soulStoriesServices = {
       throw error;
     }
   },
+
   searchAllContent: async (query: string, category: string, userId: string, storyId?: string) => {
     try {
-      console.log('Search params:', { query, category, userId, storyId });
-
       let supabaseQuery = supabase
         .from('soul_stories')
         .select(`
@@ -1231,22 +1222,14 @@ export const soulStoriesServices = {
           )
         `, { count: 'exact' });
 
-      // ✅ PRIORITY: Search by story ID if provided
       if (storyId) {
-        console.log('Searching by story ID:', storyId);
         supabaseQuery = supabaseQuery.eq('id', storyId);
       } else {
-        // Apply category filter if specified
         if (category && category !== 'all') {
           supabaseQuery = supabaseQuery.eq('category', category);
-          console.log('Filtering by category:', category);
         }
 
-        // Add comprehensive text search if query is not 'all'
         if (query && query.toLowerCase() !== 'all') {
-          console.log('Adding comprehensive text search for:', query);
-
-          // Search across multiple fields - if ANY field contains the query, return the story
           supabaseQuery = supabaseQuery.or(
             `title.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`
           );
@@ -1255,12 +1238,9 @@ export const soulStoriesServices = {
 
       supabaseQuery = supabaseQuery.order('created_at', { ascending: false });
 
-      console.log('Final query built');
-
       const { data: stories, error, count } = await supabaseQuery;
 
       if (error) {
-        console.log('Search error:', error.message);
         return {
           success: false,
           data: {
@@ -1275,43 +1255,28 @@ export const soulStoriesServices = {
         };
       }
 
-      console.log('Raw stories found:', stories?.length || 0);
-      if (stories && stories.length > 0) {
-        console.log('Sample stories:', stories.slice(0, 3).map(s => ({
-          id: s.id,
-          title: s.title,
-          description: s.description,
-          tags: s.tags,
-          category: s.category
-        })));
-      }
-
-      // Transform stories to include main URL and episode URLs EXACTLY like getStories
       const transformedStories = (stories || []).map(story => {
         if (story.content_type === 'episodes' && story.soul_story_episodes) {
-          // For episode-based stories, return main URL + episode URLs
           return {
             ...story,
-            main_url: story.asset_url, // Main story URL (can be series trailer/cover)
+            main_url: story.asset_url,
             episode_urls: story.soul_story_episodes.map((ep: any) => ({
               episode_number: ep.episode_number,
               title: ep.title,
               description: ep.description,
-              video_url: ep.video_url, // Individual episode video URL
+              video_url: ep.video_url,
               thumbnail_url: ep.thumbnail_url
             }))
           };
         } else {
-          // For single asset stories, return main URL
           return {
             ...story,
-            main_url: story.asset_url, // Main story URL
-            episode_urls: null // No episodes
+            main_url: story.asset_url,
+            episode_urls: null
           };
         }
       });
 
-      // Calculate analytics
       const analytics = {
         total_stories: transformedStories.length,
         published_stories: transformedStories.filter(story => story.status === 'published').length,
@@ -1319,14 +1284,7 @@ export const soulStoriesServices = {
         total_free_episodes: transformedStories.reduce((sum, story) => sum + (story.free_episodes || 0), 0)
       };
 
-      // Get top 20 results
       const top20Results = transformedStories.slice(0, 20);
-
-      console.log('Final results:', {
-        totalFound: transformedStories.length,
-        returned: top20Results.length,
-        analytics
-      });
 
       return {
         success: true,
@@ -1352,6 +1310,7 @@ export const soulStoriesServices = {
       };
     }
   },
+
   createComment: async (userId: string, soulStoryId: string, content: string, imgs: string[] = []) => {
     try {
       console.log('Searching for soul story with ID:', soulStoryId);
@@ -1434,9 +1393,9 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   createReply: async (userId: string, commentId: string, content: string, imgs: string[] = []) => {
     try {
-      // Verify parent comment exists
       const { data: commentData, error: commentError } = await supabase
         .from('soul_story_comments')
         .select('id, soul_story_id')
@@ -1492,6 +1451,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   getComments: async (soulStoryId: string, page: number = 1, limit: number = 10, userId?: string) => {
     try {
       const offset = (page - 1) * limit;
@@ -1550,11 +1510,11 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   getCommentsWithReplies: async (soulStoryId: string, page: number = 1, limit: number = 10, userId?: string) => {
     try {
       const offset = (page - 1) * limit;
 
-      // Get main comments (not replies)
       const { data: comments, error, count } = await supabase
         .from('soul_story_comments')
         .select('*', { count: 'exact' })
@@ -1637,6 +1597,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   updateComment: async (userId: string, commentId: string, content: string, imgs: string[] = []) => {
     try {
       const { data: commentData, error: fetchError } = await supabase
@@ -1674,6 +1635,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   deleteComment: async (userId: string, commentId: string) => {
     try {
       const { data: commentData, error: fetchError } = await supabase
@@ -1707,6 +1669,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   updateCommentReaction: async (userId: string, commentId: string, type: string) => {
     try {
       console.log('updateCommentReaction service called with:', { userId, commentId, type });
@@ -1829,6 +1792,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   updateStoryReaction: async (userId: string, storyId: string, type: string) => {
     try {
       console.log('updateStoryReaction service called with:', { userId, storyId, type });
@@ -1937,11 +1901,9 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   getStoryWithReactions: async (storyId: string, userId?: string) => {
     try {
-      console.log('getStoryWithReactions called with:', { storyId, userId });
-
-      // Get the story data
       const { data: story, error: storyError } = await supabase
         .from('soul_stories')
         .select('*')
@@ -1994,9 +1956,9 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+
   getCommentReactions: async (commentId: string, userId?: string) => {
     try {
-      // Get all reactions for this comment
       const { data: reactions, error: reactionsError } = await supabase
         .from('soul_story_reactions')
         .select('*')
@@ -2067,6 +2029,7 @@ export const soulStoriesServices = {
       return { success: false, message: 'Internal server error' };
     }
   },
+  
   // getTrendingStories: async (userId?: string, page: number = 1, limit: number = 200) => {
   //   try {
   //     const offset = (page - 1) * limit;
