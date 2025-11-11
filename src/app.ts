@@ -42,6 +42,7 @@ import PaymentRoute from './routes/payment.routes'
 import bankAccountRoutes from './routes/bankaccount.routes'
 import anamfamilyRoutes from './routes/anamfamily.routes'
 import { sendMail } from './services/mail.service';
+import { awardPoints } from './controllers/reward.controller';
 
 dotenv.config();
 
@@ -127,6 +128,7 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/stripe', PaymentRoute);
 app.use('/api/withdraw', bankAccountRoutes);
 app.use('/api/games', authMiddleware, gameRoutes);
+app.post("/api/rewards/award", awardPoints);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron();

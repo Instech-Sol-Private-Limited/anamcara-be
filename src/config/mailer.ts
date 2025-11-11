@@ -94,12 +94,19 @@ dotenv.config();
 
 const transporter = nodemailer.createTransport({
   host: "smtp.zoho.com",
-  port: 465,
-  secure: true,
+  port: 587,              // ✅ 587 for STARTTLS
+  secure: false,          // ✅ false for 587
+  requireTLS: true,       // optional but good
   auth: {
-    user: 'no-reply@anamcara.ai',
-    pass: 'Anamcara@123!'}
+    user: "no-reply@anamcara.ai",
+    pass: "2n8wLBFwBrNz",  // ⚠️ must be app password, not your login password
+  },
+  tls: {
+    minVersion: "TLSv1.2",
+    rejectUnauthorized: true,
+  },
 });
+
 
 export const sendVerificationEmail = async (to: string) => {
   const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?user=${to}`;
