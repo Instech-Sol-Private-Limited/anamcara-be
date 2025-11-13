@@ -13,7 +13,8 @@ import {
   updatePostReaction,
   getUserPostsMedia,
   updateVote,
-  getSinglePost
+  getSinglePost,
+  trackView
 } from '../controllers/posts.controller';
 import {
   createComment,
@@ -59,6 +60,7 @@ router.patch('/apply-react/:postId', authMiddleware, updatePostReaction);
 
 router.post('/votes/:targetId', authMiddleware, updateVote);
 
+router.post('/tract-views', authMiddleware, trackView);
 
 // Toggle like on post
 // router.post('/:postId/like', authMiddleware, async (req, res, next) => {
