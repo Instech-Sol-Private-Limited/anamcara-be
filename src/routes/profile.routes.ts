@@ -1,5 +1,5 @@
 import express from 'express';
-import { updateProfile, getUserProfile, getAboutInfo } from '../controllers/profiles.controller';
+import { updateProfile, getUserProfile, getAboutInfo, getProfileCompletion } from '../controllers/profiles.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = express.Router();
@@ -27,5 +27,13 @@ router.get('/:id/about', authMiddleware, async (req, res, next) => {
     next(err);
   }
 });
+router.get('/:id/completion', authMiddleware, async (req, res, next) => {
+  try {
+    await getProfileCompletion(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 export default router;

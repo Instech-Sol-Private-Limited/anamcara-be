@@ -483,17 +483,14 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    // Get all post IDs for batch operations
     const postIds = allPosts.map(post => post.id);
 
-    // ✅ Batch fetch comments count for all posts
     const { data: commentsCount } = await supabase
       .from('threadcomments')
       .select('post_id, id')
       .in('post_id', postIds)
       .eq('is_deleted', false);
 
-    // ✅ Batch fetch replies count for all comments
     const commentIds = commentsCount?.map(c => c.id) || [];
     const { data: repliesCount } = commentIds.length > 0
       ? await supabase
@@ -503,20 +500,60 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
         .eq('is_deleted', false)
       : { data: null };
 
-    // Create lookup maps for faster access
+    const { data: allReactions } = await supabase
+      .from('thread_reactions')
+      .select(`
+        id,
+        user_id,
+        target_id,
+        target_type,
+        type,
+        created_at,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          username,
+          email
+        )
+      `)
+      .in('target_id', postIds)
+      .eq('target_type', 'post');
+
     const commentsCountMap = new Map();
     const repliesCountMap = new Map();
+    const reactionsMap = new Map();
 
-    // Count comments per post
     commentsCount?.forEach(comment => {
       const count = commentsCountMap.get(comment.post_id) || 0;
       commentsCountMap.set(comment.post_id, count + 1);
     });
 
-    // Count replies per comment
     repliesCount?.forEach(reply => {
       const count = repliesCountMap.get(reply.comment_id) || 0;
       repliesCountMap.set(reply.comment_id, count + 1);
+    });
+
+    allReactions?.forEach(reaction => {
+      if (!reactionsMap.has(reaction.target_id)) {
+        reactionsMap.set(reaction.target_id, []);
+      }
+      const prof = Array.isArray(reaction.profiles) ? reaction.profiles[0] : reaction.profiles;
+      reactionsMap.get(reaction.target_id).push({
+        id: reaction.id,
+        user_id: reaction.user_id,
+        type: reaction.type,
+        created_at: reaction.created_at,
+        profile: prof ? {
+          id: prof.id,
+          first_name: prof.first_name,
+          last_name: prof.last_name,
+          avatar_url: prof.avatar_url,
+          username: prof.username,
+          email: prof.email
+        } : null
+      });
     });
 
     const postsWithReactions = await Promise.all(
@@ -558,7 +595,6 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           savedId = savedResult.data?.id || null;
         }
 
-        // ✅ Get chamber info (if applicable)
         if (post.is_chamber_post && post.chamber_id) {
           const { data: chamberData } = await supabase
             .from('custom_chambers')
@@ -579,11 +615,26 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           } : null;
         }
 
+        const { data: viewCounts } = await supabase
+          .from('post_views')
+          .select('target_id, view_count')
+          .in('target_id', postIds)
+          .eq('target_type', 'post');
+
+        const viewCountMap = new Map();
+        viewCounts?.forEach(view => {
+          const currentCount = viewCountMap.get(view.target_id) || 0;
+          viewCountMap.set(view.target_id, currentCount + view.view_count);
+        });
+
         const postComments = commentsCount?.filter(c => c.post_id === post.id) || [];
         const totalComments = postComments.length;
         const totalReplies = postComments.reduce((sum, comment) => {
           return sum + (repliesCountMap.get(comment.id) || 0);
         }, 0);
+
+        const postReactions = reactionsMap.get(post.id) || [];
+        const postViews = viewCountMap.get(post.id) || 0;
 
         return {
           ...post,
@@ -591,12 +642,14 @@ export const getPosts = async (req: Request, res: Response): Promise<any> => {
           user_vote: userVote,
           user_saved: userSaved,
           saved_id: savedId,
-          total_comments: totalComments + totalReplies, // Total comments count
-          comments_count: totalComments, // Only main comments count
-          replies_count: totalReplies, // Only replies count
+          total_comments: totalComments + totalReplies,
+          comments_count: totalComments,
+          replies_count: totalReplies,
           chamber: chamberInfo,
           total_upvotes: post.total_upvotes || 0,
-          total_downvotes: post.total_downvotes || 0
+          total_downvotes: post.total_downvotes || 0,
+          reactions: postReactions,
+          total_views: postViews,
         };
       })
     );
@@ -1858,6 +1911,199 @@ export const updateVote = async (
   } catch (error: any) {
     console.error('Error updating vote:', error);
     return res.status(500).json({ error: 'Failed to process vote' });
+  }
+};
+
+export const trackView = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { target_id, target_type } = req.body;
+    const user_id = req.user?.id;
+
+    if (!target_id || !target_type) {
+      return res.status(400).json({
+        success: false,
+        message: 'target_id and target_type are required'
+      });
+    }
+
+    if (!['post', 'thread', 'soulstory'].includes(target_type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'target_type must be one of: post, thread, soulstory'
+      });
+    }
+
+    if (user_id) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      
+      const { data: existingView } = await supabase
+        .from('post_views')
+        .select('*')
+        .eq('user_id', user_id)
+        .eq('target_id', target_id)
+        .eq('target_type', target_type)
+        .gt('last_viewed_at', oneHourAgo.toISOString())
+        .maybeSingle();
+
+      if (existingView) {
+        const { data: updatedView, error } = await supabase
+          .from('post_views')
+          .update({
+            view_count: existingView.view_count + 1,
+            last_viewed_at: new Date().toISOString()
+          })
+          .eq('id', existingView.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        return res.status(200).json({
+          success: true,
+          data: updatedView,
+          message: 'View count updated'
+        });
+      }
+    }
+
+    const viewData: any = {
+      target_id,
+      target_type,
+      view_count: 1,
+      last_viewed_at: new Date().toISOString()
+    };
+
+    if (user_id) {
+      viewData.user_id = user_id;
+    }
+
+    const { data: newView, error } = await supabase
+      .from('post_views')
+      .insert([viewData])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({
+      success: true,
+      data: newView,
+      message: 'View tracked successfully'
+    });
+
+  } catch (error: any) {
+    console.error('Error tracking view:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error tracking view'
+    });
+  }
+};
+
+export const getViewStats = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { target_type, target_id } = req.params;
+    const user_id = req.user?.id;
+
+    if (!['post', 'thread', 'soulstory'].includes(target_type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'target_type must be one of: post, thread, soulstory'
+      });
+    }
+
+    const { data: totalViews, error: totalError } = await supabase
+      .from('post_views')
+      .select('view_count')
+      .eq('target_id', target_id)
+      .eq('target_type', target_type);
+
+    if (totalError) throw totalError;
+
+    const totalViewCount = totalViews?.reduce((sum, view) => sum + view.view_count, 0) || 0;
+
+    const { data: uniqueViewers, error: uniqueError } = await supabase
+      .from('post_views')
+      .select('user_id')
+      .eq('target_id', target_id)
+      .eq('target_type', target_type)
+      .not('user_id', 'is', null);
+
+    if (uniqueError) throw uniqueError;
+
+    const uniqueViewerCount = new Set(uniqueViewers?.map(view => view.user_id)).size;
+
+    let userViewCount = 0;
+    if (user_id) {
+      const { data: userViews } = await supabase
+        .from('post_views')
+        .select('view_count')
+        .eq('user_id', user_id)
+        .eq('target_id', target_id)
+        .eq('target_type', target_type);
+
+      userViewCount = userViews?.reduce((sum, view) => sum + view.view_count, 0) || 0;
+    }
+
+    const { data: recentViewers } = await supabase
+      .from('post_views')
+      .select(`
+        user_id,
+        last_viewed_at,
+        profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          username
+        )
+      `)
+      .eq('target_id', target_id)
+      .eq('target_type', target_type)
+      .not('user_id', 'is', null)
+      .order('last_viewed_at', { ascending: false })
+      .limit(10);
+
+    const recentViewersWithProfiles = (recentViewers || [])
+      .filter((viewer, index, self) =>
+        index === self.findIndex(v => v.user_id === viewer.user_id)
+      )
+      .map(viewer => {
+        const prof = Array.isArray((viewer as any).profiles)
+          ? (viewer as any).profiles[0]
+          : (viewer as any).profiles;
+
+        return {
+          user_id: viewer.user_id,
+          last_viewed_at: viewer.last_viewed_at,
+          profile: prof
+            ? {
+                id: prof.id,
+                first_name: prof.first_name,
+                last_name: prof.last_name,
+                avatar_url: prof.avatar_url,
+                username: prof.username
+              }
+            : null
+        };
+      });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total_views: totalViewCount,
+        unique_viewers: uniqueViewerCount,
+        user_view_count: userViewCount,
+        recent_viewers: recentViewersWithProfiles
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error getting view stats:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error getting view statistics'
+    });
   }
 };
 
