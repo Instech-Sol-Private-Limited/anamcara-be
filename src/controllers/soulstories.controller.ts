@@ -1624,7 +1624,11 @@ export const updateSoulStoryReaction = async (
   const { soulStoryId } = req.params;
   const { type } = req.body;
   const { id: user_id } = req.user!;
-
+  const { data: actorProfile, error: actorProfileError } = await supabase
+    .from('profiles')
+    .select('first_name, last_name')
+    .eq('id', user_id)
+    .single();
   if (!user_id || !storyFieldMap[type]) {
     return res.status(400).json({ error: 'Invalid user or reaction type.' });
   }
@@ -1747,7 +1751,7 @@ export const updateSoulStoryReaction = async (
         recipientUserId: soulStoryData.author_id,
         actorUserId: user_id,
         threadId: soulStoryId,
-        message: `@${authorProfile.first_name} ${authorProfile.last_name} changed their reaction to _${getReactionDisplayName(type)}_ on your soul story.`,
+        message: `**${actorProfile?.first_name} ${actorProfile?.last_name}** changed their reaction to _${getReactionDisplayName(type)}_ on your soul story.`,
         type: 'soul_story_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,
@@ -1801,7 +1805,7 @@ export const updateSoulStoryReaction = async (
         recipientUserId: soulStoryData.author_id,
         actorUserId: user_id,
         threadId: soulStoryId,
-        message: `@${authorProfile.first_name} ${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your soul story. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
+        message: `**${actorProfile?.first_name} ${actorProfile?.last_name}** reacted with _${getReactionDisplayName(type)}_ on your soul story. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: 'soul_story_reaction_added',
         metadata: {
           reaction_type: type,
