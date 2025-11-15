@@ -80,6 +80,11 @@ export const updatePostReaction = async (
   const { postId } = req.params;
   const { type } = req.body;
   const { id: user_id } = req.user!;
+const { data: actorProfile, error: actorProfileError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', user_id)
+  .single();
 
   if (!user_id || !postFieldMap[type]) {
     return res.status(400).json({ error: 'Invalid user or reaction type.' });
@@ -204,7 +209,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `@${authorProfile.first_name}${authorProfile.last_name} changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
+        message: `**${actorProfile?.first_name}${actorProfile?.last_name}** changed their reaction to _${getReactionDisplayName(type)}_ on your post.`,
         type: 'post_reaction_updated',
         metadata: {
           previous_reaction_type: existing.type,
@@ -264,7 +269,7 @@ export const updatePostReaction = async (
         recipientUserId: postData.user_id,
         actorUserId: user_id,
         threadId: postId,
-        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
+        message: `**${actorProfile?.first_name}${actorProfile?.last_name}** reacted with _${getReactionDisplayName(type)}_ on your post. ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: 'post_reaction_added',
         metadata: {
           reaction_type: type,
@@ -935,7 +940,11 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
     const userId = req.user?.id!;
     const { postId } = req.params;
     const { content } = req.body;
-
+    const { data: actorProfile, error: actorProfileError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)
+  .single();
     if (!content || content.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -1002,7 +1011,7 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
           recipientUserId: postData.user_id,
           actorUserId: userId,
           threadId: postId,
-          message: `@${authorProfile.first_name}${authorProfile.last_name} commented on your post. +${soulpoints} SoulPoints (SP) added!`,
+          message: `**${actorProfile?.first_name}${actorProfile?.last_name}** commented on your post. +${soulpoints} SoulPoints (SP) added!`,
           type: 'post_comment_added',
           metadata: {
             comment_id: data.id,
@@ -1030,11 +1039,16 @@ export const addComment = async (req: Request, res: Response): Promise<any> => {
 };
 
 export const addReply = async (req: Request, res: Response): Promise<any> => {
+  
   try {
     const userId = req.user?.id;
     const { commentId } = req.params;
     const { content } = req.body;
-
+const { data: actorProfile, error: actorProfileError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)
+  .single();
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -1096,7 +1110,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: commentData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `@${commentAuthorProfile.first_name}${commentAuthorProfile.last_name}  replied to your comment. +1 SoulPoint added!`,
+            message: `**${actorProfile?.first_name}${actorProfile?.last_name}**  replied to your comment. +1 SoulPoint added!`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1129,7 +1143,7 @@ export const addReply = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: postData.user_id,
             actorUserId: userId,
             threadId: commentData.post_id,
-            message: `@${postAuthorProfile.first_name}${postAuthorProfile.last_name} replied to a comment on your post.`,
+            message: `**${actorProfile?.first_name}${actorProfile?.last_name}** replied to a comment on your post.`,
             type: 'post_reply_added',
             metadata: {
               reply_id: data.id,
@@ -1429,16 +1443,22 @@ export const getTrendingPosts = async (req: Request, res: Response): Promise<any
 
 export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
   try {
+    
     const userId = req.user?.id;
     const { postId } = req.params;
     const { optionIndex } = req.body;
-
+const { data: actorProfile, error: actorProfileError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', userId)
+  .single();
     if (!userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: Please login to vote'
       });
     }
+    
 
     if (typeof optionIndex !== 'number' || optionIndex < 0) {
       return res.status(400).json({
@@ -1531,7 +1551,7 @@ export const voteOnPoll = async (req: Request, res: Response): Promise<any> => {
             recipientUserId: post.user_id,
             actorUserId: userId,
             threadId: postId,
-            message: `@${authorProfile.first_name}${authorProfile.last_name} voted on your poll. +1 SoulPoint added!`,
+            message: `**${actorProfile?.first_name}${actorProfile?.last_name}** voted on your poll. +1 SoulPoint added!`,
             type: 'poll_vote_added',
             metadata: {
               post_id: postId,
@@ -1727,7 +1747,11 @@ export const updateVote = async (
   const { targetId } = req.params;
   const { voteType, targetType } = req.body;
   const { id: user_id } = req.user!;
-
+const { data: actorProfile, error: actorProfileError } = await supabase
+  .from('profiles')
+  .select('first_name, last_name')
+  .eq('id', user_id)
+  .single();
   if (!user_id || !['upvote', 'downvote'].includes(voteType) || !['post', 'thread', 'story'].includes(targetType)) {
     return res.status(400).json({ error: 'Invalid user, vote type, or target type.' });
   }
@@ -1881,7 +1905,7 @@ export const updateVote = async (
             recipientUserId: authorId,
             actorUserId: user_id,
             threadId: targetId,
-            message: `@${authorProfile.first_name} ${authorProfile.last_name} ${voteAction} ${voteType} on your ${targetType}.`,
+            message: `**${actorProfile?.first_name} ${actorProfile?.last_name}** ${voteAction} ${voteType} on your ${targetType}.`,
             type: `${targetType}_vote_${voteAction}` as any,
             metadata: {
               vote_type: voteType,
