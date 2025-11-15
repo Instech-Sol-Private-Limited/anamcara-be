@@ -452,6 +452,11 @@ const updateCommentReaction = async (
   const { comment_id } = req.params;
   const { type } = req.body;
   const { id: user_id } = req.user!;
+  const { data: actorProfile, error: actorProfileError } = await supabase
+    .from('profiles')
+    .select('first_name, last_name')
+    .eq('id', user_id)
+    .single();
 
   if (!user_id || !commentFieldMap[type]) {
     return res.status(400).json({ error: 'Invalid user or reaction type.' });
@@ -664,7 +669,7 @@ const updateCommentReaction = async (
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `**@someone** changed their reaction to _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
+        message: `${authorProfile?.first_name}${authorProfile?.last_name} changed their reaction to _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}**`,
         type: notificationType,
         metadata: {
           previous_reaction_type: existing.type,
@@ -732,7 +737,7 @@ const updateCommentReaction = async (
         recipientUserId: commentData.user_id,
         actorUserId: user_id,
         threadId: parentId,
-        message: `**@someone** reacted with _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
+        message: `**${actorProfile?.first_name}${actorProfile?.last_name}** reacted with _${getCommentReactionDisplayName(type)}_ on your comment: "${getCommentPreview(commentData.content)}" on ${parentType} **${truncatedTitle}** ${soulpoints > 0 ? `+${soulpoints} SoulPoints (SP) added!` : ''}`,
         type: notificationType,
         metadata: {
           reaction_type: type,
@@ -763,7 +768,11 @@ const updateCommentsVote = async (
   const { targetId } = req.params;
   const { voteType, targetType } = req.body;
   const { id: user_id, username } = req.user!;
-
+  const { data: actorProfile, error: actorProfileError } = await supabase
+    .from('profiles')
+    .select('first_name, last_name')
+    .eq('id', user_id)
+    .single();
   const validTargetTypes = ['post', 'thread', 'story', 'comment', 'subcomment'];
   const validVoteTypes = ['upvote', 'downvote'];
 
@@ -989,7 +998,7 @@ const updateCommentsVote = async (
             recipientUserId: targetData.user_id,
             actorUserId: user_id,
             threadId: parentId,
-            message: `**@someone** changed their vote to _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
+            message: `**${actorProfile?.first_name}${actorProfile?.last_name}** changed their vote to _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
             type: notificationType,
             metadata: {
               previous_vote_type: existingVote.vote_type,
@@ -1038,7 +1047,7 @@ const updateCommentsVote = async (
           recipientUserId: targetData.user_id,
           actorUserId: user_id,
           threadId: parentId,
-          message: `**@${username}** voted with _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
+          message: `**${actorProfile?.first_name}${actorProfile?.last_name}** voted with _${voteType}_ on your ${targetType}: "${contentPreview}" on ${parentType} **${parentTitle}**`,
           type: notificationType,
           metadata: {
             vote_type: voteType,

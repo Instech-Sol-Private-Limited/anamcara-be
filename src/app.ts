@@ -129,6 +129,7 @@ app.use('/api/stripe', PaymentRoute);
 app.use('/api/withdraw', bankAccountRoutes);
 app.use('/api/games', authMiddleware, gameRoutes);
 app.post("/api/rewards/award", awardPoints);
+// app.post("/api/souvibe",);
 
 cron.schedule('0 0 * * *', updateDailyInsights);
 setupPaymentCron();

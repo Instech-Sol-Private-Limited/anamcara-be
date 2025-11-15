@@ -1153,7 +1153,11 @@ const updateReaction = async (
     const { thread_id } = req.params;
     const { type } = req.body;
     const user_id = (req.user as { id?: string })?.id;
-
+  const { data: actorProfile, error: actorProfileError } = await supabase
+    .from('profiles')
+    .select('first_name, last_name')
+    .eq('id', user_id)
+    .single();
     if (!user_id || !fieldMap[type]) {
       return res.status(400).json({ error: 'Invalid user or reaction type.' });
     }
@@ -1300,7 +1304,7 @@ const updateReaction = async (
           recipientUserId: threadData.author_id,
           actorUserId: user_id,
           threadId: thread_id,
-          message: `@${authorProfile.first_name}${authorProfile.last_name}changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
+          message: `**${actorProfile?.first_name}${actorProfile?.last_name}** changed their reaction to _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}**`,
           type: 'thread_reaction_updated',
           metadata: {
             previous_reaction_type: existing.type,
@@ -1352,7 +1356,7 @@ const updateReaction = async (
         recipientUserId: threadData.author_id,
         actorUserId: user_id,
         threadId: thread_id,
-        message: `@${authorProfile.first_name}${authorProfile.last_name} reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} SoulPoints)` : ''}`,
+        message: `**${actorProfile?.first_name}${actorProfile?.last_name}** reacted with _${getReactionDisplayName(type)}_ on your thread **${threadData.title.length > 40 ? threadData.title.slice(0, 40) + '...' : threadData.title}** ${soulpoints > 0 ? `(+${soulpoints} SoulPoints)` : ''}`,
         type: 'thread_reaction_added',
         metadata: {
           reaction_type: type,
